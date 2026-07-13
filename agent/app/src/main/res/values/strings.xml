@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">APITuner Agent</string>
     <string name="brand_title">APITuner</string>
-    <string name="brand_subtitle">Agent · Channels DVR</string>
+    <string name="brand_subtitle">Device control agent</string>
     <string name="connection_title">Control server</string>
     <string name="connection_hint">Add this device in the APITuner dashboard using the http_agent backend. After the first launch, the control server auto-starts on reboot.</string>
     <string name="permissions_title">Permissions</string>

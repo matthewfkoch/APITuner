@@ -227,7 +227,7 @@ class AgentWebServer(
                 <div class="logo">AT</div>
                 <div>
                   <h1>APITuner Agent</h1>
-                  <div class="sub">Channels DVR control endpoint</div>
+                  <div class="sub">HTTP control endpoint</div>
                 </div>
               </div>
               <div class="card">

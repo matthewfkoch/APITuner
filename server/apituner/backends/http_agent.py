@@ -52,13 +52,20 @@ class HttpAgentBackend(ControlBackend):
     async def close(self) -> None:
         await self._client.aclose()
 
+    def _check_response(self, resp: httpx.Response, path: str) -> None:
+        if resp.status_code in (401, 403):
+            raise BackendUnavailable(
+                f"Agent auth failed ({resp.status_code}) on {path}; check the tuner token"
+            )
+        if resp.status_code >= 500:
+            raise BackendUnavailable(f"Agent error {resp.status_code} on {path}")
+
     async def _post(self, path: str, json: Optional[dict] = None) -> dict[str, Any]:
         try:
             resp = await self._client.post(path, json=json or {})
         except httpx.HTTPError as exc:
             raise BackendUnavailable(f"Agent request failed: {exc}") from exc
-        if resp.status_code >= 500:
-            raise BackendUnavailable(f"Agent error {resp.status_code} on {path}")
+        self._check_response(resp, path)
         try:
             return resp.json()
         except ValueError:
@@ -69,6 +76,7 @@ class HttpAgentBackend(ControlBackend):
             resp = await self._client.get(path)
         except httpx.HTTPError as exc:
             raise BackendUnavailable(f"Agent request failed: {exc}") from exc
+        self._check_response(resp, path)
         try:
             return resp.json()
         except ValueError:

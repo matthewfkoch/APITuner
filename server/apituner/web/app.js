@@ -21,9 +21,9 @@ async function handle(resp) {
 // ---- Capability definitions (label + tooltip; optional live status from /api/info) ----
 const CAP_DEFS = {
   http_agent: [
-    { label: "Launch channels", hint: "Opens the streaming app and deep link when Channels tunes a station.", always: true },
+    { label: "Launch channels", hint: "Opens the streaming app and deep link when a station is tuned.", always: true },
     { label: "Foreground app", hint: "Detects which app is on screen after a tune. Requires Usage Access on the device.", cap: "current_app" },
-    { label: "Playback check", hint: "Confirms video is playing before the HDMI stream is handed to Channels. Requires Notification Access.", cap: "playback_state" },
+    { label: "Playback check", hint: "Confirms video is playing before the HDMI stream is ready. Requires Notification Access.", cap: "playback_state" },
     { label: "Send keys", hint: "Sends BACK, HOME, and RECENTS through the Agent. Requires Accessibility on the device.", cap: "keys" },
     { label: "App list", hint: "Lists installed apps on the device — used when picking a package while editing channels.", cap: "app_list" },
     { label: "Install APKs", hint: "Can sideload APKs to the device through the Agent (advanced).", cap: "install" },
@@ -309,12 +309,11 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
         <div><b>${escapeHtml(d.name)}</b> <span class="mono">${escapeHtml(d.host)}:${d.port}</span> <span class="badge">${d.backend}</span></div>
         <button class="btn btn-sm btn-primary">Add</button></div>`);
       item.querySelector("button").addEventListener("click", () => {
-        tunerForm({
-          name: d.name,
-          control: { type: "http_agent", host: d.host, port: d.port || 9092, pair_port: null, token: "" },
-          stream_endpoint: "",
-          enabled: true,
-        });
+        const backend = d.backend === "androidtv_remote" ? "androidtv_remote" : "http_agent";
+        const control = backend === "androidtv_remote"
+          ? { type: backend, host: d.host, port: d.port || 6466, pair_port: 6467, token: "" }
+          : { type: backend, host: d.host, port: d.port || 9092, pair_port: null, token: "" };
+        tunerForm({ name: d.name, control, stream_endpoint: "", enabled: true });
       });
       box.appendChild(item);
     });
@@ -490,7 +489,7 @@ const OPTION_FIELDS = [
   ["release_grace_seconds", "Release grace (s)", "number", null, "Hold tuner lock briefly after stream disconnect"],
   ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number", null, "Reclaim tuners that stop making progress"],
   ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
-  ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays MPEG-TS; redirect sends Channels to the encoder"],
+  ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays MPEG-TS; redirect sends clients to the encoder"],
   ["wait_for_playback", "Wait for playback signal", "bool", null, "Prefer playback/foreground before accepting a tune"],
   ["stop_on_release", "Stop app on release", "bool", null, "Send HOME when the stream ends"],
   ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send HOME on release"],

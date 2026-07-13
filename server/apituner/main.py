@@ -270,6 +270,11 @@ async def create_channel(channel: Channel, request: Request) -> dict:
     if any(c.number == channel.number for c in store.config.channels):
         raise HTTPException(status_code=409, detail="Channel number already exists")
     store.config.channels.append(channel)
+    try:
+        validate_channel_numbers(store.config.channels)
+    except ChannelValidationError as exc:
+        store.config.channels.pop()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     store.save()
     return channel.model_dump()
 

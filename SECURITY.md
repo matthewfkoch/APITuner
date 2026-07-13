@@ -13,7 +13,7 @@ APITuner exposes an **unauthenticated** web dashboard and REST API on port **559
 
 ## Agent APK
 
-The APITuner Agent listens on port **9092** on each Android device. Optional token auth is supported via the `X-Auth-Token` header, but no on-device UI configures it yet — treat the agent as trusted-LAN only.
+The APITuner Agent listens on port **9092** on each Android device. Optional token auth is supported via the `X-Auth-Token` header and can be set in the Agent app's on-device settings — treat the agent as trusted-LAN only unless you enable and configure a token.
 
 Grant only the permissions you need:
 

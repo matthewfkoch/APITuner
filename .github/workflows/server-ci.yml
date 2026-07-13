@@ -11,6 +11,7 @@ on:
     paths:
       - "server/**"
       - "docker-compose.yml"
+      - ".github/workflows/server-ci.yml"
 
 jobs:
   check:
@@ -36,6 +37,10 @@ jobs:
       - name: Tests
         id: tests
         run: pytest -q --junitxml=test-results.xml
+
+      - name: Build Docker image
+        id: docker
+        run: docker build -t apituner:ci .
 
       - name: Job summary
         if: always()
@@ -71,6 +76,14 @@ jobs:
             test_line="❌ Tests did not complete"
           fi
 
+          if [[ "${{ steps.docker.outcome }}" == "success" ]]; then
+            docker_line="✅ Image built"
+          elif [[ "${{ steps.docker.outcome }}" == "skipped" ]]; then
+            docker_line="⏭️ Skipped"
+          else
+            docker_line="❌ Build failed"
+          fi
+
           {
             echo "## APITuner Server CI"
             echo ""
@@ -79,6 +92,7 @@ jobs:
             echo "| **Status** | ${status} |"
             echo "| **Python** | 3.11 |"
             echo "| **Syntax check** | ${syntax} |"
+            echo "| **Docker build** | ${docker_line} |"
             echo "| **Trigger** | \`${{ github.event_name }}\` on \`${{ github.ref_name }}\` |"
             echo "| **Commit** | [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
             echo ""

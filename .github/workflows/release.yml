@@ -48,8 +48,22 @@ jobs:
 
       - name: Set up Android SDK
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
+          echo "${ANDROID_HOME}/platform-tools" >> "$GITHUB_PATH"
+
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(find "${ANDROID_HOME}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort -V | tail -1)"
+          fi
+          if [[ -z "$SDKMANAGER" || ! -x "$SDKMANAGER" ]]; then
+            echo "::error::sdkmanager not found under ${ANDROID_HOME}"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -61,11 +75,17 @@ jobs:
         id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
+          if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
             echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
             echo "enabled=true" >> "$GITHUB_OUTPUT"
             echo "Release signing enabled"
+          elif [[ -n "$KEYSTORE_BASE64" ]]; then
+            echo "::warning::KEYSTORE_BASE64 is set but KEYSTORE_PASSWORD, KEY_ALIAS, or KEY_PASSWORD is missing; building debug APK"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "No keystore secret; will build debug APK"
@@ -157,13 +177,15 @@ jobs:
       - name: Resolve version tags
         id: meta
         run: |
+          image="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/apituner"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             ver="${GITHUB_REF_NAME#v}"
             echo "version=${ver}" >> "$GITHUB_OUTPUT"
-            echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${ver},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
+            echo "tags=${{ env.REGISTRY }}/${image}:${ver},${{ env.REGISTRY }}/${image}:latest" >> "$GITHUB_OUTPUT"
           else
             echo "version=dev" >> "$GITHUB_OUTPUT"
-            echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev" >> "$GITHUB_OUTPUT"
+            echo "tags=${{ env.REGISTRY }}/${image}:dev" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Log in to GitHub Container Registry
@@ -207,7 +229,7 @@ jobs:
             echo "| **Status** | ${status} |"
             echo "| **Version** | ${{ steps.meta.outputs.version }} |"
             echo "| **Registry** | \`${{ env.REGISTRY }}\` |"
-            echo "| **Repository** | \`${{ env.IMAGE_NAME }}\` |"
+            echo "| **Repository** | \`${{ steps.meta.outputs.image }}\` |"
             echo "| **Digest** | \`${{ steps.docker.outputs.digest || '—' }}\` |"
             echo "| **Trigger** | \`${{ github.event_name }}\` — \`${{ github.ref_name }}\` |"
             echo ""
@@ -216,7 +238,7 @@ jobs:
             echo ""
             echo "**Pull:**"
             echo "\`\`\`"
-            echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+            echo "docker pull ${{ env.REGISTRY }}/${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -235,7 +257,9 @@ jobs:
 
       - name: Resolve version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "image=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/apituner" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         id: release
@@ -272,7 +296,7 @@ jobs:
             echo "| **Version** | v${{ steps.version.outputs.version }} |"
             echo "| **Release** | [${{ steps.release.outputs.url || '—' }}](${{ steps.release.outputs.url || '#' }}) |"
             echo "| **APK attached** | ${apk_info} |"
-            echo "| **Docker image** | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\` |"
+            echo "| **Docker image** | \`${{ env.REGISTRY }}/${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}\` |"
             echo ""
             echo "**Includes:** auto-generated release notes, signed APK artifact, and GHCR image from this workflow run."
           } >> "$GITHUB_STEP_SUMMARY"

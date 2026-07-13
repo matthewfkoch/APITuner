@@ -30,7 +30,57 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Syntax check
+        id: syntax
         run: python -m compileall -q apituner
 
       - name: Tests
-        run: pytest -q
+        id: tests
+        run: pytest -q --junitxml=test-results.xml
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            status="✅ Passed"
+          else
+            status="❌ Failed"
+          fi
+
+          if [[ "${{ steps.syntax.outcome }}" == "success" ]]; then
+            syntax="✅ Clean"
+          elif [[ "${{ steps.syntax.outcome }}" == "skipped" ]]; then
+            syntax="⏭️ Skipped"
+          else
+            syntax="❌ Errors"
+          fi
+
+          if [[ -f test-results.xml ]]; then
+            tests="$(grep -oP 'tests="\K[0-9]+' test-results.xml | head -1)"
+            failures="$(grep -oP 'failures="\K[0-9]+' test-results.xml | head -1)"
+            errors="$(grep -oP 'errors="\K[0-9]+' test-results.xml | head -1)"
+            skipped="$(grep -oP 'skipped="\K[0-9]+' test-results.xml | head -1)"
+            time="$(grep -oP 'time="\K[0-9.]+' test-results.xml | head -1)"
+            tests="${tests:-0}"
+            failures="${failures:-0}"
+            errors="${errors:-0}"
+            skipped="${skipped:-0}"
+            test_line="**${tests}** tests — ${failures} failed, ${errors} errors, ${skipped} skipped (${time}s)"
+          elif [[ "${{ steps.tests.outcome }}" == "success" ]]; then
+            test_line="✅ All tests passed"
+          else
+            test_line="❌ Tests did not complete"
+          fi
+
+          {
+            echo "## APITuner Server CI"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Status** | ${status} |"
+            echo "| **Python** | 3.11 |"
+            echo "| **Syntax check** | ${syntax} |"
+            echo "| **Trigger** | \`${{ github.event_name }}\` on \`${{ github.ref_name }}\` |"
+            echo "| **Commit** | [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
+            echo ""
+            echo "**Tests:** ${test_line}"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -35,7 +35,9 @@ jobs:
           else
             ver="$(grep 'versionName' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
           fi
+          code="$(grep 'versionCode' app/build.gradle.kts | head -1 | sed -E 's/.*([0-9]+).*/\1/')"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "Building agent version $ver"
 
       - name: Set up JDK 17
@@ -45,10 +47,14 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          add-job-summary: always
 
       # Secrets cannot be used in step-level if: expressions; detect via env in a script.
       - name: Prepare release keystore
@@ -84,12 +90,19 @@ jobs:
           ver="${{ steps.version.outputs.version }}"
           if [[ -f app/build/outputs/apk/release/app-release.apk ]]; then
             name="apituner-agent-${ver}.apk"
+            variant="release"
             cp app/build/outputs/apk/release/app-release.apk "${GITHUB_WORKSPACE}/${name}"
+            src="app/build/outputs/apk/release/app-release.apk"
           else
             name="apituner-agent-${ver}-debug.apk"
+            variant="debug"
             cp app/build/outputs/apk/debug/app-debug.apk "${GITHUB_WORKSPACE}/${name}"
+            src="app/build/outputs/apk/debug/app-debug.apk"
           fi
           echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "variant=${variant}" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h "$src" | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$src" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -97,6 +110,43 @@ jobs:
           name: agent-apk
           path: ${{ github.workspace }}/${{ steps.apk.outputs.name }}
           if-no-files-found: error
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            status="✅ Passed"
+          else
+            status="❌ Failed"
+          fi
+
+          if [[ "${{ steps.signing.outputs.enabled }}" == "true" ]]; then
+            signing="✅ Release keystore"
+          else
+            signing="⚠️ Unsigned (debug fallback)"
+          fi
+
+          if [[ -n "${{ steps.apk.outputs.name }}" ]]; then
+            artifact="✅ \`${{ steps.apk.outputs.name }}\`"
+          else
+            artifact="❌ APK not produced"
+          fi
+
+          {
+            echo "## Release — Agent APK"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Status** | ${status} |"
+            echo "| **Version** | ${{ steps.version.outputs.version }} (${{ steps.version.outputs.code }}) |"
+            echo "| **Variant** | ${{ steps.apk.outputs.variant || '—' }} |"
+            echo "| **Signing** | ${signing} |"
+            echo "| **APK size** | ${{ steps.apk.outputs.size || '—' }} |"
+            echo "| **SHA-256** | \`${{ steps.apk.outputs.sha256 || '—' }}\` |"
+            echo "| **Trigger** | \`${{ github.event_name }}\` — \`${{ github.ref_name }}\` |"
+            echo ""
+            echo "**Artifact:** ${artifact} (uploaded as \`agent-apk\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish-docker:
     name: Publish Docker image
@@ -109,8 +159,10 @@ jobs:
         run: |
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             ver="${GITHUB_REF_NAME#v}"
+            echo "version=${ver}" >> "$GITHUB_OUTPUT"
             echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${ver},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
           else
+            echo "version=dev" >> "$GITHUB_OUTPUT"
             echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev" >> "$GITHUB_OUTPUT"
           fi
 
@@ -125,6 +177,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
+        id: docker
         uses: docker/build-push-action@v6
         with:
           context: ./server
@@ -133,6 +186,39 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            status="✅ Published"
+          else
+            status="❌ Failed"
+          fi
+
+          tags="${{ steps.meta.outputs.tags }}"
+          tag_list="$(echo "$tags" | tr ',' '\n' | sed 's/^/- `/' | sed 's/$/`/')"
+
+          {
+            echo "## Release — Docker Image"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Status** | ${status} |"
+            echo "| **Version** | ${{ steps.meta.outputs.version }} |"
+            echo "| **Registry** | \`${{ env.REGISTRY }}\` |"
+            echo "| **Repository** | \`${{ env.IMAGE_NAME }}\` |"
+            echo "| **Digest** | \`${{ steps.docker.outputs.digest || '—' }}\` |"
+            echo "| **Trigger** | \`${{ github.event_name }}\` — \`${{ github.ref_name }}\` |"
+            echo ""
+            echo "**Tags pushed:**"
+            echo "${tag_list:-—}"
+            echo ""
+            echo "**Pull:**"
+            echo "\`\`\`"
+            echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   github-release:
     name: Create GitHub Release
@@ -152,6 +238,7 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
+        id: release
         uses: softprops/action-gh-release@v2
         with:
           name: APITuner v${{ steps.version.outputs.version }}
@@ -159,3 +246,33 @@ jobs:
           files: apituner-agent-*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            status="✅ Published"
+          else
+            status="❌ Failed"
+          fi
+
+          apk="$(ls -1 apituner-agent-*.apk 2>/dev/null | head -1 || true)"
+          if [[ -n "$apk" ]]; then
+            apk_info="\`${apk}\` ($(du -h "$apk" | cut -f1))"
+          else
+            apk_info="—"
+          fi
+
+          {
+            echo "## Release — GitHub Release"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Status** | ${status} |"
+            echo "| **Version** | v${{ steps.version.outputs.version }} |"
+            echo "| **Release** | [${{ steps.release.outputs.url || '—' }}](${{ steps.release.outputs.url || '#' }}) |"
+            echo "| **APK attached** | ${apk_info} |"
+            echo "| **Docker image** | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\` |"
+            echo ""
+            echo "**Includes:** auto-generated release notes, signed APK artifact, and GHCR image from this workflow run."
+          } >> "$GITHUB_STEP_SUMMARY"

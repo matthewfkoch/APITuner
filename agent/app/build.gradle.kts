@@ -1,15 +1,14 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "com.apituner.agent"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.apituner.agent"
-        minSdk = 22
+        minSdk = 23
         targetSdk = 34
         versionCode = 4
         versionName = "0.1.1"
@@ -42,13 +41,15 @@ android {
         }
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 }
 

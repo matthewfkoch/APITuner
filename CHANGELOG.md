@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **Default backend is now `http_agent`** (recommended for YouTube TV / Google TV)
+- Merged Dependabot updates: AGP 9.2.1 (built-in Kotlin), Gradle 9.4.1, Android SDK 37, Python server deps
+- Agent `minSdk` raised to 23 (required by androidx.core 1.19.0)
 - Agent foreground detection falls back to recent usage stats
 - Same-app channel switches accepted after short readiness delay
 - `request_timeout` and `keep_apps_running` options are now functional

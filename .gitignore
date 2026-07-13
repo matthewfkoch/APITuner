@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+server/.venv-deps/
 env/
 
 # APITuner runtime data (config + pairing certs)

@@ -10,9 +10,14 @@ def build_m3u(channels: list[Channel], base_url: str) -> str:
     base = base_url.rstrip("/")
     lines = ["#EXTM3U"]
     for ch in sorted(channels, key=lambda c: c.number):
-        attrs = [f'channel-id="{ch.number}"']
+        attrs = [
+            f'channel-id="{ch.number}"',
+            f'channel-number="{ch.number}"',
+            f'tvg-chno="{ch.number}"',
+        ]
         if ch.tvc_guide_stationid:
-            attrs.append(f'tvg-id="{ch.tvc_guide_stationid}"')
+            # Channels DVR reads Gracenote IDs from tvc-guide-stationid (not tvg-id).
+            attrs.append(f'tvc-guide-stationid="{ch.tvc_guide_stationid}"')
         attrs.append(f'tvg-name="{_escape(ch.name)}"')
         lines.append(f'#EXTINF:-1 {" ".join(attrs)},{ch.name}')
         lines.append(f"{base}/stream/{ch.number}")

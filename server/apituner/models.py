@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 
 BackendType = Literal["androidtv_remote", "http_agent"]
 
+# Recommended backend for Google TV / YouTube TV: package-pinned deep links via the Agent.
+DEFAULT_BACKEND: BackendType = "http_agent"
+
 # Default network ports per backend.
 DEFAULT_AGENT_PORT = 9092
 DEFAULT_REMOTE_API_PORT = 6466
@@ -22,7 +25,7 @@ def _new_id() -> str:
 class ControlConfig(BaseModel):
     """How APITuner talks to a device."""
 
-    type: BackendType
+    type: BackendType = DEFAULT_BACKEND
     host: str
     # Agent: HTTP port (default 9092). Remote: API command port (default 6466).
     port: Optional[int] = None

@@ -32,9 +32,6 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.9 --no-daemon
-
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 

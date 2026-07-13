@@ -34,7 +34,7 @@ class HttpAgentBackend(ControlBackend):
         install=True,
     )
 
-    def __init__(self, tuner: Tuner) -> None:
+    def __init__(self, tuner: Tuner, *, request_timeout: float = 10.0) -> None:
         self._tuner = tuner
         port = tuner.control.port or DEFAULT_AGENT_PORT
         self._base_url = f"http://{tuner.control.host}:{port}"
@@ -42,7 +42,7 @@ class HttpAgentBackend(ControlBackend):
         if tuner.control.token:
             headers["X-Auth-Token"] = tuner.control.token
         self._client = httpx.AsyncClient(
-            base_url=self._base_url, headers=headers, timeout=15.0
+            base_url=self._base_url, headers=headers, timeout=request_timeout
         )
 
     async def connect(self) -> None:
@@ -102,6 +102,15 @@ class HttpAgentBackend(ControlBackend):
             sdk_int=data.get("sdkInt"),
             packages=packages,
         )
+
+    async def get_live_capabilities(self) -> dict[str, bool]:
+        """Permission-aware capabilities reported by the Agent APK."""
+        try:
+            data = await self._get("/api/info")
+        except BackendUnavailable:
+            return {}
+        caps = data.get("capabilities")
+        return caps if isinstance(caps, dict) else {}
 
     async def launch(
         self,

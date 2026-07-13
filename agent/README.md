@@ -1,23 +1,26 @@
 # APITuner Agent
 
-An Android app that exposes an ADB-free HTTP control API for APITuner's `http_agent` backend. Derived from [DisplayLauncher](https://github.com/mouldybread/DisplayLauncher) (Apache-2.0); see `LICENSE` and `NOTICE`.
+An Android app that exposes an ADB-free HTTP control API for APITuner's **`http_agent` backend** (the recommended default). Derived from [DisplayLauncher](https://github.com/mouldybread/DisplayLauncher) (Apache-2.0); see `LICENSE` and `NOTICE`.
 
-Use this backend for devices without the Android TV Remote Service (e.g. **Fire TV**) or when you want the installed-app list / sideload installer.
+Use this backend for **Google TV, YouTube TV, and Fire TV**. It package-pins deep links so channels open directly. Use `androidtv_remote` only when the APK cannot be installed.
 
 ## Install
 
-- Download `apituner-agent-debug.apk` from the **Build APITuner Agent APK** GitHub Actions artifact, or build locally (below), and sideload it onto the device.
-- Open the app once. Grant the optional permissions to unlock capabilities:
+- Download `apituner-agent-<version>.apk` from the [GitHub Releases](https://github.com/matthewfkoch/APITuner/releases) page, or `apituner-agent-*-debug.apk` from the **Build APITuner Agent APK** Actions artifact between releases.
+- Sideload onto the device (ADB, Downloader app, etc.).
+- Open the app once and grant permissions:
+  - **Display over other apps** → required to launch apps from the background (REQUIRED)
   - **Usage Access** → foreground-app detection (`current_app`)
   - **Notification Access** → media playback state (`playback_state`)
   - **Accessibility** → global `BACK` / `HOME` / `RECENTS` keys
 - The app runs a foreground service on **port 9092** and advertises itself over mDNS (`_apituner._tcp`).
+- After the first launch, the service **auto-starts on device reboot** (and after APK updates) — you do not need to open the app again.
 
 All permissions are granted by the user in Settings — no ADB, no root.
 
 ## HTTP API (port 9092)
 
-If a token is configured, send it as the `X-Auth-Token` header.
+If a token is configured on the device (APITuner Agent app → **Save API token**) or in the dashboard tuner form, send it as the `X-Auth-Token` header.
 
 | Method | Path                 | Body / notes                                                    |
 | ------ | -------------------- | --------------------------------------------------------------- |
@@ -39,9 +42,8 @@ Requires JDK 17 and the Android SDK.
 
 ```bash
 cd agent
-gradle wrapper --gradle-version 8.9
 ./gradlew assembleDebug
 # → app/build/outputs/apk/debug/app-debug.apk
 ```
 
-CI builds the debug APK automatically on changes under `agent/`.
+The Gradle wrapper is included — no separate Gradle install required.

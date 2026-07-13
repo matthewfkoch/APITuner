@@ -45,6 +45,12 @@ class AgentService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Keep the control server running if the user leaves the settings UI.
+        super.onTaskRemoved(rootIntent)
+        AgentService.start(applicationContext)
+    }
+
     private fun startForegroundNotification() {
         val pi = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),

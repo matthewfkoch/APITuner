@@ -1,0 +1,58 @@
+{
+  "tuners": [
+    {
+      "id": "example-tuner-1",
+      "name": "Living Room TV",
+      "control": {
+        "type": "http_agent",
+        "host": "192.0.2.10",
+        "port": 9092,
+        "pair_port": null,
+        "token": null
+      },
+      "stream_endpoint": "http://192.0.2.20/0.ts",
+      "enabled": true
+    },
+    {
+      "id": "example-tuner-2",
+      "name": "Remote-only TV",
+      "control": {
+        "type": "androidtv_remote",
+        "host": "192.0.2.11",
+        "port": null,
+        "pair_port": null,
+        "token": null
+      },
+      "stream_endpoint": "http://192.0.2.20/4.ts",
+      "enabled": false
+    }
+  ],
+  "channels": [
+    {
+      "number": 1,
+      "name": "Example Channel",
+      "provider_name": "YouTube TV",
+      "package_name": "com.google.android.youtube.tvunplugged",
+      "alternate_package_name": null,
+      "component": null,
+      "url": "https://tv.youtube.com/watch/EXAMPLE",
+      "action": "android.intent.action.VIEW",
+      "extra_string": null,
+      "key_macro": null,
+      "compatibility_mode": false,
+      "tvc_guide_stationid": null
+    }
+  ],
+  "options": {
+    "tune_timeout_seconds": 30.0,
+    "wait_for_playback": true,
+    "stop_on_release": false,
+    "keep_apps_running": true,
+    "retry_on_other_tuner": true,
+    "request_timeout": 10.0,
+    "stream_mode": "proxy",
+    "release_grace_seconds": 5.0,
+    "stuck_tuner_timeout_seconds": 40.0,
+    "tuner_idle_timeout_seconds": 60.0
+  }
+}

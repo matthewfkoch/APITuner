@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .backends import BackendNotPaired, BackendUnavailable
+from .channels import ChannelValidationError, validate_channel_numbers
 from .config import ConfigStore
 from .discovery import discover
 from .models import Channel, GlobalOptions, Tuner
@@ -149,15 +150,36 @@ async def tuner_health(tuner_id: str, request: Request) -> dict:
 
 @app.get("/api/tuners/{tuner_id}/info")
 async def tuner_info(tuner_id: str, request: Request) -> dict:
-    info = await _manager(request).refresh_info(tuner_id)
+    manager = _manager(request)
+    tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    info = await manager.refresh_info(tuner_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Tuner not found or unreachable")
+    backend = manager.get_backend(tuner)
+    capabilities: dict[str, bool] = {}
+    if hasattr(backend, "get_live_capabilities"):
+        try:
+            capabilities = await backend.get_live_capabilities()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            capabilities = {}
+    if not capabilities:
+        static = backend.capabilities
+        capabilities = {
+            "keys": static.keys,
+            "current_app": static.current_app,
+            "playback_state": static.playback_state,
+            "app_list": static.app_list,
+            "install": static.install,
+        }
     return {
         "model": info.model,
         "manufacturer": info.manufacturer,
         "os_version": info.os_version,
         "sdk_int": info.sdk_int,
         "packages": info.packages,
+        "capabilities": capabilities,
     }
 
 
@@ -181,6 +203,22 @@ async def tuner_apps(tuner_id: str, request: Request) -> list[dict]:
 
 
 # ---- Pairing (androidtv_remote backend) ----
+
+
+@app.get("/api/tuners/{tuner_id}/pair/status")
+async def pair_status(tuner_id: str, request: Request) -> dict:
+    manager = _manager(request)
+    tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    backend = manager.get_backend(tuner)
+    if not backend.requires_pairing:
+        return {"requires_pairing": False, "paired": True}
+    try:
+        paired = await backend.is_paired()
+    except Exception:  # noqa: BLE001
+        paired = False
+    return {"requires_pairing": True, "paired": paired}
 
 
 @app.post("/api/tuners/{tuner_id}/pair/start")
@@ -244,7 +282,15 @@ async def update_channel(number: int, channel: Channel, request: Request) -> dic
     )
     if idx is None:
         raise HTTPException(status_code=404, detail="Channel not found")
+    if channel.number != number and any(
+        c.number == channel.number for c in store.config.channels
+    ):
+        raise HTTPException(status_code=409, detail="Channel number already exists")
     store.config.channels[idx] = channel
+    try:
+        validate_channel_numbers(store.config.channels)
+    except ChannelValidationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     store.save()
     return channel.model_dump()
 
@@ -288,7 +334,10 @@ async def import_channels(request: Request) -> dict:
     if not isinstance(data, list):
         raise HTTPException(status_code=400, detail="Expected a channel list")
     replace = bool(body.get("replace")) if isinstance(body, dict) else False
-    count = _store(request).import_channels(data, replace=replace)
+    try:
+        count = _store(request).import_channels(data, replace=replace)
+    except ChannelValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"success": True, "imported": count}
 
 

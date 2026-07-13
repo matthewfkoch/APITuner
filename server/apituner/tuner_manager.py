@@ -78,7 +78,9 @@ class TunerManager:
     def get_backend(self, tuner: Tuner) -> ControlBackend:
         backend = self._backends.get(tuner.id)
         if backend is None:
-            backend = build_backend(tuner, self._store.certs_dir)
+            backend = build_backend(
+                tuner, self._store.certs_dir, request_timeout=self._options.request_timeout
+            )
             self._backends[tuner.id] = backend
         return backend
 
@@ -365,7 +367,11 @@ class TunerManager:
     async def release(self, lease: Lease) -> None:
         options = self._options
         self._unlock(lease.tuner.id)
-        if options.stop_on_release or lease.channel.compatibility_mode:
+        if (
+            options.stop_on_release
+            or not options.keep_apps_running
+            or lease.channel.compatibility_mode
+        ):
             try:
                 await lease.backend.stop()
             except Exception:  # noqa: BLE001

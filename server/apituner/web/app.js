@@ -18,17 +18,30 @@ async function handle(resp) {
   return data;
 }
 
-// ---- Capability map (static per backend) ----
-const CAPS = {
-  androidtv_remote: ["keys", "current_app", "playback", "power"],
-  http_agent: ["keys*", "current_app", "playback", "apps", "install"],
+// ---- Capability definitions (label + tooltip; optional live status from /api/info) ----
+const CAP_DEFS = {
+  http_agent: [
+    { label: "Launch channels", hint: "Opens the streaming app and deep link when Channels tunes a station.", always: true },
+    { label: "Foreground app", hint: "Detects which app is on screen after a tune. Requires Usage Access on the device.", cap: "current_app" },
+    { label: "Playback check", hint: "Confirms video is playing before the HDMI stream is handed to Channels. Requires Notification Access.", cap: "playback_state" },
+    { label: "Send keys", hint: "Sends BACK, HOME, and RECENTS through the Agent. Requires Accessibility on the device.", cap: "keys" },
+    { label: "App list", hint: "Lists installed apps on the device — used when picking a package while editing channels.", cap: "app_list" },
+    { label: "Install APKs", hint: "Can sideload APKs to the device through the Agent (advanced).", cap: "install" },
+  ],
+  androidtv_remote: [
+    { label: "Send keys", hint: "Sends BACK, HOME, and other remote key presses through the Google TV Remote protocol.", cap: "keys" },
+    { label: "Foreground app", hint: "Reads which app is in the foreground after a tune.", cap: "current_app" },
+    { label: "Playback check", hint: "Best-effort playback detection. May be limited compared to the Agent APK.", cap: "playback_state" },
+  ],
 };
 
 // ---- UI utilities ----
 function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
 function toast(msg, isErr) {
   const t = document.getElementById("toast");
-  t.textContent = msg; t.className = "toast" + (isErr ? " err" : "");
+  t.textContent = msg;
+  t.className = "toast" + (isErr ? " err" : "");
+  t.classList.remove("hidden");
   setTimeout(() => t.classList.add("hidden"), 3200);
 }
 function openModal(title, node) {
@@ -39,10 +52,10 @@ function openModal(title, node) {
 }
 function closeModal() { document.getElementById("modal").classList.add("hidden"); }
 
-// ---- Tabs ----
-document.querySelectorAll(".tab").forEach((tab) => {
+// ---- Navigation ----
+document.querySelectorAll(".nav-item").forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach((t) => t.classList.remove("active"));
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
     tab.classList.add("active");
     document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
@@ -64,40 +77,89 @@ document.getElementById("copy-m3u").addEventListener("click", () => {
 });
 
 // ============================ TUNERS ============================
+let cachedChannels = [];
+
 async function loadTuners() {
   const list = document.getElementById("tuner-list");
   let tuners = [];
   try { tuners = await api.get("/api/tuners"); } catch (e) { toast(e.message, true); return; }
-  if (!tuners.length) { list.innerHTML = `<div class="empty">No tuners yet. Click <b>Add tuner</b> or <b>Discover</b>.</div>`; return; }
+  if (!tuners.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">📡</div>
+        <h3>No tuners configured</h3>
+        <p>Add a Google TV device and its HDMI encoder stream to start tuning channels.</p>
+        <button class="btn btn-primary" id="empty-add-tuner">Add your first tuner</button>
+      </div>`;
+    list.querySelector("#empty-add-tuner")?.addEventListener("click", () => tunerForm(null));
+    return;
+  }
   list.innerHTML = "";
   for (const t of tuners) {
-    const card = el(`<div class="card"></div>`);
+    const backendLabel = t.control.type === "http_agent" ? "Agent APK" : "TV Remote";
+    const card = el(`<article class="card"></article>`);
     card.innerHTML = `
       <div class="card-head">
         <div>
           <div class="card-title">${escapeHtml(t.name)}</div>
-          <div class="card-sub">${t.control.type} &middot; ${escapeHtml(t.control.host)}${t.control.port ? ":" + t.control.port : ""}</div>
+          <div class="card-sub">
+            <span class="backend-pill">${backendLabel}</span>
+            &nbsp;·&nbsp; ${escapeHtml(t.control.host)}${t.control.port ? ":" + t.control.port : ""}
+          </div>
         </div>
-        <span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "enabled" : "disabled"}</span>
+        <div class="card-badges">
+          <span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "Enabled" : "Disabled"}</span>
+          <span class="badge muted" data-health title="Checking whether the device is reachable…">Checking…</span>
+        </div>
       </div>
-      <div class="card-row"><span class="muted">Encoder</span><span class="mono">${escapeHtml(t.stream_endpoint)}</span></div>
-      <div class="badges" data-badges></div>
+      <div class="card-meta">
+        <div class="card-row"><span class="label">Encoder</span><span class="value mono">${escapeHtml(t.stream_endpoint)}</span></div>
+      </div>
+      <div class="cap-section">
+        <div class="cap-label">What this backend can do</div>
+        <div class="badges" data-badges></div>
+      </div>
       <div class="card-actions">
-        <button class="btn btn-sm" data-act="health">Check health</button>
-        ${t.control.type === "androidtv_remote" ? `<button class="btn btn-sm" data-act="pair">Pair</button>` : ""}
-        <button class="btn btn-sm" data-act="edit">Edit</button>
+        <button class="btn btn-sm btn-secondary" data-act="health" title="Ping the device to verify the Agent APK or TV remote is reachable on the network">Recheck connection</button>
+        ${t.control.type === "androidtv_remote" ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
+        <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
         <button class="btn btn-sm btn-danger" data-act="delete">Delete</button>
       </div>`;
     const badges = card.querySelector("[data-badges]");
-    (CAPS[t.control.type] || []).forEach((c) => badges.appendChild(el(`<span class="badge accent">${c}</span>`)));
-    card.querySelector('[data-act="health"]').addEventListener("click", async (e) => {
-      const btn = e.target; btn.textContent = "..."; 
-      try { const r = await api.get(`/api/tuners/${t.id}/health`); badges.appendChild(el(`<span class="badge ${r.online ? "on" : "off"}">${r.online ? "online" : "offline"}</span>`)); }
-      catch (err) { toast(err.message, true); }
-      btn.textContent = "Check health";
-    });
+    renderCapabilityBadges(badges, t.control.type);
+    const healthBtn = card.querySelector('[data-act="health"]');
+    const healthBadge = card.querySelector("[data-health]");
+    const setHealth = (online) => {
+      healthBadge.className = `badge ${online ? "on" : "off"}`;
+      healthBadge.textContent = online ? "Reachable" : "Unreachable";
+      healthBadge.title = online
+        ? "Device responded to a health check"
+        : "Device did not respond — check IP, Agent APK, or network";
+      card.classList.toggle("card-online", online);
+      card.classList.toggle("card-offline", !online);
+    };
+    const runHealthCheck = async () => {
+      healthBtn.disabled = true;
+      healthBtn.textContent = "Checking…";
+      healthBadge.className = "badge muted";
+      healthBadge.textContent = "Checking…";
+      try {
+        const r = await api.get(`/api/tuners/${t.id}/health`);
+        setHealth(r.online);
+        if (r.online) await refreshCapabilityStatus(badges, t);
+      } catch (err) {
+        setHealth(false);
+        toast(err.message, true);
+      }
+      healthBtn.disabled = false;
+      healthBtn.textContent = "Recheck connection";
+    };
+    healthBtn.addEventListener("click", runHealthCheck);
     const pairBtn = card.querySelector('[data-act="pair"]');
-    if (pairBtn) pairBtn.addEventListener("click", () => pairFlow(t));
+    if (pairBtn) {
+      pairBtn.addEventListener("click", () => pairFlow(t));
+      refreshPairStatus(t, card.querySelector("[data-pair-status]"));
+    }
     card.querySelector('[data-act="edit"]').addEventListener("click", () => tunerForm(t));
     card.querySelector('[data-act="delete"]').addEventListener("click", async () => {
       if (!confirm(`Delete tuner "${t.name}"?`)) return;
@@ -105,18 +167,69 @@ async function loadTuners() {
       catch (err) { toast(err.message, true); }
     });
     list.appendChild(card);
+    runHealthCheck();
+  }
+}
+
+function renderCapabilityBadges(container, backendType) {
+  container.innerHTML = "";
+  (CAP_DEFS[backendType] || []).forEach((def) => {
+    const badge = el(`<span class="badge cap-badge accent" title="${escapeAttr(def.hint)}">${escapeHtml(def.label)}</span>`);
+    if (def.cap) badge.dataset.cap = def.cap;
+    if (def.always) badge.dataset.always = "1";
+    container.appendChild(badge);
+  });
+}
+
+async function refreshCapabilityStatus(container, tuner) {
+  const badges = [...container.querySelectorAll("[data-cap]")];
+  if (!badges.length) return;
+  try {
+    const info = await api.get(`/api/tuners/${tuner.id}/info`);
+    const caps = info.capabilities || {};
+    badges.forEach((badge) => {
+      const key = badge.dataset.cap;
+      const on = !!caps[key];
+      badge.classList.remove("accent", "on", "off", "muted");
+      badge.classList.add("cap-badge", on ? "on" : "off");
+      const baseHint = badge.getAttribute("title") || "";
+      const status = on ? "Active on this device." : "Not available — grant the permission on the device or check the Agent app.";
+      badge.setAttribute("title", `${baseHint} ${status}`);
+    });
+  } catch {
+    badges.forEach((badge) => {
+      badge.classList.remove("on", "off");
+      badge.classList.add("accent", "muted");
+    });
+  }
+}
+
+async function refreshPairStatus(tuner, badge) {
+  if (!badge) return;
+  try {
+    const r = await api.get(`/api/tuners/${tuner.id}/pair/status`);
+    if (!r.requires_pairing) {
+      badge.className = "badge";
+      badge.textContent = "n/a";
+      return;
+    }
+    badge.className = `badge ${r.paired ? "on" : "off"}`;
+    badge.textContent = r.paired ? "Paired" : "Not paired";
+  } catch (e) {
+    badge.className = "badge off";
+    badge.textContent = "pair unknown";
   }
 }
 
 function tunerForm(existing) {
-  const t = existing || { name: "", control: { type: "androidtv_remote", host: "", port: null, pair_port: null, token: "" }, stream_endpoint: "", enabled: true };
+  const t = existing || { name: "", control: { type: "http_agent", host: "", port: 9092, pair_port: null, token: "" }, stream_endpoint: "", enabled: true };
   const form = el(`<form class="form-grid"></form>`);
   form.innerHTML = `
     <div class="field full"><label>Name</label><input name="name" value="${escapeAttr(t.name)}" required /></div>
     <div class="field"><label>Backend</label>
       <select name="type">
-        <option value="androidtv_remote">androidtv_remote (Google TV)</option>
-        <option value="http_agent">http_agent (Fire TV / Agent APK)</option>
+        <option value="http_agent">http_agent (Agent APK) — recommended</option>
+        <option value="androidtv_remote">androidtv_remote (Google TV Remote)</option>
       </select>
     </div>
     <div class="field"><label>Host / IP</label><input name="host" value="${escapeAttr(t.control.host)}" required /></div>
@@ -186,14 +299,22 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
   box.innerHTML = `<div class="muted">Scanning the network…</div>`;
   try {
     const found = await api.get("/api/discover?timeout=5");
-    if (!found.length) { box.innerHTML = `<div class="muted">No devices found. You can still add one manually.</div>`; return; }
-    box.innerHTML = `<div class="card-title" style="margin-bottom:8px">Discovered devices</div>`;
+    if (!found.length) {
+      box.innerHTML = `<div class="empty">No devices found on the network. Add a tuner manually by IP.</div>`;
+      return;
+    }
+    box.innerHTML = `<div class="card-title" style="margin-bottom:10px;font-size:14px;">Discovered devices</div>`;
     found.forEach((d) => {
       const item = el(`<div class="disc-item">
         <div><b>${escapeHtml(d.name)}</b> <span class="mono">${escapeHtml(d.host)}:${d.port}</span> <span class="badge">${d.backend}</span></div>
         <button class="btn btn-sm btn-primary">Add</button></div>`);
       item.querySelector("button").addEventListener("click", () => {
-        tunerForm({ name: d.name, control: { type: d.backend === "http_agent" ? "http_agent" : "androidtv_remote", host: d.host, port: null, pair_port: null, token: "" }, stream_endpoint: "", enabled: true });
+        tunerForm({
+          name: d.name,
+          control: { type: "http_agent", host: d.host, port: d.port || 9092, pair_port: null, token: "" },
+          stream_endpoint: "",
+          enabled: true,
+        });
       });
       box.appendChild(item);
     });
@@ -201,24 +322,46 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
 });
 
 // ============================ CHANNELS ============================
-async function loadChannels() {
+function channelMatchesQuery(c, q) {
+  if (!q) return true;
+  const hay = `${c.number} ${c.name} ${c.provider_name || ""} ${c.package_name} ${c.url || ""}`.toLowerCase();
+  return hay.includes(q);
+}
+
+function renderChannels(channels) {
   const tbody = document.querySelector("#channel-table tbody");
-  let channels = [];
-  try { channels = await api.get("/api/channels"); } catch (e) { toast(e.message, true); return; }
-  channels.sort((a, b) => a.number - b.number);
+  const q = (document.getElementById("channel-search")?.value || "").trim().toLowerCase();
+  const filtered = channels.filter((c) => channelMatchesQuery(c, q));
+  const countEl = document.getElementById("channel-count");
+  if (countEl) {
+    countEl.textContent = q
+      ? `Showing ${filtered.length} of ${channels.length}`
+      : `${channels.length} channel${channels.length === 1 ? "" : "s"}`;
+  }
   tbody.innerHTML = "";
-  if (!channels.length) { tbody.innerHTML = `<tr><td colspan="6"><div class="empty">No channels yet. Add one or import an ADBTuner export.</div></td></tr>`; return; }
-  for (const c of channels) {
-    const tr = el(`<tr>
-      <td>${c.number}</td>
-      <td>${escapeHtml(c.name)}</td>
-      <td class="muted">${escapeHtml(c.provider_name || "")}</td>
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import an ADBTuner export or add one manually."}</div></td></tr>`;
+    return;
+  }
+  for (const c of filtered) {
+    const tr = el(`<tr class="row-clickable" title="Click to edit channel">
+      <td><span class="ch-num">${c.number}</span></td>
+      <td><strong>${escapeHtml(c.name)}</strong></td>
+      <td class="muted">${escapeHtml(c.provider_name || "—")}</td>
       <td class="mono">${escapeHtml(c.package_name)}</td>
-      <td class="mono">${escapeHtml((c.url || "").slice(0, 40))}</td>
-      <td><button class="btn btn-sm" data-edit>Edit</button> <button class="btn btn-sm btn-danger" data-del>Delete</button></td>
+      <td class="mono col-url" title="${escapeAttr(c.url || "")}">${escapeHtml((c.url || "—").slice(0, 48))}${(c.url || "").length > 48 ? "…" : ""}</td>
+      <td class="col-actions"><button class="btn btn-sm btn-secondary" data-edit>Edit</button> <button class="btn btn-sm btn-danger" data-del>Delete</button></td>
     </tr>`);
-    tr.querySelector("[data-edit]").addEventListener("click", () => channelForm(c));
-    tr.querySelector("[data-del]").addEventListener("click", async () => {
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      channelForm(c);
+    });
+    tr.querySelector("[data-edit]").addEventListener("click", (e) => {
+      e.stopPropagation();
+      channelForm(c);
+    });
+    tr.querySelector("[data-del]").addEventListener("click", async (e) => {
+      e.stopPropagation();
       if (!confirm(`Delete channel ${c.number}?`)) return;
       try { await api.del(`/api/channels/${c.number}`); toast("Channel deleted"); loadChannels(); }
       catch (e) { toast(e.message, true); }
@@ -226,6 +369,16 @@ async function loadChannels() {
     tbody.appendChild(tr);
   }
 }
+
+async function loadChannels() {
+  try { cachedChannels = await api.get("/api/channels"); } catch (e) { toast(e.message, true); return; }
+  cachedChannels.sort((a, b) => a.number - b.number);
+  renderChannels(cachedChannels);
+}
+
+document.getElementById("channel-search")?.addEventListener("input", () => {
+  renderChannels(cachedChannels);
+});
 
 function channelForm(existing) {
   const c = existing || { number: "", name: "", provider_name: "", package_name: "", alternate_package_name: "", component: "", url: "", action: "android.intent.action.VIEW", extra_string: "", key_macro: [], compatibility_mode: false, tvc_guide_stationid: "" };
@@ -332,31 +485,33 @@ document.getElementById("import-btn").addEventListener("click", () => {
 
 // ============================ OPTIONS ============================
 const OPTION_FIELDS = [
-  ["tune_timeout_seconds", "Tune timeout (s)", "number"],
-  ["request_timeout", "Request timeout (s)", "number"],
-  ["release_grace_seconds", "Release grace (s)", "number"],
-  ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number"],
-  ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number"],
-  ["stream_mode", "Stream mode", "select", ["proxy", "redirect"]],
-  ["wait_for_playback", "Wait for playback signal", "bool"],
-  ["stop_on_release", "Stop app on release", "bool"],
-  ["keep_apps_running", "Keep apps running", "bool"],
-  ["retry_on_other_tuner", "Retry on another tuner", "bool"],
+  ["tune_timeout_seconds", "Tune timeout (s)", "number", null, "Max seconds to wait for a channel to become ready"],
+  ["request_timeout", "Request timeout (s)", "number", null, "HTTP timeout for Agent API calls"],
+  ["release_grace_seconds", "Release grace (s)", "number", null, "Hold tuner lock briefly after stream disconnect"],
+  ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number", null, "Reclaim tuners that stop making progress"],
+  ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
+  ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays MPEG-TS; redirect sends Channels to the encoder"],
+  ["wait_for_playback", "Wait for playback signal", "bool", null, "Prefer playback/foreground before accepting a tune"],
+  ["stop_on_release", "Stop app on release", "bool", null, "Send HOME when the stream ends"],
+  ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send HOME on release"],
+  ["retry_on_other_tuner", "Retry on another tuner", "bool", null, "Try another eligible tuner if a tune fails"],
 ];
 async function loadOptions() {
   const form = document.getElementById("options-form");
   let opts = {};
   try { opts = await api.get("/api/options"); } catch (e) { toast(e.message, true); return; }
   form.innerHTML = "";
-  for (const [key, label, type, choices] of OPTION_FIELDS) {
+  for (const [key, label, type, choices, hint] of OPTION_FIELDS) {
     if (type === "bool") {
-      form.appendChild(el(`<div class="field checkbox"><input type="checkbox" name="${key}" ${opts[key] ? "checked" : ""} /><label>${label}</label></div>`));
+      const row = el(`<div class="field checkbox"><input type="checkbox" name="${key}" ${opts[key] ? "checked" : ""} /><label>${label}</label></div>`);
+      if (hint) row.appendChild(el(`<div class="hint">${hint}</div>`));
+      form.appendChild(row);
     } else if (type === "select") {
-      const f = el(`<div class="field"><label>${label}</label><select name="${key}"></select></div>`);
+      const f = el(`<div class="field"><label>${label}</label><select name="${key}"></select>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`);
       choices.forEach((ch) => { const o = el(`<option value="${ch}">${ch}</option>`); if (opts[key] === ch) o.selected = true; f.querySelector("select").appendChild(o); });
       form.appendChild(f);
     } else {
-      form.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${opts[key]}" /></div>`));
+      form.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${opts[key]}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
     }
   }
 }
@@ -380,25 +535,56 @@ function startStatusPolling() { stopStatusPolling(); renderStatus(); statusTimer
 function stopStatusPolling() { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } }
 async function renderStatus() {
   const list = document.getElementById("status-list");
+  const stats = document.getElementById("status-stats");
   let data;
-  try { data = await api.get("/api/status"); } catch (e) { list.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; return; }
-  document.getElementById("status-meta").textContent = `v${data.version} · ${data.channel_count} channels · stream mode: ${data.options.stream_mode}`;
-  if (!data.tuners.length) { list.innerHTML = `<div class="empty">No tuners configured.</div>`; return; }
+  try { data = await api.get("/api/status"); } catch (e) {
+    list.innerHTML = `<div class="empty-state"><p>${escapeHtml(e.message)}</p></div>`;
+    stats.innerHTML = "";
+    return;
+  }
+
+  const active = data.tuners.filter((t) => t.locked).length;
+  const free = data.tuners.length - active;
+  const errors = data.tuners.filter((t) => t.last_error).length;
+
+  document.getElementById("status-meta").textContent =
+    `v${data.version} · ${data.options.stream_mode} stream mode · updates every 3s`;
+
+  document.getElementById("app-version").textContent = `v${data.version}`;
+
+  stats.innerHTML = `
+    <div class="stat-card"><div class="stat-label">Tuners</div><div class="stat-value">${data.tuners.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value amber">${active}</div></div>
+    <div class="stat-card"><div class="stat-label">Available</div><div class="stat-value green">${free}</div></div>
+    <div class="stat-card"><div class="stat-label">Channels</div><div class="stat-value accent">${data.channel_count}</div></div>
+    ${errors ? `<div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value" style="color:var(--red)">${errors}</div></div>` : ""}`;
+
+  if (!data.tuners.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-state-icon">●</div><h3>No tuners</h3><p>Add tuners to see live activity here.</p></div>`;
+    return;
+  }
   list.innerHTML = "";
   for (const s of data.tuners) {
-    const card = el(`<div class="card">
+    const card = el(`<article class="card ${s.locked ? "card-active" : ""}"></article>`);
+    card.innerHTML = `
       <div class="card-head">
-        <div><div class="card-title"><span class="dot ${s.locked ? "locked" : "free"}"></span>${escapeHtml(s.name)}</div>
-        <div class="card-sub">${s.backend}${s.model ? " · " + escapeHtml(s.model) : ""}</div></div>
-        <span class="badge ${s.locked ? "warn" : "on"}">${s.locked ? "tuning/active" : "free"}</span>
+        <div>
+          <div class="card-title">
+            <span class="dot ${s.locked ? "locked pulse" : "free"}"></span>
+            ${escapeHtml(s.name)}
+          </div>
+          <div class="card-sub">${s.backend}${s.model ? " · " + escapeHtml(s.model) : ""}</div>
+        </div>
+        <span class="badge ${s.locked ? "warn" : "on"}">${s.locked ? "Tuning" : "Idle"}</span>
       </div>
-      ${s.locked ? `<div class="card-row"><span class="muted">Channel</span><span>${s.channel_number ?? "?"} · ${escapeHtml(s.channel_name || "")}</span></div>` : ""}
-      ${s.tune_id ? `<div class="card-row"><span class="muted">Tune ID</span><span class="mono">${s.tune_id}</span></div>` : ""}
-      ${s.last_tune_seconds != null ? `<div class="card-row"><span class="muted">Last tune</span><span>${s.last_tune_seconds.toFixed(2)}s</span></div>` : ""}
-      ${s.locked && s.bytes_transferred ? `<div class="card-row"><span class="muted">Transferred</span><span>${fmtBytes(s.bytes_transferred)}</span></div>` : ""}
-      ${s.locked && s.last_seen_seconds != null ? `<div class="card-row"><span class="muted">Last data</span><span>${s.last_seen_seconds}s ago</span></div>` : ""}
-      ${s.last_error ? `<div class="card-row"><span class="muted">Last error</span><span class="badge off">${escapeHtml(s.last_error)}</span></div>` : ""}
-    </div>`);
+      <div class="card-meta">
+        ${s.locked ? `<div class="card-row"><span class="label">Channel</span><span class="value"><strong>${s.channel_number ?? "?"}</strong> · ${escapeHtml(s.channel_name || "")}</span></div>` : ""}
+        ${s.tune_id ? `<div class="card-row"><span class="label">Tune ID</span><span class="value mono">${s.tune_id}</span></div>` : ""}
+        ${s.last_tune_seconds != null ? `<div class="card-row"><span class="label">Last tune</span><span class="value">${s.last_tune_seconds.toFixed(1)}s</span></div>` : ""}
+        ${s.locked && s.bytes_transferred ? `<div class="card-row"><span class="label">Streamed</span><span class="value">${fmtBytes(s.bytes_transferred)}</span></div>` : ""}
+        ${s.locked && s.lock_seconds != null ? `<div class="card-row"><span class="label">Lock time</span><span class="value">${s.lock_seconds}s</span></div>` : ""}
+        ${s.last_error ? `<div class="card-row"><span class="label">Error</span><span class="value"><span class="badge off">${escapeHtml(s.last_error)}</span></span></div>` : ""}
+      </div>`;
     list.appendChild(card);
   }
 }
@@ -418,3 +604,7 @@ function escapeAttr(s) { return escapeHtml(s); }
 // ---- init ----
 initM3u();
 loadTuners();
+api.get("/api/status").then((d) => {
+  const elVer = document.getElementById("app-version");
+  if (elVer) elVer.textContent = `v${d.version}`;
+}).catch(() => {});

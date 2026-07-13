@@ -1,6 +1,8 @@
 services:
   apituner:
     build: ./server
+    # Or pull a release image instead of building locally:
+    # image: ghcr.io/matthewfkoch/apituner:latest
     image: apituner:latest
     container_name: apituner
     # Bridge networking with an explicit port mapping (default). Devices and

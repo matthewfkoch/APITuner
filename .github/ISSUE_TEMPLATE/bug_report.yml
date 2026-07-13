@@ -1,0 +1,30 @@
+---
+name: Bug report
+about: Report something that isn't working
+title: "[Bug] "
+labels: bug
+assignees: ""
+---
+
+**Describe the bug**
+A clear description of what went wrong.
+
+**Environment**
+- APITuner version:
+- Deployment: Docker / local Python
+- Control backend: `http_agent` / `androidtv_remote`
+- Device: (e.g. Chromecast with Google TV, Fire TV)
+
+**Steps to reproduce**
+1.
+2.
+3.
+
+**Expected behavior**
+What you expected to happen.
+
+**Logs / screenshots**
+Paste relevant server logs, dashboard status, or a photo of the TV screen.
+
+**Additional context**
+Encoder URL, channel config, or anything else that helps.

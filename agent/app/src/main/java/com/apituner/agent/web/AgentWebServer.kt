@@ -188,15 +188,59 @@ class AgentWebServer(
 
     private fun statusPage(): Response {
         val html = """
-            <!DOCTYPE html><html><head><meta charset="utf-8">
+            <!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>APITuner Agent</title>
-            <style>body{font-family:sans-serif;background:#0e1117;color:#e6edf3;padding:24px}
-            code{background:#1c2230;padding:2px 6px;border-radius:4px}</style></head>
-            <body><h1>APITuner Agent</h1>
-            <p>This device is controllable by APITuner over HTTP.</p>
-            <p>Model: <code>${Build.MANUFACTURER} ${Build.MODEL}</code> · Android <code>${Build.VERSION.RELEASE}</code></p>
-            <p>Endpoints under <code>/api/</code>. Add this device in APITuner using the <b>http_agent</b> backend.</p>
+            <style>
+              :root {
+                --bg:#080b10; --surface:#141a24; --surface-2:#1e2736; --border:rgba(255,255,255,.08);
+                --text:#f0f4f8; --muted:#94a3b8; --accent:#2dd4bf; --accent-dark:#042f2e;
+              }
+              * { box-sizing:border-box; }
+              body {
+                margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+                background:var(--bg); color:var(--text); padding:28px 24px;
+              }
+              .brand { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
+              .logo {
+                width:44px; height:44px; border-radius:11px;
+                background:linear-gradient(135deg,#14b8a6,#0d9488);
+                display:grid; place-items:center; color:var(--accent-dark); font-weight:700;
+              }
+              h1 { margin:0; font-size:22px; letter-spacing:-.02em; }
+              .sub { color:#64748b; font-size:12px; margin-top:2px; }
+              .card {
+                background:var(--surface); border:1px solid var(--border); border-radius:12px;
+                padding:18px 20px; margin-top:14px;
+              }
+              .card h2 { margin:0 0 8px; font-size:16px; }
+              .card p { margin:0; color:var(--muted); line-height:1.55; font-size:14px; }
+              code {
+                font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                background:var(--surface-2); color:var(--accent); padding:2px 6px; border-radius:4px;
+              }
+              .row { margin-top:12px; font-size:14px; }
+              .label { color:#64748b; display:inline-block; min-width:92px; }
+            </style></head>
+            <body>
+              <div class="brand">
+                <div class="logo">AT</div>
+                <div>
+                  <h1>APITuner Agent</h1>
+                  <div class="sub">Channels DVR control endpoint</div>
+                </div>
+              </div>
+              <div class="card">
+                <h2>Device ready</h2>
+                <p>This Android TV device is controllable by APITuner over HTTP on port <code>${AgentPrefs.DEFAULT_PORT}</code>.</p>
+                <div class="row"><span class="label">Model</span><code>${Build.MANUFACTURER} ${Build.MODEL}</code></div>
+                <div class="row"><span class="label">Android</span><code>${Build.VERSION.RELEASE}</code></div>
+                <div class="row"><span class="label">Backend</span><code>http_agent</code></div>
+              </div>
+              <div class="card">
+                <h2>API</h2>
+                <p>Management endpoints live under <code>/api/</code>. Add this device in the APITuner dashboard using backend <code>http_agent</code>.</p>
+              </div>
             </body></html>
         """.trimIndent()
         return newFixedLengthResponse(Response.Status.OK, "text/html", html)

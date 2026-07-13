@@ -8,7 +8,9 @@ from ..models import Tuner
 from .base import ControlBackend
 
 
-def build_backend(tuner: Tuner, certs_dir: Path) -> ControlBackend:
+def build_backend(
+    tuner: Tuner, certs_dir: Path, *, request_timeout: float = 10.0
+) -> ControlBackend:
     """Instantiate a backend from a tuner's ControlConfig.
 
     Imports are done lazily so an environment missing one backend's optional
@@ -22,5 +24,5 @@ def build_backend(tuner: Tuner, certs_dir: Path) -> ControlBackend:
     if ctype == "http_agent":
         from .http_agent import HttpAgentBackend
 
-        return HttpAgentBackend(tuner)
+        return HttpAgentBackend(tuner, request_timeout=request_timeout)
     raise ValueError(f"Unknown control backend type: {ctype!r}")

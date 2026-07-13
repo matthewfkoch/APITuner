@@ -16,6 +16,9 @@ agent/build/
 agent/app/build/
 agent/local.properties
 agent/keystore.jks
+agent/apituner-release.jks
+agent/.keystore-secrets.txt
+*.jks
 *.apk
 
 # IDE / OS

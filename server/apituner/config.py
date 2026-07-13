@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import AppConfig, Channel
+from .channels import ChannelValidationError, validate_channel_numbers
 
 # Fields ADBTuner uses in its channel export; we keep parity for drop-in import/export.
 _ADBTUNER_CHANNEL_FIELDS = (
@@ -19,6 +20,9 @@ _ADBTUNER_CHANNEL_FIELDS = (
     "package_name",
     "alternate_package_name",
     "component",
+    "action",
+    "extra_string",
+    "key_macro",
     "compatibility_mode",
     "tvc_guide_stationid",
 )
@@ -78,16 +82,14 @@ class ConfigStore:
         """Import an ADBTuner-style channel list. Returns the number imported."""
         with self._lock:
             imported = [Channel.model_validate(item) for item in data]
+            validate_channel_numbers(imported)
             if replace:
                 self._config.channels = imported
             else:
-                existing = {c.number for c in self._config.channels}
+                merged = {c.number: c for c in self._config.channels}
                 for ch in imported:
-                    if ch.number in existing:
-                        # Replace channel with the same number.
-                        self._config.channels = [
-                            c for c in self._config.channels if c.number != ch.number
-                        ]
-                    self._config.channels.append(ch)
+                    merged[ch.number] = ch
+                self._config.channels = list(merged.values())
+            validate_channel_numbers(self._config.channels)
             self.save()
             return len(imported)

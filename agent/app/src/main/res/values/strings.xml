@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">APITuner Agent</string>
+    <string name="brand_title">APITuner</string>
+    <string name="brand_subtitle">Agent · Channels DVR</string>
+    <string name="connection_title">Control server</string>
+    <string name="connection_hint">Add this device in the APITuner dashboard using the http_agent backend. After the first launch, the control server auto-starts on reboot.</string>
+    <string name="permissions_title">Permissions</string>
+    <string name="permissions_hint">Grant these on the device so APITuner can launch apps and detect playback.</string>
+    <string name="token_title">API token</string>
+    <string name="token_hint">Optional. If set, APITuner must send this value as X-Auth-Token.</string>
+    <string name="token_placeholder">Leave blank for no auth</string>
+    <string name="save_token">Save token</string>
+    <string name="badge_granted">Granted</string>
+    <string name="badge_needed">Needed</string>
+    <string name="badge_optional">Optional</string>
+    <string name="grant">Open settings</string>
 </resources>

@@ -30,8 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.1.2] - 2026-07-13
 
 ### Changed
-- Merged Dependabot updates: AGP 9.2.1 (built-in Kotlin), Gradle 9.4.1, Android SDK 37, Python server deps
-- Agent `minSdk` raised to 23 (required by androidx.core 1.19.0)
+- Merged Dependabot updates: AGP 9.2.1 (built-in Kotlin), Gradle 9.4.1, Android SDK 36, Python server deps
+- Agent `minSdk` raised to 23; `core-ktx` 1.18.0 (CI-compatible; API 37 platform not yet in sdkmanager)
 
 ## [0.1.1] - 2026-07-13
 

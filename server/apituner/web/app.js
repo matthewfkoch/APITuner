@@ -606,4 +606,9 @@ loadTuners();
 api.get("/api/status").then((d) => {
   const elVer = document.getElementById("app-version");
   if (elVer) elVer.textContent = `v${d.version}`;
+  if (d.agent_apk_url) {
+    document.querySelectorAll(".agent-apk-link").forEach((a) => {
+      a.href = d.agent_apk_url;
+    });
+  }
 }).catch(() => {});

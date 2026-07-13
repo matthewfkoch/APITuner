@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.1.1] - 2026-07-13
 
 ### Changed
+- Dashboard Agent APK links use the public `APITuner-releases` repo (configurable via `APITUNER_AGENT_APK_URL`)
 - Default server port is now **6592** (was 5593) to avoid conflict with ADBTuner on the same host
 
 ## [0.1.0] - 2026-07-13

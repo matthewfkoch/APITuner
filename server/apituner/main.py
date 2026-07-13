@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -29,6 +29,10 @@ logging.basicConfig(
 logger = logging.getLogger("apituner")
 
 WEB_DIR = Path(__file__).parent / "web"
+AGENT_APK_RELEASES_URL = os.environ.get(
+    "APITUNER_AGENT_APK_URL",
+    "https://github.com/matthewfkoch/APITuner-releases/releases",
+)
 
 
 @asynccontextmanager
@@ -70,7 +74,10 @@ def _manager(request: Request) -> TunerManager:
 async def dashboard() -> Response:
     index = WEB_DIR / "index.html"
     if index.exists():
-        return FileResponse(index)
+        html = index.read_text(encoding="utf-8").replace(
+            "{{AGENT_APK_RELEASES_URL}}", AGENT_APK_RELEASES_URL
+        )
+        return HTMLResponse(html)
     return PlainTextResponse("APITuner is running. Dashboard assets missing.")
 
 
@@ -355,6 +362,7 @@ async def discover_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
 async def status(request: Request) -> dict:
     return {
         "version": __version__,
+        "agent_apk_url": AGENT_APK_RELEASES_URL,
         "options": _store(request).config.options.model_dump(),
         "tuners": _manager(request).status(),
         "channel_count": len(_store(request).config.channels),

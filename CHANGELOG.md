@@ -7,25 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-13
+
 ### Added
-- GitHub Release workflow (Docker image + Agent APK)
-- Server CI with pytest suite
-- Issue/PR templates and Dependabot
-- Dashboard channel search, pairing status, API docs link
-- Agent on-device auth token setting
-- Channel duplicate-number validation on import
-- `config.example.json`, `SECURITY.md`, `CONTRIBUTING.md`, root `LICENSE`
-
-### Changed
-- **Default backend is now `http_agent`** (recommended for YouTube TV / Google TV)
-- Agent foreground detection falls back to recent usage stats
-- Same-app channel switches accepted after short readiness delay
-- `request_timeout` and `keep_apps_running` options are now functional
-- Channel export includes `action`, `extra_string`, and `key_macro`
-
-### Fixed
-- Tune failures when switching channels inside the same app (e.g. ABC → ESPN)
-- Background activity launch blocked without Display-over-other-apps permission
+- `/channels.m3u8` playlist endpoint (ADBTuner-compatible URL for Channels DVR)
+- `?provider=` query parameter on `/channels.m3u` and `/channels.m3u8` to filter by `provider_name`
 
 ## [0.1.2] - 2026-07-13
 

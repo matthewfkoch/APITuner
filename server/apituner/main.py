@@ -18,7 +18,7 @@ from .channels import ChannelValidationError, validate_channel_numbers
 from .config import ConfigStore
 from .discovery import discover
 from .models import Channel, GlobalOptions, Tuner
-from .playlist import build_m3u
+from .playlist import build_m3u, filter_channels_by_provider
 from .stream import open_stream
 from .tuner_manager import NoTunerAvailable, TuneFailed, TunerManager
 
@@ -81,11 +81,23 @@ async def dashboard() -> Response:
     return PlainTextResponse("APITuner is running. Dashboard assets missing.")
 
 
-@app.get("/channels.m3u", include_in_schema=False)
-async def channels_m3u(request: Request) -> Response:
-    channels = _store(request).config.channels
+def _channels_playlist(request: Request, provider: str | None = None) -> Response:
+    channels = filter_channels_by_provider(
+        _store(request).config.channels, provider
+    )
     base_url = str(request.base_url)
     return PlainTextResponse(build_m3u(channels, base_url), media_type="audio/x-mpegurl")
+
+
+@app.get("/channels.m3u", include_in_schema=False)
+async def channels_m3u(request: Request, provider: str | None = None) -> Response:
+    return _channels_playlist(request, provider)
+
+
+@app.get("/channels.m3u8", include_in_schema=False)
+async def channels_m3u8(request: Request, provider: str | None = None) -> Response:
+    # ADBTuner-compatible URL used by Channels DVR custom channel sources.
+    return _channels_playlist(request, provider)
 
 
 @app.get("/stream/{number}", include_in_schema=False)

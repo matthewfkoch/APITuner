@@ -1,5 +1,5 @@
 from apituner.models import Channel
-from apituner.playlist import build_m3u
+from apituner.playlist import build_m3u, filter_channels_by_provider
 
 
 def test_build_m3u_sorted_and_stream_urls():
@@ -25,3 +25,14 @@ def test_build_m3u_escapes_quotes_in_name():
     channels = [Channel(number=2, name='Channel "HD"', package_name="com.x")]
     m3u = build_m3u(channels, "http://localhost:6592")
     assert "Channel 'HD'" in m3u or "tvg-name=\"Channel 'HD'\"" in m3u
+
+
+def test_filter_channels_by_provider():
+    channels = [
+        Channel(number=1, name="ABC", package_name="com.yttv", provider_name="YouTube TV"),
+        Channel(number=2, name="NFL", package_name="com.yttv", provider_name="Sunday Ticket"),
+        Channel(number=3, name="CBS", package_name="com.yttv", provider_name="YouTube TV"),
+    ]
+    filtered = filter_channels_by_provider(channels, "YouTube TV")
+    assert [c.number for c in filtered] == [1, 3]
+    assert len(filter_channels_by_provider(channels, None)) == 3

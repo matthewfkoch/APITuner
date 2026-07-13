@@ -207,5 +207,5 @@ base64 -i apituner-release.jks | pbcopy   # paste into KEYSTORE_BASE64
 ## Licensing
 
 - This project is licensed under **Apache License 2.0** — see [LICENSE](LICENSE).
-- The `agent/` app is derived from **DisplayLauncher** (Apache-2.0). See `agent/NOTICE` for attribution to [mouldybread/DisplayLauncher](https://github.com/mouldybread/DisplayLauncher) and [matthewfkoch/DisplayLauncher](https://github.com/matthewfkoch/DisplayLauncher).
+- The `agent/` app is derived from **DisplayLauncher** (Apache-2.0). See `agent/NOTICE` for attribution to [mouldybread/DisplayLauncher](https://github.com/mouldybread/DisplayLauncher).
 - `androidtvremote2` and `pychromecast` are used as standard PyPI dependencies under their respective licenses.

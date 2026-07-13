@@ -4,12 +4,9 @@ Copyright 2026 The APITuner Authors
 This product includes software derived from DisplayLauncher, which is
 licensed under the Apache License, Version 2.0.
 
-  DisplayLauncher (upstream)
+  DisplayLauncher
   Copyright the DisplayLauncher Authors
   https://github.com/mouldybread/DisplayLauncher
-
-  DisplayLauncher (fork)
-  https://github.com/matthewfkoch/DisplayLauncher
 
 Portions of the HTTP server, app-launching, install/uninstall, and
 foreground-service code are derived from DisplayLauncher and re-branded to

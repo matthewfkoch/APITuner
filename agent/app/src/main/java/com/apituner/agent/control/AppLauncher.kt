@@ -1,7 +1,6 @@
 /*
  * Derived from DisplayLauncher (Apache-2.0):
  *   https://github.com/mouldybread/DisplayLauncher
- *   https://github.com/matthewfkoch/DisplayLauncher
  * See LICENSE and NOTICE at the repository root.
  */
 package com.apituner.agent.control

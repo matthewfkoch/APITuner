@@ -172,8 +172,8 @@ Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 To cut a release:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main` (repo collaborators only).

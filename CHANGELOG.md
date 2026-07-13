@@ -18,8 +18,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **Default backend is now `http_agent`** (recommended for YouTube TV / Google TV)
-- Merged Dependabot updates: AGP 9.2.1 (built-in Kotlin), Gradle 9.4.1, Android SDK 37, Python server deps
-- Agent `minSdk` raised to 23 (required by androidx.core 1.19.0)
 - Agent foreground detection falls back to recent usage stats
 - Same-app channel switches accepted after short readiness delay
 - `request_timeout` and `keep_apps_running` options are now functional
@@ -28,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Tune failures when switching channels inside the same app (e.g. ABC → ESPN)
 - Background activity launch blocked without Display-over-other-apps permission
+
+## [0.1.2] - 2026-07-13
+
+### Changed
+- Merged Dependabot updates: AGP 9.2.1 (built-in Kotlin), Gradle 9.4.1, Android SDK 37, Python server deps
+- Agent `minSdk` raised to 23 (required by androidx.core 1.19.0)
 
 ## [0.1.1] - 2026-07-13
 
@@ -46,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/matthewfkoch/APITuner-releases/releases/tag/v0.1.2
 [0.1.1]: https://github.com/matthewfkoch/APITuner-releases/releases/tag/v0.1.1
 [0.1.0]: https://github.com/matthewfkoch/APITuner-releases/releases/tag/v0.1.0

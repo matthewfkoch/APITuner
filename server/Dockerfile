@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    APITUNER_PORT=5593 \
+    APITUNER_PORT=6592 \
     APITUNER_DATA_DIR=/data
 
 WORKDIR /app
@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY apituner ./apituner
 
 VOLUME ["/data"]
-EXPOSE 5593
+EXPOSE 6592
 
 # Host networking is recommended (see docker-compose) so mDNS + device
 # discovery works; the app binds to APITUNER_PORT on all interfaces.

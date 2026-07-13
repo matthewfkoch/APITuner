@@ -9,12 +9,12 @@ playlist, tuner orchestration, and HDMI encoder stream relay.
 cd server
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
-APITUNER_DATA_DIR=../data uvicorn apituner.main:app --reload --port 5593
+APITUNER_DATA_DIR=../data uvicorn apituner.main:app --reload --port 6592
 ```
 
-- Dashboard: http://localhost:5593
-- OpenAPI docs: http://localhost:5593/docs
-- M3U playlist: http://localhost:5593/channels.m3u
+- Dashboard: http://localhost:6592
+- OpenAPI docs: http://localhost:6592/docs
+- M3U playlist: http://localhost:6592/channels.m3u
 
 ## Tests
 

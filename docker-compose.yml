@@ -8,12 +8,12 @@ services:
     # Bridge networking with an explicit port mapping (default). Devices and
     # HDMI encoders are reached by their LAN IPs, so tuning + streaming work.
     ports:
-      - "5593:5593"
+      - "6592:6592"
     volumes:
       # Persists config.json and Android TV Remote pairing certificates.
       - ./data:/data
     environment:
-      - APITUNER_PORT=5593
+      - APITUNER_PORT=6592
       - APITUNER_DATA_DIR=/data
       - APITUNER_LOG_LEVEL=INFO
     restart: unless-stopped

@@ -27,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Tune failures when switching channels inside the same app (e.g. ABC → ESPN)
 - Background activity launch blocked without Display-over-other-apps permission
 
+## [0.1.1] - 2026-07-13
+
+### Changed
+- Default server port is now **6592** (was 5593) to avoid conflict with ADBTuner on the same host
+
 ## [0.1.0] - 2026-07-13
 
 ### Added
@@ -38,5 +43,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/matthewfkoch/APITuner-releases/releases/tag/v0.1.1
 [0.1.0]: https://github.com/matthewfkoch/APITuner-releases/releases/tag/v0.1.0

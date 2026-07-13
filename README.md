@@ -5,7 +5,7 @@ An **ADB-free** virtual tuner for [Channels DVR](https://getchannels.com/), in t
 - **No ADB. No root. No developer mode.**
 - **Default backend:** the bundled **APITuner Agent** APK (derived from [DisplayLauncher](https://github.com/mouldybread/DisplayLauncher)) — package-pinned deep links that work reliably with YouTube TV and other streaming apps.
 - **Alternate backend:** the Android TV Remote protocol v2 via [`androidtvremote2`](https://github.com/tronikos/androidtvremote2), with optional [`pychromecast`](https://github.com/home-assistant-libs/pychromecast) for playback detection. Simpler setup (pair once, no APK) but **cannot pin the target app** on deep links, which often triggers Android's "Open with" chooser.
-- Runs in Docker. Web dashboard on port **5593**.
+- Runs in Docker. Web dashboard on port **6592**.
 
 > APITuner still requires an **HDMI encoder** per device (like ADBTuner). Streaming apps are DRM-protected, so a device cannot screen-capture itself; the encoder captures the device's HDMI output and serves it as MPEG-TS.
 
@@ -60,7 +60,7 @@ Use `androidtv_remote` only when you cannot install the Agent APK.
 mkdir -p apituner-data
 docker run -d \
   --name apituner \
-  -p 5593:5593 \
+  -p 6592:6592 \
   -v "$(pwd)/apituner-data:/data" \
   --restart unless-stopped \
   ghcr.io/matthewfkoch/apituner:latest
@@ -74,7 +74,7 @@ cd APITuner
 docker compose up -d --build
 ```
 
-Open the dashboard at `http://<docker-host>:5593`.
+Open the dashboard at `http://<docker-host>:6592`.
 
 To use mDNS **Discover**, enable host networking (see the comment in `docker-compose.yml`); otherwise add tuners by IP manually.
 
@@ -84,7 +84,7 @@ To use mDNS **Discover**, enable host networking (see the comment in `docker-com
 cd server
 python3.11 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-APITUNER_DATA_DIR=../data uvicorn apituner.main:app --host 0.0.0.0 --port 5593
+APITUNER_DATA_DIR=../data uvicorn apituner.main:app --host 0.0.0.0 --port 6592
 ```
 
 Config and pairing certs are stored under `APITUNER_DATA_DIR` (default `./data` relative to the working directory). Docker Compose mounts `./data` at the repo root — use the same path when running locally to share config.
@@ -116,7 +116,7 @@ Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is
 In Channels DVR: **Settings → Add Source → Custom Channels → M3U URL** and paste the URL shown at the top of the dashboard:
 
 ```
-http://<docker-host>:5593/channels.m3u
+http://<docker-host>:6592/channels.m3u
 ```
 
 ## Global options
@@ -160,7 +160,7 @@ Configurable in the dashboard:
 
 ## Security
 
-The dashboard and API on port **5593** are **not authenticated**. Do not expose APITuner to the public internet. See [SECURITY.md](SECURITY.md).
+The dashboard and API on port **6592** are **not authenticated**. Do not expose APITuner to the public internet. See [SECURITY.md](SECURITY.md).
 
 ## Releases
 
@@ -172,8 +172,8 @@ Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 To cut a release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main` (repo collaborators only).

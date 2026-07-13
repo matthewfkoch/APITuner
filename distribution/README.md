@@ -12,17 +12,17 @@ Download the latest **Agent APK** from [Releases](https://github.com/matthewfkoc
 mkdir -p apituner-data
 docker run -d \
   --name apituner \
-  -p 5593:5593 \
+  -p 6592:6592 \
   -v "$(pwd)/apituner-data:/data" \
   --restart unless-stopped \
   ghcr.io/matthewfkoch/apituner:latest
 ```
 
-Open the dashboard at `http://<docker-host>:5593`.
+Open the dashboard at `http://<docker-host>:6592`.
 
 **Server basics**
 
-- Web dashboard on port **5593** — manage tuners, channels, and options
+- Web dashboard on port **6592** — manage tuners, channels, and options
 - **M3U playlist** at `/channels.m3u` — add this URL in Channels DVR as a Custom Channels source
 - Each **tuner** is one Android TV device plus its HDMI encoder stream URL
 - When Channels requests a channel, APITuner launches the app on a free tuner and relays MPEG-TS from the encoder

@@ -61,5 +61,5 @@ dependencies {
     implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     // JSON
-    implementation("com.google.code.gson:gson:2.11.0")
+    implementation("com.google.code.gson:gson:2.14.0")
 }

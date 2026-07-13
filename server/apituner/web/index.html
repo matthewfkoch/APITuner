@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APITuner</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">AT</span>
+      <div>
+        <h1>APITuner</h1>
+        <p class="tagline">ADB-free virtual tuner for Channels DVR</p>
+      </div>
+    </div>
+    <div class="m3u">
+      <label>Channels DVR source URL</label>
+      <div class="m3u-row">
+        <input id="m3u-url" type="text" readonly />
+        <button id="copy-m3u" class="btn btn-ghost" title="Copy">Copy</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="tuners">Tuners</button>
+    <button class="tab" data-tab="channels">Channels</button>
+    <button class="tab" data-tab="status">Live Status</button>
+    <button class="tab" data-tab="options">Options</button>
+  </nav>
+
+  <main>
+    <!-- TUNERS -->
+    <section id="tab-tuners" class="tab-panel active">
+      <div class="panel-head">
+        <h2>Tuners</h2>
+        <div class="actions">
+          <button id="discover-btn" class="btn btn-ghost">Discover</button>
+          <button id="add-tuner-btn" class="btn btn-primary">Add tuner</button>
+        </div>
+      </div>
+      <div id="discovered" class="discovered hidden"></div>
+      <div id="tuner-list" class="cards"></div>
+    </section>
+
+    <!-- CHANNELS -->
+    <section id="tab-channels" class="tab-panel">
+      <div class="panel-head">
+        <h2>Channels</h2>
+        <div class="actions">
+          <button id="import-btn" class="btn btn-ghost">Import</button>
+          <button id="export-btn" class="btn btn-ghost">Export</button>
+          <button id="add-channel-btn" class="btn btn-primary">Add channel</button>
+        </div>
+      </div>
+      <table class="table" id="channel-table">
+        <thead>
+          <tr><th>#</th><th>Name</th><th>Provider</th><th>Package</th><th>Deep link</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- STATUS -->
+    <section id="tab-status" class="tab-panel">
+      <div class="panel-head"><h2>Live Status</h2><span id="status-meta" class="muted"></span></div>
+      <div id="status-list" class="cards"></div>
+    </section>
+
+    <!-- OPTIONS -->
+    <section id="tab-options" class="tab-panel">
+      <div class="panel-head"><h2>Global Options</h2></div>
+      <form id="options-form" class="form-grid"></form>
+      <div class="form-actions"><button id="save-options" class="btn btn-primary">Save options</button></div>
+    </section>
+  </main>
+
+  <!-- Modal host -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h3 id="modal-title"></h3><button id="modal-close" class="btn btn-ghost">&times;</button></div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

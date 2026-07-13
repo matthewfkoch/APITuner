@@ -1,0 +1,26 @@
+services:
+  apituner:
+    build: ./server
+    image: apituner:latest
+    container_name: apituner
+    # Bridge networking with an explicit port mapping (default). Devices and
+    # HDMI encoders are reached by their LAN IPs, so tuning + streaming work.
+    ports:
+      - "5593:5593"
+    volumes:
+      # Persists config.json and Android TV Remote pairing certificates.
+      - ./data:/data
+    environment:
+      - APITUNER_PORT=5593
+      - APITUNER_DATA_DIR=/data
+      - APITUNER_LOG_LEVEL=INFO
+    restart: unless-stopped
+
+    # --- mDNS auto-discovery ---
+    # The /api/discover feature needs multicast, which does NOT cross Docker's
+    # bridge network. To use Discover, comment out the "ports:" block above and
+    # enable host networking instead:
+    #
+    #   network_mode: host
+    #
+    # You can always add tuners manually by IP without host networking.

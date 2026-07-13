@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# APITuner runtime data (config + pairing certs)
+server/data/
+data/
+
+# Android / Gradle
+agent/.gradle/
+agent/build/
+agent/app/build/
+agent/local.properties
+agent/keystore.jks
+*.apk
+
+# IDE / OS
+.DS_Store
+.idea/
+*.iml

@@ -1,0 +1,8 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pydantic==2.10.4
+androidtvremote2==0.2.0
+pychromecast==14.0.5
+zeroconf==0.136.2
+python-multipart==0.0.20

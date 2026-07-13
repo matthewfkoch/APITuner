@@ -1,6 +1,7 @@
 /*
  * Foreground service hosting the Agent HTTP server + mDNS advertisement.
- * Derived from DisplayLauncher's LauncherService (Apache-2.0).
+ * Derived from DisplayLauncher's LauncherService (Apache-2.0):
+ *   https://github.com/mouldybread/DisplayLauncher
  */
 package com.apituner.agent
 

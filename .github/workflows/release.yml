@@ -246,8 +246,8 @@ jobs:
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  github-release:
-    name: Create GitHub Release
+  public-release:
+    name: Publish public release
     needs: [build-agent, publish-docker]
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag'
@@ -265,15 +265,41 @@ jobs:
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           echo "image=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/apituner" >> "$GITHUB_OUTPUT"
 
+      - name: Verify releases repo token
+        env:
+          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          if [[ -z "$RELEASES_REPO_TOKEN" ]]; then
+            echo "::error::RELEASES_REPO_TOKEN is required to publish APKs to matthewfkoch/APITuner-releases"
+            echo "Create a fine-grained PAT with Contents: Read and write on APITuner-releases, then add it as a repository secret."
+            exit 1
+          fi
+
       - name: Publish release
         id: release
         uses: softprops/action-gh-release@v2
         with:
+          repository: matthewfkoch/APITuner-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          tag_name: ${{ github.ref_name }}
           name: APITuner v${{ steps.version.outputs.version }}
-          generate_release_notes: true
+          body: |
+            ## Agent APK
+
+            Download **apituner-agent-${{ steps.version.outputs.version }}.apk** below and install on each Android TV / Google TV device.
+
+            Grant **Display over other apps**, **Usage Access**, and **Notification Access** (and **Accessibility** if you need BACK/HOME keys).
+
+            In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and your HDMI encoder stream URL.
+
+            ## Server (Docker)
+
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
+            ```
+
+            Or pull `:latest` for the most recent release.
           files: apituner-agent-*.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Job summary
         if: always()
@@ -291,16 +317,18 @@ jobs:
             apk_info="—"
           fi
 
+          release_url="https://github.com/matthewfkoch/APITuner-releases/releases/tag/${{ github.ref_name }}"
+
           {
-            echo "## Release — GitHub Release"
+            echo "## Release — Public GitHub Release"
             echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| **Status** | ${status} |"
             echo "| **Version** | v${{ steps.version.outputs.version }} |"
-            echo "| **Release** | [${{ steps.release.outputs.url || '—' }}](${{ steps.release.outputs.url || '#' }}) |"
+            echo "| **Release** | [${release_url}](${release_url}) |"
             echo "| **APK attached** | ${apk_info} |"
             echo "| **Docker image** | \`${{ env.REGISTRY }}/${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}\` |"
             echo ""
-            echo "**Includes:** auto-generated release notes, signed APK artifact, and GHCR image from this workflow run."
+            echo "**Published to:** \`matthewfkoch/APITuner-releases\` (public downloads; source repo stays private)."
           } >> "$GITHUB_STEP_SUMMARY"

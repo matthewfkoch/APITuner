@@ -39,4 +39,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Tuner pool orchestration with capability-aware selection
 
 [Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.0
+[0.1.0]: https://github.com/matthewfkoch/APITuner-releases/releases/tag/v0.1.0

@@ -42,7 +42,7 @@ Use `androidtv_remote` only when you cannot install the Agent APK.
 
 ### Agent setup (per device)
 
-1. Install the APK from [GitHub Releases](https://github.com/matthewfkoch/APITuner/releases) (or build from `agent/`).
+1. Install the APK from [GitHub Releases](https://github.com/matthewfkoch/APITuner-releases/releases) (or build from `agent/`).
 2. Open the app and grant:
    - **Display over other apps** — **required** (allows background app launches)
    - **Usage Access** — **recommended** (foreground-app tune readiness)
@@ -166,8 +166,8 @@ The dashboard and API on port **5593** are **not authenticated**. Do not expose 
 
 Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 
-1. **Publishes the server** to GitHub Container Registry: `ghcr.io/matthewfkoch/apituner:<version>`
-2. **Builds the Agent APK** and attaches it to the [GitHub Release](https://github.com/matthewfkoch/APITuner/releases)
+1. **Publishes the server** to GitHub Container Registry: `ghcr.io/matthewfkoch/apituner:<version>` (make the GHCR package **public** once in package settings)
+2. **Builds the Agent APK** and attaches it to the public [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases/releases) repo (source stays private)
 
 To cut a release:
 
@@ -176,7 +176,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.
+Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main` (repo collaborators only).
+
+### Public APK releases (private source)
+
+Add a fine-grained GitHub PAT as repository secret **`RELEASES_REPO_TOKEN`** with **Contents: Read and write** on [matthewfkoch/APITuner-releases](https://github.com/matthewfkoch/APITuner-releases). The release workflow uses it to create public GitHub Releases with the APK attached.
+
+Copy `distribution/README.md` into the releases repo for the landing page (one-time).
 
 ### Optional: signed release APK
 

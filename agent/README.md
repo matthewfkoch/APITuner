@@ -6,7 +6,7 @@ Use this backend for **Google TV, YouTube TV, and Fire TV**. It package-pins dee
 
 ## Install
 
-- Download `apituner-agent-<version>.apk` from the [GitHub Releases](https://github.com/matthewfkoch/APITuner/releases) page, or `apituner-agent-*-debug.apk` from the **Build APITuner Agent APK** Actions artifact between releases.
+- Download `apituner-agent-<version>.apk` from the [GitHub Releases](https://github.com/matthewfkoch/APITuner-releases/releases) page, or `apituner-agent-*-debug.apk` from the **Build APITuner Agent APK** Actions artifact between releases (collaborators only).
 - Sideload onto the device (ADB, Downloader app, etc.).
 - Open the app once and grant permissions:
   - **Display over other apps** → required to launch apps from the background (REQUIRED)

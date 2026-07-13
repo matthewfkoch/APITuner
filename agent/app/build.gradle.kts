@@ -19,7 +19,8 @@ android {
         create("release") {
             val ks = System.getenv("KEYSTORE_FILE")
             if (ks != null) {
-                storeFile = file(ks)
+                // Resolve from the agent project root (agent/), not app/.
+                storeFile = rootProject.file(ks)
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KEY_ALIAS")
                 keyPassword = System.getenv("KEY_PASSWORD")

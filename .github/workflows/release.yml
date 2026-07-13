@@ -81,8 +81,12 @@ jobs:
         run: |
           if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
             echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
+            if [[ ! -f keystore.jks ]]; then
+              echo "::error::Failed to write keystore.jks"
+              exit 1
+            fi
             echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Release signing enabled"
+            echo "Release signing enabled ($(wc -c < keystore.jks) bytes)"
           elif [[ -n "$KEYSTORE_BASE64" ]]; then
             echo "::warning::KEYSTORE_BASE64 is set but KEYSTORE_PASSWORD, KEY_ALIAS, or KEY_PASSWORD is missing; building debug APK"
             echo "enabled=false" >> "$GITHUB_OUTPUT"

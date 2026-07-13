@@ -12,7 +12,8 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # GHCR requires lowercase image names (repository may be mixed-case).
+  IMAGE_NAME: ${{ github.repository_owner }}/apituner
 
 jobs:
   build-agent:
@@ -49,12 +50,23 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Decode release keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+      # Secrets cannot be used in step-level if: expressions; detect via env in a script.
+      - name: Prepare release keystore
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Release signing enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No keystore secret; will build debug APK"
+          fi
 
       - name: Build release APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: steps.signing.outputs.enabled == 'true'
         env:
           KEYSTORE_FILE: keystore.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -63,7 +75,7 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Build debug APK
-        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
+        if: steps.signing.outputs.enabled != 'true'
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Stage release artifact

@@ -34,7 +34,7 @@ body:
     id: version
     attributes:
       label: APITuner version
-      placeholder: e.g. 0.1.4 or Docker image tag
+      placeholder: e.g. 0.1.3 or Docker image tag
   - type: input
     id: device
     attributes:

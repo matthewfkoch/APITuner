@@ -130,7 +130,7 @@ jobs:
           echo "sha256=$(sha256sum "$src" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-apk
           path: ${{ github.workspace }}/${{ steps.apk.outputs.name }}

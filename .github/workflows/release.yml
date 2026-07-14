@@ -25,7 +25,7 @@ jobs:
     outputs:
       apk_name: ${{ steps.apk.outputs.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: version
@@ -41,7 +41,7 @@ jobs:
           echo "Building agent version $ver"
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -67,7 +67,7 @@ jobs:
           test -d "${ANDROID_HOME}/platforms/android-36"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           add-job-summary: always
 
@@ -130,7 +130,7 @@ jobs:
           echo "sha256=$(sha256sum "$src" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-apk
           path: ${{ github.workspace }}/${{ steps.apk.outputs.name }}
@@ -177,7 +177,7 @@ jobs:
     name: Publish Docker image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version tags
         id: meta
@@ -259,10 +259,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: agent-apk
 

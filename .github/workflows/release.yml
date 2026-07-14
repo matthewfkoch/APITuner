@@ -67,7 +67,7 @@ jobs:
           test -d "${ANDROID_HOME}/platforms/android-36"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           add-job-summary: always
 

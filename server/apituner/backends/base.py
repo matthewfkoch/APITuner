@@ -46,6 +46,8 @@ class DeviceInfo:
     os_version: Optional[str] = None
     sdk_int: Optional[int] = None
     packages: list[str] = field(default_factory=list)
+    agent_version_name: Optional[str] = None
+    agent_version_code: Optional[int] = None
 
 
 class ControlBackend(ABC):

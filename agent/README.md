@@ -26,7 +26,7 @@ If a token is configured on the device (APITuner Agent app → **Save API token*
 | Method | Path                 | Body / notes                                                    |
 | ------ | -------------------- | --------------------------------------------------------------- |
 | GET    | `/api/health`        | `{ success, message }`                                          |
-| GET    | `/api/info`          | model, manufacturer, androidVersion, sdkInt, packages, capabilities |
+| GET    | `/api/info`          | model, manufacturer, androidVersion, sdkInt, **versionName**, **versionCode**, packages, capabilities |
 | GET    | `/api/apps`          | `[ { name, packageName } ]`                                     |
 | GET    | `/api/foreground`    | `{ packageName, hasPermission }`                                |
 | GET    | `/api/playback`      | `{ playing, package, hasPermission }`                           |
@@ -36,6 +36,17 @@ If a token is configured on the device (APITuner Agent app → **Save API token*
 | POST   | `/api/key`           | `{ key }` — `BACK` / `HOME` / `RECENTS`                         |
 | POST   | `/api/uninstall`     | `{ packageName }` (opens system dialog)                         |
 | POST   | `/api/upload-apk`    | multipart `file` (opens installer)                              |
+
+## Updates
+
+The Agent can update itself from [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases/releases):
+
+- **In-app:** open the Agent UI → **Updates** → **Check for updates** (or leave **Auto-check** on; checks about once per day).
+- **Dashboard:** on each `http_agent` tuner card, when a newer release exists, click **Update Agent**.
+
+Both paths download the APK and open the system Install dialog — confirm once with the TV remote. Fully silent installs are not available without Device Owner.
+
+Upgrades require the same signing key as the installed build. Published release APKs should use the release keystore secrets; switching from a debug APK to a signed release requires uninstalling first.
 
 ## Build locally
 

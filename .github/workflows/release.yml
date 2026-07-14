@@ -265,6 +265,35 @@ jobs:
         run: |
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           echo "image=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/apituner" >> "$GITHUB_OUTPUT"
+          code="$(grep 'versionCode' agent/app/build.gradle.kts | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+
+      - name: Build latest.json manifest
+        id: latest
+        run: |
+          ver="${{ steps.version.outputs.version }}"
+          code="${{ steps.version.outputs.code }}"
+          apk="$(ls -1 apituner-agent-*.apk | head -1)"
+          if [[ -z "$apk" ]]; then
+            echo "::error::No APK found to describe in latest.json"
+            exit 1
+          fi
+          sha="$(sha256sum "$apk" | cut -d' ' -f1)"
+          apk_url="https://github.com/matthewfkoch/APITuner-releases/releases/download/${{ github.ref_name }}/${apk}"
+          python3 - <<PY
+          import json
+          manifest = {
+              "versionName": "${ver}",
+              "versionCode": int("${code}"),
+              "apkUrl": "${apk_url}",
+              "apkName": "${apk}",
+              "sha256": "${sha}",
+          }
+          with open("latest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          print(json.dumps(manifest, indent=2))
+          PY
 
       - name: Verify releases repo token
         env:
@@ -293,6 +322,9 @@ jobs:
 
             In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and your HDMI encoder stream URL.
 
+            Machine-readable update metadata: **latest.json** (also available at
+            `…/releases/latest/download/latest.json`).
+
             ## Server (Docker)
 
             ```bash
@@ -300,7 +332,9 @@ jobs:
             ```
 
             Or pull `:latest` for the most recent release.
-          files: apituner-agent-*.apk
+          files: |
+            apituner-agent-*.apk
+            latest.json
 
       - name: Job summary
         if: always()

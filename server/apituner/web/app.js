@@ -115,11 +115,22 @@ document.getElementById("copy-xmltv").addEventListener("click", () => {
 
 // ============================ TUNERS ============================
 let cachedChannels = [];
+let cachedAgentLatest = null;
+
+async function fetchAgentLatest() {
+  try {
+    cachedAgentLatest = await api.get("/api/agent/latest");
+  } catch (_) {
+    cachedAgentLatest = null;
+  }
+  return cachedAgentLatest;
+}
 
 async function loadTuners() {
   const list = document.getElementById("tuner-list");
   let tuners = [];
   try { tuners = await api.get("/api/tuners"); } catch (e) { toast(e.message, true); return; }
+  const latestPromise = fetchAgentLatest();
   if (!tuners.length) {
     list.innerHTML = `
       <div class="empty-state">
@@ -131,9 +142,11 @@ async function loadTuners() {
     list.querySelector("#empty-add-tuner")?.addEventListener("click", () => tunerForm(null));
     return;
   }
+  await latestPromise;
   list.innerHTML = "";
   for (const t of tuners) {
     const backendLabel = t.control.type === "http_agent" ? "Agent APK" : "TV Remote";
+    const isAgent = t.control.type === "http_agent";
     const card = el(`<article class="card"></article>`);
     card.innerHTML = `
       <div class="card-head">
@@ -147,6 +160,7 @@ async function loadTuners() {
         <div class="card-badges">
           <span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "Enabled" : "Disabled"}</span>
           <span class="badge muted" data-health title="Checking whether the device is reachable…">Checking…</span>
+          ${isAgent ? `<span class="badge muted" data-agent-version title="Installed Agent APK version">Agent …</span>` : ""}
         </div>
       </div>
       <div class="card-meta">
@@ -158,6 +172,7 @@ async function loadTuners() {
       </div>
       <div class="card-actions">
         <button class="btn btn-sm btn-secondary" data-act="health" title="Ping the device to verify the Agent APK or TV remote is reachable on the network">Recheck connection</button>
+        ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Download the latest Agent APK and open the Install dialog on the TV">Update Agent</button>` : ""}
         ${t.control.type === "androidtv_remote" ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
         <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
         <button class="btn btn-sm btn-danger" data-act="delete">Delete</button>
@@ -166,6 +181,8 @@ async function loadTuners() {
     renderCapabilityBadges(badges, t.control.type);
     const healthBtn = card.querySelector('[data-act="health"]');
     const healthBadge = card.querySelector("[data-health]");
+    const versionBadge = card.querySelector("[data-agent-version]");
+    const updateBtn = card.querySelector('[data-act="update-agent"]');
     const setHealth = (online) => {
       healthBadge.className = `badge ${online ? "on" : "off"}`;
       healthBadge.textContent = online ? "Reachable" : "Unreachable";
@@ -175,6 +192,29 @@ async function loadTuners() {
       card.classList.toggle("card-online", online);
       card.classList.toggle("card-offline", !online);
     };
+    const applyAgentVersion = (info) => {
+      if (!versionBadge) return;
+      const code = info && info.version_code != null ? Number(info.version_code) : null;
+      const name = info && info.version_name ? String(info.version_name) : null;
+      if (name == null && code == null) {
+        versionBadge.className = "badge muted";
+        versionBadge.textContent = "Agent ?";
+        versionBadge.title = "Agent did not report a version";
+        if (updateBtn) updateBtn.classList.add("hidden");
+        return;
+      }
+      const latest = cachedAgentLatest;
+      const latestCode = latest && latest.versionCode != null ? Number(latest.versionCode) : null;
+      const outdated = latestCode != null && code != null && code < latestCode;
+      versionBadge.className = `badge ${outdated ? "warn" : "on"}`;
+      versionBadge.textContent = outdated
+        ? `Update available (${name || code})`
+        : `Agent v${name || code}`;
+      versionBadge.title = outdated
+        ? `Installed ${name || "?"} (${code}); latest is ${latest.versionName} (${latestCode})`
+        : `Installed Agent version ${name || "?"} (${code})`;
+      if (updateBtn) updateBtn.classList.toggle("hidden", !outdated);
+    };
     const runHealthCheck = async () => {
       healthBtn.disabled = true;
       healthBtn.textContent = "Checking…";
@@ -183,7 +223,21 @@ async function loadTuners() {
       try {
         const r = await api.get(`/api/tuners/${t.id}/health`);
         setHealth(r.online);
-        if (r.online) await refreshCapabilityStatus(badges, t);
+        if (r.online) {
+          await refreshCapabilityStatus(badges, t);
+          if (isAgent) {
+            try {
+              const info = await api.get(`/api/tuners/${t.id}/info`);
+              applyAgentVersion(info);
+            } catch (_) {
+              applyAgentVersion(null);
+            }
+          }
+        } else if (versionBadge) {
+          versionBadge.className = "badge muted";
+          versionBadge.textContent = "Agent …";
+          if (updateBtn) updateBtn.classList.add("hidden");
+        }
       } catch (err) {
         setHealth(false);
         toast(err.message, true);
@@ -192,6 +246,23 @@ async function loadTuners() {
       healthBtn.textContent = "Recheck connection";
     };
     healthBtn.addEventListener("click", runHealthCheck);
+    if (updateBtn) {
+      updateBtn.addEventListener("click", async () => {
+        updateBtn.disabled = true;
+        updateBtn.textContent = "Updating…";
+        try {
+          const r = await api.post(`/api/tuners/${t.id}/update-agent`, {});
+          toast(r.message || (r.updated
+            ? "Install dialog opened on the TV — confirm with the remote"
+            : "Agent already up to date"));
+          await runHealthCheck();
+        } catch (err) {
+          toast(err.message, true);
+        }
+        updateBtn.disabled = false;
+        updateBtn.textContent = "Update Agent";
+      });
+    }
     const pairBtn = card.querySelector('[data-act="pair"]');
     if (pairBtn) {
       pairBtn.addEventListener("click", () => pairFlow(t));

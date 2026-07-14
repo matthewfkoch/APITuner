@@ -13,7 +13,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .agent_update import AgentUpdateError, download_apk, latest_cache
 from .backends import BackendNotPaired, BackendUnavailable
+from .backends.http_agent import HttpAgentBackend
 from .channels import ChannelValidationError, validate_channel_numbers
 from .config import ConfigStore
 from .discovery import discover
@@ -242,6 +244,8 @@ async def tuner_info(tuner_id: str, request: Request) -> dict:
         "sdk_int": info.sdk_int,
         "packages": info.packages,
         "capabilities": capabilities,
+        "version_name": info.agent_version_name,
+        "version_code": info.agent_version_code,
     }
 
 
@@ -416,6 +420,71 @@ async def discover_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
     return await discover(timeout=min(timeout, 15.0))
 
 
+@app.get("/api/agent/latest")
+async def agent_latest(force: bool = False) -> dict[str, Any]:
+    """Return the cached public Agent APK latest.json manifest."""
+    try:
+        latest = await latest_cache.get(force=force)
+    except AgentUpdateError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return latest.to_dict()
+
+
+@app.post("/api/tuners/{tuner_id}/update-agent")
+async def update_agent(tuner_id: str, request: Request) -> dict[str, Any]:
+    """Download the latest Agent APK and push it to an http_agent device."""
+    store = _store(request)
+    manager = _manager(request)
+    tuner = next((t for t in store.config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    if tuner.control.type != "http_agent":
+        raise HTTPException(
+            status_code=400,
+            detail="Agent updates are only supported for http_agent tuners",
+        )
+
+    backend = manager.get_backend(tuner)
+    if not isinstance(backend, HttpAgentBackend):
+        raise HTTPException(status_code=400, detail="Backend is not http_agent")
+
+    try:
+        latest = await latest_cache.get(force=True)
+    except AgentUpdateError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    info = await manager.refresh_info(tuner_id)
+    current_code = info.agent_version_code if info else None
+    if current_code is not None and current_code >= latest.version_code:
+        return {
+            "success": True,
+            "updated": False,
+            "message": "Agent already up to date",
+            "version_name": info.agent_version_name if info else None,
+            "version_code": current_code,
+            "latest": latest.to_dict(),
+        }
+
+    data_dir = store.data_dir
+    cache_dir = Path(data_dir) / "agent-apk-cache"
+    try:
+        apk_path = await download_apk(latest, cache_dir)
+        result = await backend.upload_apk(apk_path)
+    except AgentUpdateError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except BackendUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {
+        "success": True,
+        "updated": True,
+        "message": result.get("message")
+        or "Install dialog opened on the TV — confirm with the remote",
+        "latest": latest.to_dict(),
+        "previous_version_code": current_code,
+    }
+
+
 @app.get("/api/status")
 async def status(request: Request) -> dict:
     store = _store(request)
@@ -426,6 +495,7 @@ async def status(request: Request) -> dict:
     return {
         "version": __version__,
         "agent_apk_url": AGENT_APK_RELEASES_URL,
+        "agent_latest_url": latest_cache.url,
         "options": options.model_dump(),
         "tuners": manager.status(),
         "channel_count": len(store.config.channels),

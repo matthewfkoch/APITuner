@@ -11,6 +11,17 @@
     <string name="token_hint">Optional. If set, APITuner must send this value as X-Auth-Token.</string>
     <string name="token_placeholder">Leave blank for no auth</string>
     <string name="save_token">Save token</string>
+    <string name="updates_title">Updates</string>
+    <string name="updates_hint">Checks GitHub Releases for a newer Agent APK. Install still requires one confirmation on this TV.</string>
+    <string name="check_for_updates">Check for updates</string>
+    <string name="auto_update_on">Auto-check updates: On</string>
+    <string name="auto_update_off">Auto-check updates: Off</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_up_to_date">You are on the latest version.</string>
+    <string name="update_available">Update %1$s available. Opening installer…</string>
+    <string name="update_install_started">Install dialog opened — confirm with the remote.</string>
+    <string name="update_skipped">Update skipped: %1$s</string>
+    <string name="update_failed">Update check failed: %1$s</string>
     <string name="badge_granted">Granted</string>
     <string name="badge_needed">Needed</string>
     <string name="badge_optional">Optional</string>

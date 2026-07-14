@@ -14,6 +14,7 @@ import com.apituner.agent.control.ForegroundAppDetector
 import com.apituner.agent.control.KeyAccessibilityService
 import com.apituner.agent.control.PlaybackDetector
 import com.apituner.agent.util.AgentPrefs
+import com.apituner.agent.util.AgentVersion
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import fi.iki.elonen.NanoHTTPD
@@ -81,6 +82,7 @@ class AgentWebServer(
     private fun getApps(): Response = json(appLauncher.getInstalledApps())
 
     private fun getInfo(): Response {
+        val version = AgentVersion.current(context)
         val caps = mapOf(
             "keys" to KeyAccessibilityService.isEnabled(),
             "current_app" to foreground.hasPermission(),
@@ -95,6 +97,8 @@ class AgentWebServer(
                 "manufacturer" to Build.MANUFACTURER,
                 "androidVersion" to Build.VERSION.RELEASE,
                 "sdkInt" to Build.VERSION.SDK_INT,
+                "versionName" to version.versionName,
+                "versionCode" to version.versionCode,
                 "packages" to appLauncher.getInstalledPackageNames(),
                 "capabilities" to caps,
             )

@@ -214,9 +214,20 @@ Bump `server/apituner/__init__.py` and the Agent `versionName`/`versionCode` fir
 
 APKs are published to the companion [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases) repo so download URLs stay stable for users who only need the APK.
 
-Add a fine-grained GitHub PAT as repository secret **`RELEASES_REPO_TOKEN`** with **Contents: Read and write** on that repo. The release workflow uses it to create GitHub Releases with the APK attached.
+Add a fine-grained GitHub PAT as repository secret **`RELEASES_REPO_TOKEN`** with **Contents: Read and write** on that repo. The release workflow uses it to create GitHub Releases with the APK and a machine-readable **`latest.json`** attached (also at `…/releases/latest/download/latest.json`).
 
 Copy `distribution/README.md` into the releases repo for the landing page (one-time).
+
+### Agent APK updates
+
+The Agent can update from Releases without re-sideloading manually:
+
+1. **In the Agent app** — **Check for updates** (or leave auto-check enabled; about once per day).
+2. **In the dashboard** — on an `http_agent` tuner, when “Update available” shows, click **Update Agent**.
+
+Both open the system Install dialog on the TV; confirm once with the remote. Override the manifest URL with `APITUNER_AGENT_LATEST_URL` if needed.
+
+**Signing:** upgrades only work when the new APK is signed with the same key as the installed one. Configure the release keystore secrets below for durable upgrade paths; a debug→release switch requires uninstalling first.
 
 ### Optional: signed release APK
 
@@ -243,6 +254,7 @@ base64 -i apituner-release.jks | pbcopy   # paste into KEYSTORE_BASE64
 - **`http_agent` is the reliable choice for deep-link tuning** — it pins the target package. `androidtv_remote` is kept for pairing-only or key-macro workflows where an APK cannot be installed.
 - `androidtv_remote` requires the pre-installed Android TV Remote Service (present on Google TV / Android TV, absent on Fire TV).
 - Cast-based playback detection from Docker bridge networking can be unreliable; the Agent's foreground/usage detection is more dependable in practice.
+- Agent APK updates always require one Install confirmation on the TV (Android does not allow silent sideload updates without Device Owner).
 
 ## Licensing
 

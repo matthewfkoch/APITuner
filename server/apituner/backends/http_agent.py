@@ -8,6 +8,7 @@ on permissions the user grants through the Agent's on-device settings.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -109,6 +110,8 @@ class HttpAgentBackend(ControlBackend):
             os_version=data.get("androidVersion"),
             sdk_int=data.get("sdkInt"),
             packages=packages,
+            agent_version_name=data.get("versionName"),
+            agent_version_code=_as_int(data.get("versionCode")),
         )
 
     async def get_live_capabilities(self) -> dict[str, bool]:
@@ -162,7 +165,40 @@ class HttpAgentBackend(ControlBackend):
     async def stop(self) -> None:
         await self._post("/api/stop", {})
 
+    async def upload_apk(self, apk_path: str | Path) -> dict[str, Any]:
+        """POST a local APK to the Agent's /api/upload-apk (opens Install dialog)."""
+        path = Path(apk_path)
+        if not path.is_file():
+            raise BackendUnavailable(f"APK not found: {path}")
+        try:
+            with path.open("rb") as fh:
+                files = {"file": (path.name, fh, "application/vnd.android.package-archive")}
+                resp = await self._client.post(
+                    "/api/upload-apk",
+                    files=files,
+                    timeout=httpx.Timeout(180.0, connect=15.0),
+                )
+        except httpx.HTTPError as exc:
+            raise BackendUnavailable(f"Agent APK upload failed: {exc}") from exc
+        self._check_response(resp, "/api/upload-apk")
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        if not data.get("success", False):
+            raise BackendUnavailable(data.get("message") or "Agent rejected APK upload")
+        return data if isinstance(data, dict) else {"success": True}
+
     async def list_apps(self) -> list[dict[str, str]]:
         """Convenience for the dashboard's app picker."""
         data = await self._get("/api/apps")
         return data if isinstance(data, list) else []
+
+
+def _as_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

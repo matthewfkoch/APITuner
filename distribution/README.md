@@ -59,6 +59,8 @@ Install `apituner-agent-<version>.apk` on each Android TV / Google TV device.
    - Device IP and port: `9092`
    - Stream URL: your HDMI encoder URL for that device
 
+Later updates: use **Check for updates** in the Agent app, or **Update Agent** on the tuner card in the dashboard when a newer release is available. Confirm Install once on the TV remote.
+
 **Agent basics**
 
 - Runs on the TV and receives tune commands from the server

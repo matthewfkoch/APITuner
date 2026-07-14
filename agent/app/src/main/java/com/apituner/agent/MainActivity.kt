@@ -14,21 +14,29 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.apituner.agent.control.ForegroundAppDetector
 import com.apituner.agent.control.KeyAccessibilityService
 import com.apituner.agent.control.PlaybackDetector
 import com.apituner.agent.util.AgentPrefs
+import com.apituner.agent.util.AgentVersion
+import com.apituner.agent.util.UpdateChecker
 import java.net.NetworkInterface
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var serverUrlView: TextView
     private lateinit var deviceInfoView: TextView
     private lateinit var tokenStatusView: TextView
+    private lateinit var versionView: TextView
     private lateinit var tokenInput: EditText
+    private lateinit var autoUpdateButton: Button
+    private lateinit var checkUpdateButton: Button
     private val permissionBadges = mutableMapOf<String, TextView>()
+    private val updateExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,6 +52,8 @@ class MainActivity : AppCompatActivity() {
         root.addView(spacer(20))
         root.addView(buildConnectionCard())
         root.addView(spacer(16))
+        root.addView(buildUpdatesCard())
+        root.addView(spacer(16))
         root.addView(buildPermissionsCard())
         root.addView(spacer(16))
         root.addView(buildTokenCard())
@@ -54,6 +64,11 @@ class MainActivity : AppCompatActivity() {
             addView(root)
         }
         setContentView(scroll)
+    }
+
+    override fun onDestroy() {
+        updateExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -110,7 +125,71 @@ class MainActivity : AppCompatActivity() {
 
         tokenStatusView = monoValue()
         card.addView(infoRow("API token", tokenStatusView))
+
+        versionView = monoValue()
+        card.addView(infoRow("Version", versionView))
         return card
+    }
+
+    private fun buildUpdatesCard(): LinearLayout {
+        val card = card()
+        card.addView(cardTitle(getString(R.string.updates_title)))
+        card.addView(cardHint(getString(R.string.updates_hint)))
+
+        autoUpdateButton = secondaryButton(autoUpdateLabel()) {
+            val next = !AgentPrefs.isAutoUpdateEnabled(this)
+            AgentPrefs.setAutoUpdateEnabled(this, next)
+            autoUpdateButton.text = autoUpdateLabel()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) }
+        }
+        card.addView(autoUpdateButton)
+
+        checkUpdateButton = primaryButton(getString(R.string.check_for_updates)) {
+            runManualUpdateCheck()
+        }
+        card.addView(checkUpdateButton)
+        return card
+    }
+
+    private fun autoUpdateLabel(): String =
+        if (AgentPrefs.isAutoUpdateEnabled(this)) {
+            getString(R.string.auto_update_on)
+        } else {
+            getString(R.string.auto_update_off)
+        }
+
+    private fun runManualUpdateCheck() {
+        checkUpdateButton.isEnabled = false
+        checkUpdateButton.text = getString(R.string.update_checking)
+        updateExecutor.execute {
+            val result = try {
+                UpdateChecker(this).checkAndInstallIfNewer(force = true)
+            } catch (e: Exception) {
+                UpdateChecker.CheckResult.Failed(e.message ?: "update failed")
+            }
+            AgentPrefs.setLastUpdateCheckMs(this, System.currentTimeMillis())
+            runOnUiThread {
+                checkUpdateButton.isEnabled = true
+                checkUpdateButton.text = getString(R.string.check_for_updates)
+                val message = when (result) {
+                    is UpdateChecker.CheckResult.UpToDate ->
+                        getString(R.string.update_up_to_date)
+                    is UpdateChecker.CheckResult.UpdateAvailable ->
+                        getString(R.string.update_available, result.latest.versionName)
+                    is UpdateChecker.CheckResult.InstallStarted ->
+                        getString(R.string.update_install_started)
+                    is UpdateChecker.CheckResult.Skipped ->
+                        getString(R.string.update_skipped, result.reason)
+                    is UpdateChecker.CheckResult.Failed ->
+                        getString(R.string.update_failed, result.message)
+                }
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun buildPermissionsCard(): LinearLayout {
@@ -260,6 +339,12 @@ class MainActivity : AppCompatActivity() {
 
         val token = AgentPrefs.getToken(this)
         tokenStatusView.text = if (token.isEmpty()) "Not set" else "Configured"
+
+        val version = AgentVersion.current(this)
+        versionView.text = "${version.versionName} (${version.versionCode})"
+        if (::autoUpdateButton.isInitialized) {
+            autoUpdateButton.text = autoUpdateLabel()
+        }
 
         updateBadge("overlay", Settings.canDrawOverlays(this), required = true)
         updateBadge("usage", ForegroundAppDetector(this).hasPermission())

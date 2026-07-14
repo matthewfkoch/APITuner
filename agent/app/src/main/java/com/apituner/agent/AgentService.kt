@@ -21,7 +21,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.apituner.agent.control.AppLauncher
 import com.apituner.agent.util.AgentPrefs
+import com.apituner.agent.util.UpdateChecker
 import com.apituner.agent.web.AgentWebServer
+import java.util.concurrent.Executors
 
 class AgentService : Service() {
 
@@ -30,6 +32,8 @@ class AgentService : Service() {
     private var registrationListener: NsdManager.RegistrationListener? = null
     private val tag = "AgentService"
     private val handler = Handler(Looper.getMainLooper())
+    private val updateExecutor = Executors.newSingleThreadExecutor()
+    private val appLauncher by lazy { AppLauncher(applicationContext) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -43,6 +47,7 @@ class AgentService : Service() {
         startWebServer()
         registerService()
         startMonitoring()
+        scheduleUpdateCheck(delayMs = 30_000)
         return START_STICKY
     }
 
@@ -71,7 +76,7 @@ class AgentService : Service() {
         try {
             webServer?.stop()
             webServer = AgentWebServer(
-                AgentPrefs.DEFAULT_PORT, applicationContext, AppLauncher(applicationContext)
+                AgentPrefs.DEFAULT_PORT, applicationContext, appLauncher
             )
             webServer?.start(NanoTimeouts.SOCKET_READ_TIMEOUT, false)
             Log.d(tag, "Web server started on ${AgentPrefs.DEFAULT_PORT}")
@@ -113,9 +118,42 @@ class AgentService : Service() {
                     Log.w(tag, "Web server down; restarting")
                     startWebServer()
                 }
+                if (AgentPrefs.shouldAutoCheckNow(applicationContext)) {
+                    runUpdateCheck()
+                }
                 handler.postDelayed(this, 60_000)
             }
         }, 60_000)
+    }
+
+    private fun scheduleUpdateCheck(delayMs: Long) {
+        handler.postDelayed({ runUpdateCheck() }, delayMs)
+    }
+
+    private fun runUpdateCheck() {
+        if (!AgentPrefs.shouldAutoCheckNow(applicationContext)) return
+        if (UpdateChecker.isBusy()) return
+        updateExecutor.execute {
+            try {
+                val result = UpdateChecker(applicationContext, appLauncher)
+                    .checkAndInstallIfNewer(force = false)
+                AgentPrefs.setLastUpdateCheckMs(applicationContext, System.currentTimeMillis())
+                when (result) {
+                    is UpdateChecker.CheckResult.InstallStarted ->
+                        Log.i(tag, "Agent update install dialog opened for ${result.latest.versionName}")
+                    is UpdateChecker.CheckResult.UpdateAvailable ->
+                        Log.i(tag, "Agent update available: ${result.latest.versionName}")
+                    is UpdateChecker.CheckResult.UpToDate ->
+                        Log.d(tag, "Agent up to date (${result.current.versionName})")
+                    is UpdateChecker.CheckResult.Skipped ->
+                        Log.d(tag, "Agent update skipped: ${result.reason}")
+                    is UpdateChecker.CheckResult.Failed ->
+                        Log.w(tag, "Agent update check failed: ${result.message}")
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Agent update check error: ${e.message}")
+            }
+        }
     }
 
     private fun createNotificationChannel() {
@@ -137,6 +175,7 @@ class AgentService : Service() {
             registrationListener?.let { nsdManager?.unregisterService(it) }
         } catch (_: Exception) {}
         handler.removeCallbacksAndMessages(null)
+        updateExecutor.shutdownNow()
     }
 
     private object NanoTimeouts {

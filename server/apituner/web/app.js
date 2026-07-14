@@ -540,6 +540,7 @@ const OPTION_FIELDS = [
   ["channels_dvr_url", "Channels DVR URL", "text", null, "LAN base URL for guide import, e.g. http://192.0.2.30:8089"],
   ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as schedule source (e.g. M3U-YouTubeTV)"],
   ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 259200 = 3 days)"],
+  ["xmltv_cache_seconds", "XMLTV cache (s)", "number", null, "How long to reuse a built /xmltv.xml response"],
 ];
 async function loadOptions() {
   const form = document.getElementById("options-form");

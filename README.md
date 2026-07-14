@@ -14,12 +14,12 @@ An **ADB-free** virtual tuner for [Channels DVR](https://getchannels.com/), in t
 ## How it works
 
 ```
-Channels DVR ──GET /stream/9000──▶ APITuner ──control──▶ Android TV device
-                                      │                     (launches app / deep link)
-                                      └──relay MPEG-TS◀── HDMI encoder ◀─HDMI─ device
+Channels DVR ──HDHomeRun /auto/v…──▶ APITuner ──control──▶ Android TV device
+                (or /channels.m3u)       │                     (launches app / deep link)
+                                         └──relay MPEG-TS◀── HDMI encoder ◀─HDMI─ device
 ```
 
-1. Channels DVR requests a channel from APITuner's `channels.m3u`.
+1. Channels DVR requests a channel (HDHomeRun lineup or M3U).
 2. APITuner picks a free, eligible tuner and tells its device to launch the channel's app / deep link.
 3. It waits until the app is playing (playback state, foreground app, or a fixed delay depending on the backend), optionally sends a key macro to clear prompts.
 4. It relays the paired HDMI encoder's MPEG-TS to Channels and releases the tuner when the stream ends.
@@ -76,7 +76,7 @@ docker compose up -d --build
 
 Open the dashboard at `http://<docker-host>:6592`.
 
-To use mDNS **Discover**, enable host networking (see the comment in `docker-compose.yml`); otherwise add tuners by IP manually.
+To use mDNS **Discover** and HDHomeRun auto-discovery (SSDP / UDP 65001), enable host networking (see the comment in `docker-compose.yml`). You can always add tuners by IP and add APITuner as an HDHomeRun source by URL (`http://<host>:6592`) without host networking.
 
 ### Run without Docker
 
@@ -166,12 +166,14 @@ Configurable in the dashboard:
 - `redirect` — Channels connects to the encoder directly (lower server load; tuner reclaimed after idle timeout). **Not used for HDHomeRun streams** (those always proxy so lock lifecycle stays correct).
 
 HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tuner{n}/v{channel}`) are enabled by default. Disable with **HDHomeRun emulation** in Options if you only want the M3U source.
+
 ---
 
 ## Repository layout
 
-- `server/` — the APITuner FastAPI service. See [server/README.md](server/README.md) for dev setup, tests, and API docs (`/docs`).
+- `server/` — the APITuner FastAPI service (including `hdhr/` HDHomeRun + XMLTV). See [server/README.md](server/README.md).
 - `agent/` — the APITuner Agent Android app (`http_agent` backend). CI builds the APK (`.github/workflows/agent-build.yml`).
+- `distribution/` — landing-page README for the public APK releases repo.
 - `config.example.json` — sample tuners, channels, and options.
 - `CHANGELOG.md` — version history.
 
@@ -183,6 +185,8 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Agent launch succeeds but app doesn't open | Missing "Display over other apps" | Grant overlay permission on the device |
 | Same-app channel switch times out | Usage Access not granted | Grant Usage Access; use latest server |
 | Discover finds nothing in Docker | Bridge network blocks mDNS | Use `network_mode: host` or add tuners manually |
+| HDHomeRun not auto-detected | SSDP/UDP 65001 blocked on Docker bridge | Host networking, or add source URL `http://<host>:6592` manually |
+| HDHomeRun guide empty | XMLTV not configured | Set Channels DVR URL + XMLTV source device; use Custom URL `…/xmltv.xml` |
 | `androidtv_remote` playback never ready | Cast/mDNS unreachable from Docker | Use Agent backend, or host networking |
 | No free tuner | All tuners locked | Wait for stream to end, or lower idle/stuck timeouts |
 
@@ -200,15 +204,15 @@ Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 To cut a release:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
-Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.
+Bump `server/apituner/__init__.py` and the Agent `versionName`/`versionCode` first, move `[Unreleased]` notes in `CHANGELOG.md` into the new version section, then tag. Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.
 
 ### Agent APK releases repo
 
-APKs are published to the companion [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases) repo so downloads stay stable even if this source repo’s visibility changes.
+APKs are published to the companion [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases) repo so download URLs stay stable for users who only need the APK.
 
 Add a fine-grained GitHub PAT as repository secret **`RELEASES_REPO_TOKEN`** with **Contents: Read and write** on that repo. The release workflow uses it to create GitHub Releases with the APK attached.
 

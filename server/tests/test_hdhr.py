@@ -43,7 +43,7 @@ def test_build_discover_json_tuner_count():
         base_url="http://192.0.2.1:6592",
         options=options,
         tuner_count=3,
-        firmware_version="0.1.3",
+        firmware_version="0.1.4",
     )
     assert data["TunerCount"] == 3
     assert data["DeviceID"] == "AABBCCDD"

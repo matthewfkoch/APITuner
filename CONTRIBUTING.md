@@ -32,6 +32,7 @@ cd agent
 2. Keep changes focused
 3. Update README/docs when behavior changes
 4. CI must pass (`Server CI`, `Build APITuner Agent APK`)
+5. Expect maintainer review (`CODEOWNERS` auto-requests `@matthewfkoch`)
 
 Run tests:
 

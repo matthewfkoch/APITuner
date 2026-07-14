@@ -6,7 +6,7 @@ Use this backend for **Google TV, YouTube TV, and Fire TV**. It package-pins dee
 
 ## Install
 
-- Download `apituner-agent-<version>.apk` from the [GitHub Releases](https://github.com/matthewfkoch/APITuner-releases/releases) page, or `apituner-agent-*-debug.apk` from the **Build APITuner Agent APK** Actions artifact between releases (collaborators only).
+- Download `apituner-agent-<version>.apk` from the [GitHub Releases](https://github.com/matthewfkoch/APITuner-releases/releases) page, or grab a debug APK from the **Build APITuner Agent APK** workflow artifacts on `main` between tagged releases.
 - Sideload onto the device (ADB, Downloader app, etc.).
 - Open the app once and grant permissions:
   - **Display over other apps** → required to launch apps from the background (REQUIRED)
@@ -15,6 +15,7 @@ Use this backend for **Google TV, YouTube TV, and Fire TV**. It package-pins dee
   - **Accessibility** → global `BACK` / `HOME` / `RECENTS` keys
 - The app runs a foreground service on **port 9092** and advertises itself over mDNS (`_apituner._tcp`).
 - After the first launch, the service **auto-starts on device reboot** (and after APK updates) — you do not need to open the app again.
+- The Agent registers as an optional HOME / launcher candidate (DisplayLauncher heritage). You do not need to set it as the default launcher for normal `http_agent` tuning.
 
 All permissions are granted by the user in Settings — no ADB, no root.
 

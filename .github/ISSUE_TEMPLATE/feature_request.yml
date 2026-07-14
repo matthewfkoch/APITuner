@@ -1,19 +1,29 @@
----
 name: Feature request
-about: Suggest an idea for APITuner
+description: Suggest an idea for APITuner
 title: "[Feature] "
-labels: enhancement
-assignees: ""
----
-
-**Problem**
-What problem does this solve?
-
-**Proposed solution**
-How would you like it to work?
-
-**Alternatives considered**
-Any other approaches you've thought about.
-
-**Additional context**
-Links, screenshots, or related issues.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you've thought about.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, screenshots, or related issues.

@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 server/.venv-deps/
+.pytest_cache/
 env/
 
 # APITuner runtime data (config + pairing certs)
@@ -16,6 +17,7 @@ scripts/
 
 # Android / Gradle
 agent/.gradle/
+agent/.kotlin/
 agent/build/
 agent/app/build/
 agent/local.properties
@@ -24,6 +26,7 @@ agent/apituner-release.jks
 agent/.keystore-secrets.txt
 *.jks
 *.apk
+*.log
 
 # IDE / OS
 .DS_Store

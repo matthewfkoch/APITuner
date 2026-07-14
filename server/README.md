@@ -1,7 +1,8 @@
 # APITuner Server
 
-FastAPI application that powers the virtual tuner: dashboard, REST API, M3U
-playlist, tuner orchestration, and HDMI encoder stream relay.
+FastAPI application that powers the virtual tuner: dashboard, REST API,
+HDHomeRun emulation, M3U playlist, tuner orchestration, and HDMI encoder
+stream relay.
 
 ## Run locally
 
@@ -14,7 +15,9 @@ APITUNER_DATA_DIR=../data uvicorn apituner.main:app --reload --port 6592
 
 - Dashboard: http://localhost:6592
 - OpenAPI docs: http://localhost:6592/docs
+- HDHomeRun discover: http://localhost:6592/discover.json
 - M3U playlist: http://localhost:6592/channels.m3u
+- XMLTV guide: http://localhost:6592/xmltv.xml
 
 ## Tests
 
@@ -28,12 +31,14 @@ pytest
 
 | Module | Purpose |
 | ------ | ------- |
-| `main.py` | FastAPI routes |
+| `main.py` | FastAPI app wiring and core REST routes |
 | `tuner_manager.py` | Tuner pool, tune orchestration, readiness |
 | `backends/` | `http_agent` and `androidtv_remote` control planes |
-| `playlist.py` | M3U generation for Channels DVR |
+| `hdhr/` | HDHomeRun discovery, lineup, stream routes, XMLTV |
+| `playlist.py` | M3U / M3U8 generation for Channels DVR |
 | `stream.py` | MPEG-TS proxy / redirect |
 | `config.py` | Persistent `config.json` + ADBTuner import/export |
+| `discovery.py` | mDNS discovery for Agent / Android TV Remote |
 | `web/` | Dashboard static assets |
 
 Runtime data (config, pairing certs) lives under `APITUNER_DATA_DIR` (default

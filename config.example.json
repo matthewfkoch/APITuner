@@ -59,6 +59,10 @@
     "hdhr_device_id": "A1B2C3D4",
     "hdhr_port": null,
     "hdhr_ssdp_enabled": true,
-    "hdhr_udp_discovery_enabled": true
+    "hdhr_udp_discovery_enabled": true,
+    "channels_dvr_url": "http://192.0.2.30:8089",
+    "xmltv_source_device": "M3U-YouTubeTV",
+    "xmltv_duration_seconds": 259200,
+    "xmltv_cache_seconds": 900.0
   }
 }

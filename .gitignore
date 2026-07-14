@@ -7,6 +7,8 @@ venv/
 server/.venv-deps/
 .pytest_cache/
 env/
+.env
+.env.*
 
 # APITuner runtime data (config + pairing certs)
 server/data/
@@ -14,6 +16,12 @@ data/
 
 # Local probe / scratch scripts (often contain LAN IPs)
 scripts/
+
+# Certs / keys outside data/ (defense in depth)
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Android / Gradle
 agent/.gradle/

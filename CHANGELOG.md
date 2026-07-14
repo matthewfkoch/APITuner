@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- HDHomeRun tuner emulation (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tuner{n}/v{channel}`)
+- SSDP (UDP 1900) + SiliconDust UDP (65001) discovery for Channels DVR auto-detect
+- Dashboard sidebar shows HDHomeRun device URL and tuner count
+- Options for HDHomeRun name, DeviceID, optional port, and discovery toggles
+
 ## [0.1.3] - 2026-07-13
 
 ### Added

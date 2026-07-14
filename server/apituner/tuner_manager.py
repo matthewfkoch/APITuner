@@ -20,6 +20,10 @@ class NoTunerAvailable(Exception):
     """No eligible/free tuner could serve the channel."""
 
 
+class TunerInUse(Exception):
+    """A specific tuner index was requested but is already locked."""
+
+
 class TuneFailed(Exception):
     """The device failed to reach a playable state in time."""
 
@@ -128,6 +132,19 @@ class TunerManager:
 
     # -- Selection --
 
+    def enabled_tuners(self) -> list[Tuner]:
+        """Enabled tuners in config order (tuner0, tuner1, ... for HDHR)."""
+        return [t for t in self._tuners() if t.enabled]
+
+    def tuner_count(self) -> int:
+        return len(self.enabled_tuners())
+
+    def tuner_at_index(self, index: int) -> Optional[Tuner]:
+        enabled = self.enabled_tuners()
+        if index < 0 or index >= len(enabled):
+            return None
+        return enabled[index]
+
     def _has_app(self, tuner_id: str, channel: Channel) -> Optional[bool]:
         info = self._info.get(tuner_id)
         if not info or not info.packages:
@@ -172,6 +189,24 @@ class TunerManager:
             st.last_seen = time.time()
             return chosen
 
+    async def _select_index(self, channel: Channel, tuner_index: int) -> Tuner:
+        """Lock a specific enabled-tuner index, or raise TunerInUse / NoTunerAvailable."""
+        async with self._alloc_lock:
+            tuner = self.tuner_at_index(tuner_index)
+            if tuner is None:
+                raise NoTunerAvailable(f"No tuner at index {tuner_index}")
+            if self._has_app(tuner.id, channel) is False:
+                raise NoTunerAvailable(
+                    f"Tuner {tuner_index} cannot serve channel {channel.number}"
+                )
+            st = self._state(tuner.id)
+            if st.locked:
+                raise TunerInUse(f"Tuner {tuner_index} is in use")
+            st.locked = True
+            st.lock_obtained = time.time()
+            st.last_seen = time.time()
+            return tuner
+
     def _unlock(self, tuner_id: str) -> None:
         st = self._state(tuner_id)
         st.locked = False
@@ -182,8 +217,26 @@ class TunerManager:
 
     # -- Tune orchestration --
 
-    async def lease(self, channel: Channel) -> Lease:
+    async def lease(
+        self, channel: Channel, *, tuner_index: Optional[int] = None
+    ) -> Lease:
         options = self._options
+        if tuner_index is not None:
+            tuner = await self._select_index(channel, tuner_index)
+            backend = self.get_backend(tuner)
+            tune_id = _new_tune_id()
+            try:
+                await self._do_tune(tuner, backend, channel, tune_id, options)
+                return Lease(
+                    tuner=tuner, backend=backend, tune_id=tune_id, channel=channel
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Tune %s failed on %s: %s", tune_id, tuner.name, exc)
+                st = self._state(tuner.id)
+                st.last_error = str(exc)
+                self._unlock(tuner.id)
+                raise
+
         tried: set[str] = set()
         last_err: Optional[Exception] = None
         while True:

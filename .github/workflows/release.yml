@@ -331,5 +331,5 @@ jobs:
             echo "| **APK attached** | ${apk_info} |"
             echo "| **Docker image** | \`${{ env.REGISTRY }}/${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}\` |"
             echo ""
-            echo "**Published to:** \`matthewfkoch/APITuner-releases\` (public downloads; source repo stays private)."
+            echo "**Published to:** \`matthewfkoch/APITuner-releases\` (public APK downloads)."
           } >> "$GITHUB_STEP_SUMMARY"

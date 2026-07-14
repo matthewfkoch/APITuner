@@ -48,15 +48,28 @@ class ConfigStore:
         return self.data_dir / "certs"
 
     def _load(self) -> AppConfig:
+        had_device_id = False
         if self.path.exists():
             try:
                 raw = json.loads(self.path.read_text())
-                return AppConfig.model_validate(raw)
+                had_device_id = bool(
+                    isinstance(raw, dict)
+                    and isinstance(raw.get("options"), dict)
+                    and raw["options"].get("hdhr_device_id")
+                )
+                config = AppConfig.model_validate(raw)
             except (json.JSONDecodeError, ValueError):
                 # Corrupt config: back it up rather than lose it, then start fresh.
                 backup = self.path.with_suffix(".json.bak")
                 self.path.replace(backup)
-        return AppConfig()
+                config = AppConfig()
+        else:
+            config = AppConfig()
+        # Persist auto-generated HDHR DeviceID so Channels doesn't see a new device.
+        if not had_device_id:
+            self._config = config
+            self.save()
+        return config
 
     def save(self) -> None:
         with self._lock:

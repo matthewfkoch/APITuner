@@ -26,5 +26,7 @@ What you expected to happen.
 **Logs / screenshots**
 Paste relevant server logs, dashboard status, or a photo of the TV screen.
 
+Do **not** paste API tokens, pairing certs, keystores, or your full `data/config.json`.
+
 **Additional context**
-Encoder URL, channel config, or anything else that helps.
+Encoder URL, channel config, or anything else that helps. Redact LAN IPs if you prefer.

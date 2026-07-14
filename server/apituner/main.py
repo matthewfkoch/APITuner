@@ -17,6 +17,9 @@ from .backends import BackendNotPaired, BackendUnavailable
 from .channels import ChannelValidationError, validate_channel_numbers
 from .config import ConfigStore
 from .discovery import discover
+from .hdhr.discovery import DiscoverIdentity, HdhrDiscoveryService
+from .hdhr.lineup import resolve_base_url
+from .hdhr.routes import router as hdhr_router
 from .models import Channel, GlobalOptions, Tuner
 from .playlist import build_m3u, filter_channels_by_provider
 from .stream import open_stream
@@ -35,12 +38,31 @@ AGENT_APK_RELEASES_URL = os.environ.get(
 )
 
 
+def _http_port() -> int:
+    return int(os.environ.get("APITUNER_PORT", "6592"))
+
+
+def _discovery_identity(store: ConfigStore, manager: TunerManager) -> DiscoverIdentity:
+    options = store.config.options
+    port = options.hdhr_port or _http_port()
+    # Discovery replies use LAN IP filled in by the UDP responder; seed BaseURL
+    # with localhost so HTTP clients still get a usable absolute URL shape.
+    base = f"http://127.0.0.1:{port}"
+    return DiscoverIdentity(
+        device_id_hex=options.hdhr_device_id,
+        tuner_count=manager.tuner_count(),
+        base_url=base,
+        friendly_name=options.hdhr_friendly_name,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = ConfigStore()
     manager = TunerManager(store)
     app.state.store = store
     app.state.manager = manager
+    app.state.hdhr_discovery = None
     await manager.start_reaper()
     # Best-effort: warm device info so tuner selection is app-aware.
     for tuner in store.config.tuners:
@@ -49,14 +71,35 @@ async def lifespan(app: FastAPI):
                 await manager.refresh_info(tuner.id)
             except Exception:  # noqa: BLE001
                 pass
+
+    options = store.config.options
+    if options.hdhr_enabled and (
+        options.hdhr_ssdp_enabled or options.hdhr_udp_discovery_enabled
+    ):
+        discovery = HdhrDiscoveryService(
+            lambda: _discovery_identity(store, manager),
+            ssdp_enabled=options.hdhr_ssdp_enabled,
+            udp_enabled=options.hdhr_udp_discovery_enabled,
+            http_port=options.hdhr_port or _http_port(),
+        )
+        app.state.hdhr_discovery = discovery
+        try:
+            await discovery.start()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HDHR discovery failed to start: %s", exc)
+
     logger.info("APITuner %s started", __version__)
     try:
         yield
     finally:
+        discovery = getattr(app.state, "hdhr_discovery", None)
+        if discovery is not None:
+            await discovery.stop()
         await manager.stop_reaper()
 
 
 app = FastAPI(title="APITuner", version=__version__, lifespan=lifespan)
+app.include_router(hdhr_router)
 
 
 def _store(request: Request) -> ConfigStore:
@@ -341,6 +384,9 @@ async def get_options(request: Request) -> dict:
 @app.put("/api/options")
 async def set_options(options: GlobalOptions, request: Request) -> dict:
     store = _store(request)
+    # Preserve DeviceID if the client omitted / cleared it.
+    if not options.hdhr_device_id:
+        options.hdhr_device_id = store.config.options.hdhr_device_id
     store.config.options = options
     store.save()
     return options.model_dump()
@@ -372,12 +418,31 @@ async def discover_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
 
 @app.get("/api/status")
 async def status(request: Request) -> dict:
+    store = _store(request)
+    manager = _manager(request)
+    options = store.config.options
+    base = resolve_base_url(str(request.base_url), options)
+    xmltv_url = f"{base}/xmltv.xml" if options.hdhr_enabled else None
     return {
         "version": __version__,
         "agent_apk_url": AGENT_APK_RELEASES_URL,
-        "options": _store(request).config.options.model_dump(),
-        "tuners": _manager(request).status(),
-        "channel_count": len(_store(request).config.channels),
+        "options": options.model_dump(),
+        "tuners": manager.status(),
+        "channel_count": len(store.config.channels),
+        "hdhr": {
+            "enabled": options.hdhr_enabled,
+            "friendly_name": options.hdhr_friendly_name,
+            "device_id": options.hdhr_device_id,
+            "tuner_count": manager.tuner_count(),
+            "base_url": base if options.hdhr_enabled else None,
+            "discover_url": f"{base}/discover.json" if options.hdhr_enabled else None,
+            "xmltv_url": xmltv_url if options.channels_dvr_url else None,
+            "channels_dvr_url": options.channels_dvr_url,
+            "ssdp_enabled": options.hdhr_ssdp_enabled,
+            "udp_discovery_enabled": options.hdhr_udp_discovery_enabled,
+            "discovery_running": getattr(request.app.state, "hdhr_discovery", None)
+            is not None,
+        },
     }
 
 

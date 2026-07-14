@@ -1,6 +1,6 @@
 # APITuner
 
-An **ADB-free** virtual tuner for [Channels DVR](https://getchannels.com/), in the spirit of ADBTuner. APITuner controls networked Android TV / Google TV devices through pluggable, ADB-free control backends and relays each device's paired HDMI-encoder stream to Channels as a Custom Channels (M3U) source.
+An **ADB-free** virtual tuner for [Channels DVR](https://getchannels.com/), in the spirit of ADBTuner. APITuner controls networked Android TV / Google TV devices through pluggable, ADB-free control backends and relays each device's paired HDMI-encoder stream to Channels — as an **HDHomeRun-compatible tuner** (recommended, for Tuner Sharing / multi-TV sync) or as a Custom Channels (M3U) source.
 
 - **No ADB. No root. No developer mode.**
 - **Default backend:** the bundled **APITuner Agent** APK (derived from [DisplayLauncher](https://github.com/mouldybread/DisplayLauncher)) — package-pinned deep links that work reliably with YouTube TV and other streaming apps.
@@ -96,7 +96,7 @@ Config and pairing certs are stored under `APITUNER_DATA_DIR` (default `./data` 
 1. **Add a tuner** in the dashboard (or click **Discover**).
 2. **Recommended — `http_agent`:** install the Agent APK (see above), grant permissions, enter the device IP (port `9092`).
 3. **Alternate — `androidtv_remote`:** enter the device IP, click **Pair**, enter the PIN shown on the TV. Pairing certs are stored under `data/certs/`.
-4. Enter the **encoder stream URL** — the HDMI encoder's MPEG-TS endpoint, e.g. `http://192.168.1.200/4.ts`.
+4. Enter the **encoder stream URL** — the HDMI encoder's MPEG-TS endpoint, e.g. `http://192.0.2.20/4.ts`.
 
 See `config.example.json` for a sample configuration.
 
@@ -113,12 +113,37 @@ Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is
 
 ## Connect to Channels DVR
 
+### Recommended: HDHomeRun tuner (multi-TV sync)
+
+APITuner can appear as an **HDHomeRun** network tuner. Channels DVR then treats it like a native SiliconDust device, which enables **Tuner Sharing** — one physical tune fans out to multiple TVs watching the same channel (much tighter sync than Custom Channels).
+
+1. In Channels DVR: **Settings → Add Source → HDHomeRun**.
+2. Either wait for auto-discovery, or enter the URL shown in the dashboard sidebar (e.g. `http://<host>:6592`).
+3. Scan channels; assign Gracenote / guide data as you would for any HDHR source.
+4. **Enable Tuner Sharing** on clients: **Settings → Playback → Advanced → Tuner Sharing** (or force it via DVR server-side client settings).
+5. Remove or disable the Custom Channels M3U source if you previously used it — otherwise Channels may use both and waste tuners.
+
+#### Guide data (Gracenote via Custom URL)
+
+HDHomeRun sources don't read `tvc-guide-stationid` the way M3U Custom Channels do. APITuner can instead serve an XMLTV feed remapped from your Channels DVR guide (matched by Gracenote StationID):
+
+1. In APITuner **Options**, set **Channels DVR URL** to your DVR (e.g. `http://192.0.2.30:8089`) and **XMLTV source device** (default `M3U-YouTubeTV`).
+2. In Channels, on the APITuner HDHomeRun source, set guide provider to **Custom URL**.
+3. Paste `http://<apituner-host>:6592/xmltv.xml` and Save.
+
+`TunerCount` equals the number of **enabled** tuners in APITuner (one device + HDMI encoder per slot).
+
+> Auto-discovery (SSDP + SiliconDust UDP port 65001) needs multicast. In Docker, use `network_mode: host` (see `docker-compose.yml`). Manual IP entry works on bridge networking.
+
+### Alternate: Custom Channels (M3U)
+
 In Channels DVR: **Settings → Add Source → Custom Channels → M3U URL** and paste the URL shown at the top of the dashboard:
 
 ```
 http://<docker-host>:6592/channels.m3u
 ```
 
+Custom Channels does **not** support Tuner Sharing — each TV typically opens its own stream, which is why the same channel can look out of sync across rooms.
 ## Global options
 
 Configurable in the dashboard:
@@ -131,13 +156,16 @@ Configurable in the dashboard:
 | Keep apps running | When off, always send HOME on release (overrides keep-warm behavior) |
 | Retry on other tuner | Try another eligible tuner if a tune fails |
 | Request timeout | HTTP timeout for Agent API calls (seconds) |
-| Stream mode | `proxy` (default, like ADBTuner) or `redirect` (Channels hits encoder directly) |
+| Stream mode | `proxy` (default, like ADBTuner) or `redirect` (Channels hits encoder directly; M3U only) |
 | Release grace | Seconds to hold tuner lock after stream disconnect |
 | Stuck / idle timeouts | Reclaim tuners that stop making progress |
+| HDHomeRun emulation | Appear as an HDHomeRun tuner (`discover.json` / `lineup.json` / `/auto/v…`) |
+| HDHomeRun discovery | SSDP + UDP 65001 (optional; needs host networking in Docker) |
 
 - `proxy` (default) — APITuner relays the encoder stream and releases the tuner on disconnect.
-- `redirect` — Channels connects to the encoder directly (lower server load; tuner reclaimed after idle timeout).
+- `redirect` — Channels connects to the encoder directly (lower server load; tuner reclaimed after idle timeout). **Not used for HDHomeRun streams** (those always proxy so lock lifecycle stays correct).
 
+HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tuner{n}/v{channel}`) are enabled by default. Disable with **HDHomeRun emulation** in Options if you only want the M3U source.
 ---
 
 ## Repository layout
@@ -166,8 +194,8 @@ The dashboard and API on port **6592** are **not authenticated**. Do not expose 
 
 Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 
-1. **Publishes the server** to GitHub Container Registry: `ghcr.io/matthewfkoch/apituner:<version>` (make the GHCR package **public** once in package settings)
-2. **Builds the Agent APK** and attaches it to the public [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases/releases) repo (source stays private)
+1. **Publishes the server** to GitHub Container Registry: `ghcr.io/matthewfkoch/apituner:<version>` (set the GHCR package visibility to **Public** in package settings if needed)
+2. **Builds the Agent APK** and attaches it to [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases/releases) for public download
 
 To cut a release:
 
@@ -176,11 +204,13 @@ git tag v0.1.2
 git push origin v0.1.2
 ```
 
-Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main` (repo collaborators only).
+Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.
 
-### Public APK releases (private source)
+### Agent APK releases repo
 
-Add a fine-grained GitHub PAT as repository secret **`RELEASES_REPO_TOKEN`** with **Contents: Read and write** on [matthewfkoch/APITuner-releases](https://github.com/matthewfkoch/APITuner-releases). The release workflow uses it to create public GitHub Releases with the APK attached.
+APKs are published to the companion [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases) repo so downloads stay stable even if this source repo’s visibility changes.
+
+Add a fine-grained GitHub PAT as repository secret **`RELEASES_REPO_TOKEN`** with **Contents: Read and write** on that repo. The release workflow uses it to create GitHub Releases with the APK attached.
 
 Copy `distribution/README.md` into the releases repo for the landing page (one-time).
 

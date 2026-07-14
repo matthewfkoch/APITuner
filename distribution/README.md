@@ -2,7 +2,9 @@
 
 APITuner is a virtual tuner for [Channels DVR](https://getchannels.com/). It controls Android TV / Google TV devices and relays each device's HDMI-encoder stream to Channels as a Custom Channels (M3U) source.
 
-Download the latest **Agent APK** from [Releases](https://github.com/matthewfkoch/APITuner-releases/releases).
+- **Source:** [matthewfkoch/APITuner](https://github.com/matthewfkoch/APITuner)
+- **Agent APK downloads:** [Releases](https://github.com/matthewfkoch/APITuner-releases/releases)
+- **Docker image:** `ghcr.io/matthewfkoch/apituner:latest`
 
 ---
 

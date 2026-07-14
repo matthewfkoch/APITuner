@@ -53,6 +53,12 @@
     "stream_mode": "proxy",
     "release_grace_seconds": 5.0,
     "stuck_tuner_timeout_seconds": 40.0,
-    "tuner_idle_timeout_seconds": 60.0
+    "tuner_idle_timeout_seconds": 60.0,
+    "hdhr_enabled": true,
+    "hdhr_friendly_name": "APITuner",
+    "hdhr_device_id": "A1B2C3D4",
+    "hdhr_port": null,
+    "hdhr_ssdp_enabled": true,
+    "hdhr_udp_discovery_enabled": true
   }
 }

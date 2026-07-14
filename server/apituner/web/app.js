@@ -66,14 +66,51 @@ document.querySelectorAll(".nav-item").forEach((tab) => {
   });
 });
 
-// ---- M3U URL ----
+// ---- M3U + HDHomeRun URLs ----
 function initM3u() {
   const url = `${location.origin}/channels.m3u`;
   document.getElementById("m3u-url").value = url;
 }
+function initHdhr(status) {
+  const input = document.getElementById("hdhr-url");
+  const meta = document.getElementById("hdhr-meta");
+  if (!input) return;
+  const hdhr = status && status.hdhr;
+  if (!hdhr || !hdhr.enabled) {
+    input.value = "(disabled)";
+    if (meta) meta.textContent = "Enable HDHomeRun in Options";
+    return;
+  }
+  input.value = hdhr.base_url || location.origin;
+  if (meta) {
+    const parts = [
+      `${hdhr.tuner_count} tuner${hdhr.tuner_count === 1 ? "" : "s"}`,
+      hdhr.device_id ? `ID ${hdhr.device_id}` : null,
+      hdhr.discovery_running ? "discovery on" : "manual IP only",
+      hdhr.xmltv_url ? "XMLTV ready" : "set Channels DVR URL for EPG",
+    ].filter(Boolean);
+    meta.textContent = parts.join(" · ");
+  }
+  const xmltvInput = document.getElementById("xmltv-url");
+  if (xmltvInput) {
+    xmltvInput.value = hdhr.xmltv_url || `${location.origin}/xmltv.xml`;
+  }
+}
 document.getElementById("copy-m3u").addEventListener("click", () => {
   const input = document.getElementById("m3u-url");
   navigator.clipboard.writeText(input.value).then(() => toast("M3U URL copied"));
+});
+document.getElementById("copy-hdhr").addEventListener("click", () => {
+  const input = document.getElementById("hdhr-url");
+  if (!input.value || input.value.startsWith("(")) {
+    toast("HDHomeRun is disabled", true);
+    return;
+  }
+  navigator.clipboard.writeText(input.value).then(() => toast("HDHomeRun URL copied"));
+});
+document.getElementById("copy-xmltv").addEventListener("click", () => {
+  const input = document.getElementById("xmltv-url");
+  navigator.clipboard.writeText(input.value).then(() => toast("XMLTV URL copied"));
 });
 
 // ============================ TUNERS ============================
@@ -236,7 +273,7 @@ function tunerForm(existing) {
     <div class="field"><label>Port <span class="hint">(blank = default)</span></label><input name="port" type="number" value="${t.control.port ?? ""}" /></div>
     <div class="field" data-remote><label>Pair port <span class="hint">(remote, default 6467)</span></label><input name="pair_port" type="number" value="${t.control.pair_port ?? ""}" /></div>
     <div class="field" data-agent><label>Auth token <span class="hint">(agent, optional)</span></label><input name="token" value="${escapeAttr(t.control.token || "")}" /></div>
-    <div class="field full"><label>Encoder stream URL <span class="hint">(HDMI encoder MPEG-TS)</span></label><input name="stream_endpoint" value="${escapeAttr(t.stream_endpoint)}" placeholder="http://192.168.1.41:8090/stream0" required /></div>
+    <div class="field full"><label>Encoder stream URL <span class="hint">(HDMI encoder MPEG-TS)</span></label><input name="stream_endpoint" value="${escapeAttr(t.stream_endpoint)}" placeholder="http://192.0.2.20:8090/stream0" required /></div>
     <div class="field checkbox full"><input type="checkbox" name="enabled" ${t.enabled ? "checked" : ""} /><label>Enabled</label></div>
     <div class="form-actions full"><button type="button" class="btn btn-ghost" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>`;
   const typeSel = form.querySelector('[name="type"]');
@@ -494,6 +531,15 @@ const OPTION_FIELDS = [
   ["stop_on_release", "Stop app on release", "bool", null, "Send HOME when the stream ends"],
   ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send HOME on release"],
   ["retry_on_other_tuner", "Retry on another tuner", "bool", null, "Try another eligible tuner if a tune fails"],
+  ["hdhr_enabled", "HDHomeRun emulation", "bool", null, "Appear as an HDHomeRun tuner for Channels DVR (enables Tuner Sharing)"],
+  ["hdhr_friendly_name", "HDHomeRun name", "text", null, "Friendly name shown in Channels / Plex source list"],
+  ["hdhr_device_id", "HDHomeRun DeviceID", "text", null, "Stable 8-char hex ID (persisted; do not change lightly)"],
+  ["hdhr_port", "HDHomeRun port (optional)", "number", null, "Leave blank to use the main APITuner port"],
+  ["hdhr_ssdp_enabled", "SSDP discovery", "bool", null, "Advertise via SSDP/UPnP multicast (needs host networking in Docker)"],
+  ["hdhr_udp_discovery_enabled", "UDP 65001 discovery", "bool", null, "SiliconDust broadcast discovery (needs host networking in Docker)"],
+  ["channels_dvr_url", "Channels DVR URL", "text", null, "LAN base URL for guide import, e.g. http://192.0.2.30:8089"],
+  ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as schedule source (e.g. M3U-YouTubeTV)"],
+  ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 259200 = 3 days)"],
 ];
 async function loadOptions() {
   const form = document.getElementById("options-form");
@@ -509,8 +555,12 @@ async function loadOptions() {
       const f = el(`<div class="field"><label>${label}</label><select name="${key}"></select>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`);
       choices.forEach((ch) => { const o = el(`<option value="${ch}">${ch}</option>`); if (opts[key] === ch) o.selected = true; f.querySelector("select").appendChild(o); });
       form.appendChild(f);
+    } else if (type === "text") {
+      const val = opts[key] == null ? "" : opts[key];
+      form.appendChild(el(`<div class="field"><label>${label}</label><input type="text" name="${key}" value="${escapeAttr(val)}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
     } else {
-      form.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${opts[key]}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
+      const val = opts[key] == null ? "" : opts[key];
+      form.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${val}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
     }
   }
 }
@@ -521,11 +571,17 @@ document.getElementById("save-options").addEventListener("click", async () => {
     const input = form.querySelector(`[name="${key}"]`);
     if (!input) continue;
     if (type === "bool") payload[key] = input.checked;
-    else if (type === "number") payload[key] = Number(input.value);
-    else payload[key] = input.value;
+    else if (type === "number") {
+      const raw = String(input.value ?? "").trim();
+      payload[key] = raw === "" ? null : Number(raw);
+    } else payload[key] = input.value;
   }
-  try { await api.put("/api/options", payload); toast("Options saved"); }
-  catch (e) { toast(e.message, true); }
+  try {
+    await api.put("/api/options", payload);
+    toast("Options saved (restart required for discovery changes)");
+    const status = await api.get("/api/status");
+    initHdhr(status);
+  } catch (e) { toast(e.message, true); }
 });
 
 // ============================ STATUS ============================
@@ -546,10 +602,14 @@ async function renderStatus() {
   const free = data.tuners.length - active;
   const errors = data.tuners.filter((t) => t.last_error).length;
 
+  const hdhrBits = data.hdhr && data.hdhr.enabled
+    ? ` · HDHR ${data.hdhr.tuner_count} tuner${data.hdhr.tuner_count === 1 ? "" : "s"}`
+    : "";
   document.getElementById("status-meta").textContent =
-    `v${data.version} · ${data.options.stream_mode} stream mode · updates every 3s`;
+    `v${data.version} · ${data.options.stream_mode} stream mode${hdhrBits} · updates every 3s`;
 
   document.getElementById("app-version").textContent = `v${data.version}`;
+  initHdhr(data);
 
   stats.innerHTML = `
     <div class="stat-card"><div class="stat-label">Tuners</div><div class="stat-value">${data.tuners.length}</div></div>
@@ -606,6 +666,7 @@ loadTuners();
 api.get("/api/status").then((d) => {
   const elVer = document.getElementById("app-version");
   if (elVer) elVer.textContent = `v${d.version}`;
+  initHdhr(d);
   if (d.agent_apk_url) {
     document.querySelectorAll(".agent-apk-link").forEach((a) => {
       a.href = d.agent_apk_url;

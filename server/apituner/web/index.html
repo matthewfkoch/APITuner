@@ -42,7 +42,22 @@
       </nav>
 
       <div class="sidebar-footer">
-        <label class="sidebar-label" for="m3u-url">M3U source URL</label>
+        <label class="sidebar-label" for="hdhr-url">HDHomeRun device URL</label>
+        <div class="m3u-compact">
+          <input id="hdhr-url" type="text" readonly />
+          <button id="copy-hdhr" class="btn btn-icon" title="Copy HDHomeRun URL" aria-label="Copy HDHomeRun URL">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+        <div id="hdhr-meta" class="sidebar-version" style="margin-top:6px"></div>
+        <label class="sidebar-label" for="xmltv-url" style="margin-top:12px">XMLTV (Custom URL) EPG</label>
+        <div class="m3u-compact">
+          <input id="xmltv-url" type="text" readonly />
+          <button id="copy-xmltv" class="btn btn-icon" title="Copy XMLTV URL" aria-label="Copy XMLTV URL">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+        <label class="sidebar-label" for="m3u-url" style="margin-top:12px">M3U source URL</label>
         <div class="m3u-compact">
           <input id="m3u-url" type="text" readonly />
           <button id="copy-m3u" class="btn btn-icon" title="Copy M3U URL" aria-label="Copy M3U URL">

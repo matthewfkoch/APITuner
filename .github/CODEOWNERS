@@ -1,0 +1,3 @@
+# Default owner for all paths — auto-requested as reviewer on PRs.
+# Enforce with branch protection: require review from Code Owners.
+* @matthewfkoch

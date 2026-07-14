@@ -7,6 +7,7 @@ services:
     container_name: apituner
     # Bridge networking with an explicit port mapping (default). Devices and
     # HDMI encoders are reached by their LAN IPs, so tuning + streaming work.
+    # Manual HDHomeRun / M3U setup also works in bridge mode.
     ports:
       - "6592:6592"
     volumes:
@@ -18,11 +19,13 @@ services:
       - APITUNER_LOG_LEVEL=INFO
     restart: unless-stopped
 
-    # --- mDNS auto-discovery ---
-    # The /api/discover feature needs multicast, which does NOT cross Docker's
-    # bridge network. To use Discover, comment out the "ports:" block above and
+    # --- mDNS + HDHomeRun auto-discovery ---
+    # /api/discover (mDNS) and HDHomeRun SSDP / SiliconDust UDP (65001)
+    # need multicast, which does NOT cross Docker's bridge network.
+    # To enable auto-discovery, comment out the "ports:" block above and
     # enable host networking instead:
     #
     #   network_mode: host
     #
-    # You can always add tuners manually by IP without host networking.
+    # You can always add tuners by IP and add APITuner as an HDHomeRun
+    # source by IP (http://<host>:6592) without host networking.

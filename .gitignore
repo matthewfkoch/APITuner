@@ -11,6 +11,9 @@ env/
 server/data/
 data/
 
+# Local probe / scratch scripts (often contain LAN IPs)
+scripts/
+
 # Android / Gradle
 agent/.gradle/
 agent/build/

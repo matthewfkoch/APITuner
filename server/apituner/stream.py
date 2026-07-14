@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 import httpx
 from fastapi import Request
@@ -15,6 +15,7 @@ from .tuner_manager import Lease, TunerManager
 logger = logging.getLogger(__name__)
 
 _CHUNK = 64 * 1024
+HDHR_SERVER_HEADER = "HDHomeRun/1.0"
 
 
 async def _delayed_release(manager: TunerManager, lease: Lease, grace: float) -> None:
@@ -61,4 +62,24 @@ async def open_stream(request: Request, manager: TunerManager, channel) -> Respo
     return StreamingResponse(
         _proxy_iter(request, manager, lease),
         media_type="video/mp2t",
+    )
+
+
+async def open_hdhr_stream(
+    request: Request,
+    manager: TunerManager,
+    channel,
+    *,
+    tuner_index: Optional[int] = None,
+) -> Response:
+    """HDHomeRun tune + always-proxy MPEG-TS (never redirect).
+
+    Redirect mode is skipped for HDHR routes so tuner lock lifecycle stays
+    tied to the HTTP connection Channels / Plex holds open.
+    """
+    lease = await manager.lease(channel, tuner_index=tuner_index)
+    return StreamingResponse(
+        _proxy_iter(request, manager, lease),
+        media_type="video/mp2t",
+        headers={"Server": HDHR_SERVER_HEADER},
     )

@@ -22,6 +22,10 @@ Grant only the permissions you need:
 - **Notification Access** — optional, improves playback detection
 - **Accessibility** — optional, BACK/HOME/RECENTS keys only
 
-## Reporting issues
+## Reporting vulnerabilities
 
-Open a [GitHub issue](https://github.com/matthewfkoch/APITuner/issues) for security concerns. Do not commit `data/` (config, pairing certs) to the repository.
+Prefer [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability) on this repository when enabled (Settings → Code security → Private vulnerability reporting).
+
+Otherwise open a [GitHub issue](https://github.com/matthewfkoch/APITuner/issues) **without** sharing exploit details or private configs publicly.
+
+Do not commit `data/` (config, pairing certs), keystores, or agent tokens to the repository.

@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-13
+
+### Added
+- Multi-arch Docker images (`linux/amd64` and `linux/arm64`) for GHCR releases
+
 ## [0.1.4] - 2026-07-13
 
 ### Added
@@ -53,7 +58,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.5
 [0.1.4]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.4
 [0.1.3]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.3
 [0.1.2]: https://github.com/matthewfkoch/APITuner/compare/v0.1.1...v0.1.2

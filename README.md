@@ -198,7 +198,7 @@ The dashboard and API on port **6592** are **not authenticated**. Do not expose 
 
 Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 
-1. **Publishes the server** to GitHub Container Registry: `ghcr.io/matthewfkoch/apituner:<version>` (set the GHCR package visibility to **Public** in package settings if needed)
+1. **Publishes the server** to GitHub Container Registry: `ghcr.io/matthewfkoch/apituner:<version>` (multi-arch: `linux/amd64` + `linux/arm64`; package visibility should be **Public**)
 2. **Builds the Agent APK** and attaches it to [APITuner-releases](https://github.com/matthewfkoch/APITuner-releases/releases) for public download
 
 To cut a release:

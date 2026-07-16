@@ -8,6 +8,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from .models import AppConfig, Channel
 from .channels import ChannelValidationError, validate_channel_numbers
 
@@ -26,6 +28,38 @@ _ADBTUNER_CHANNEL_FIELDS = (
     "compatibility_mode",
     "tvc_guide_stationid",
 )
+
+
+def _coerce_channel_number(value: Any) -> int | None:
+    """Best-effort int coercion for ADBTuner number/sort_order quirks."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_adbtuner_channel(item: dict[str, Any]) -> dict[str, Any]:
+    """Coerce common ADBTuner export quirks into APITuner's channel schema."""
+    out = dict(item)
+
+    number = _coerce_channel_number(out.get("number"))
+    if number is None:
+        number = _coerce_channel_number(out.get("sort_order"))
+    if number is not None:
+        out["number"] = number
+
+    sid = out.get("tvc_guide_stationid")
+    if sid is None or sid == "":
+        out["tvc_guide_stationid"] = None
+    else:
+        out["tvc_guide_stationid"] = str(sid)
+
+    if out.get("alternate_package_name") == "":
+        out["alternate_package_name"] = None
+
+    return out
 
 
 def _default_data_dir() -> Path:
@@ -94,7 +128,28 @@ class ConfigStore:
     def import_channels(self, data: list[dict[str, Any]], *, replace: bool = False) -> int:
         """Import an ADBTuner-style channel list. Returns the number imported."""
         with self._lock:
-            imported = [Channel.model_validate(item) for item in data]
+            imported: list[Channel] = []
+            for index, item in enumerate(data):
+                if not isinstance(item, dict):
+                    raise ChannelValidationError(
+                        f"Channel at index {index} must be an object"
+                    )
+                normalized = normalize_adbtuner_channel(item)
+                label = normalized.get("name") or f"index {index}"
+                if normalized.get("number") in (None, ""):
+                    raise ChannelValidationError(
+                        f"Invalid channel '{label}': missing channel number "
+                        "(set number, or include sort_order so it can be filled in)"
+                    )
+                try:
+                    imported.append(Channel.model_validate(normalized))
+                except ValidationError as exc:
+                    msgs = "; ".join(
+                        error.get("msg", "invalid") for error in exc.errors()[:3]
+                    )
+                    raise ChannelValidationError(
+                        f"Invalid channel '{label}': {msgs}"
+                    ) from exc
             validate_channel_numbers(imported)
             if replace:
                 self._config.channels = imported

@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-15
+
+### Fixed
+- Discover → Add treated the device as an existing tuner (PUT without id) and flashed "Tuner not found"
+- ADBTuner import: clearer 400 errors for null channel numbers and duplicate numbers (with channel names), plus quirk normalization (`sort_order`, string numbers, empty alternate package, numeric station IDs)
+- Agent crash on Fire OS 7 / Android 9 (API 28): Usage Access check used `unsafeCheckOpNoThrow` (API 29+)
+
+### Changed
+- Docker image includes `curl` for in-container Agent reachability diagnostics
+- README troubleshooting for Synology/bridge Agent unreachable, import failures, and Fire TV limits
+- Agent UI is easier to navigate with a D-pad remote (focus rings, larger full-width buttons, token field no longer steals focus)
+
 ## [0.1.5] - 2026-07-13
 
 ### Added
@@ -58,7 +70,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.6
 [0.1.5]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.5
 [0.1.4]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.4
 [0.1.3]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.3

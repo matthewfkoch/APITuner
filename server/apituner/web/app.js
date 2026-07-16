@@ -10,11 +10,23 @@ const api = {
 function jsonOpts(method, body) {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) };
 }
+function formatDetail(detail) {
+  if (detail == null) return null;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((e) => {
+      if (!e || typeof e !== "object") return String(e);
+      const loc = Array.isArray(e.loc) ? e.loc.filter((x) => x !== "body").join(".") : "";
+      return loc ? `${loc}: ${e.msg || "invalid"}` : (e.msg || JSON.stringify(e));
+    }).join("; ");
+  }
+  return String(detail);
+}
 async function handle(resp) {
   const text = await resp.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!resp.ok) throw new Error((data && data.detail) || resp.statusText || "Request failed");
+  if (!resp.ok) throw new Error(formatDetail(data && data.detail) || resp.statusText || "Request failed");
   return data;
 }
 
@@ -371,12 +383,13 @@ function tunerForm(existing) {
       },
     };
     try {
-      if (existing) await api.put(`/api/tuners/${existing.id}`, { id: existing.id, ...payload });
+      // Discover-prefilled forms pass a seed object without an id — always create those.
+      if (existing && existing.id) await api.put(`/api/tuners/${existing.id}`, { id: existing.id, ...payload });
       else await api.post("/api/tuners", payload);
       toast("Tuner saved"); closeModal(); loadTuners();
     } catch (err) { toast(err.message, true); }
   });
-  openModal(existing ? "Edit tuner" : "Add tuner", form);
+  openModal(existing && existing.id ? "Edit tuner" : "Add tuner", form);
 }
 document.getElementById("add-tuner-btn").addEventListener("click", () => tunerForm(null));
 
@@ -572,7 +585,7 @@ document.getElementById("export-btn").addEventListener("click", async () => {
 });
 document.getElementById("import-btn").addEventListener("click", () => {
   const node = el(`<div>
-    <p class="muted">Paste an ADBTuner (or APITuner) channel-list JSON array.</p>
+    <p class="muted">Paste an ADBTuner (or APITuner) channel-list JSON array. Channel numbers must be unique; null numbers are filled from <code>sort_order</code> when present.</p>
     <div class="field full"><textarea id="import-json" rows="10" placeholder="[ { &quot;number&quot;: 9000, ... } ]"></textarea></div>
     <div class="field checkbox"><input type="checkbox" id="import-replace" /><label>Replace all existing channels</label></div>
     <div class="form-actions"><button class="btn btn-ghost" data-cancel>Cancel</button><button class="btn btn-primary" data-import>Import</button></div>
@@ -582,6 +595,10 @@ document.getElementById("import-btn").addEventListener("click", () => {
     let parsed;
     try { parsed = JSON.parse(node.querySelector("#import-json").value); }
     catch { toast("Invalid JSON", true); return; }
+    // Accept a bare array or an object wrapping { channels: [...] }.
+    if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.channels)) {
+      parsed = parsed.channels;
+    }
     try {
       const r = await api.post("/api/import", { channels: parsed, replace: node.querySelector("#import-replace").checked });
       toast(`Imported ${r.imported} channels`); closeModal(); loadChannels();

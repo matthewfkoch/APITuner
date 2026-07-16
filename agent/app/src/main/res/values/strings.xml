@@ -10,7 +10,10 @@
     <string name="token_title">API token</string>
     <string name="token_hint">Optional. If set, APITuner must send this value as X-Auth-Token.</string>
     <string name="token_placeholder">Leave blank for no auth</string>
+    <string name="edit_token">Edit API token</string>
     <string name="save_token">Save token</string>
+    <string name="grant_needed">Grant permission</string>
+    <string name="grant_review">Open settings</string>
     <string name="updates_title">Updates</string>
     <string name="updates_hint">Checks GitHub Releases for a newer Agent APK. Install still requires one confirmation on this TV.</string>
     <string name="check_for_updates">Check for updates</string>

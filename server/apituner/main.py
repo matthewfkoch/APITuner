@@ -405,8 +405,14 @@ async def export_channels(request: Request) -> JSONResponse:
 async def import_channels(request: Request) -> dict:
     body = await request.json()
     data = body.get("channels", body) if isinstance(body, dict) else body
+    # Nested wrap: { "channels": { "channels": [...] } } from a paste + UI envelope.
+    if isinstance(data, dict) and isinstance(data.get("channels"), list):
+        data = data["channels"]
     if not isinstance(data, list):
-        raise HTTPException(status_code=400, detail="Expected a channel list")
+        raise HTTPException(
+            status_code=400,
+            detail="Expected a channel list (JSON array, or an object with a channels array)",
+        )
     replace = bool(body.get("replace")) if isinstance(body, dict) else False
     try:
         count = _store(request).import_channels(data, replace=replace)

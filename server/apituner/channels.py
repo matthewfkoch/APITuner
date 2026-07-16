@@ -23,7 +23,14 @@ def find_duplicate_numbers(channels: list[Channel]) -> list[int]:
 def validate_channel_numbers(channels: list[Channel]) -> None:
     """Raise ChannelValidationError if any channel number is duplicated."""
     dups = find_duplicate_numbers(channels)
-    if dups:
-        raise ChannelValidationError(
-            f"Duplicate channel numbers: {', '.join(str(n) for n in dups)}"
-        )
+    if not dups:
+        return
+    details: list[str] = []
+    for num in dups:
+        names = [ch.name for ch in channels if ch.number == num]
+        joined = " / ".join(names) if names else "?"
+        details.append(f"{num} ({joined})")
+    raise ChannelValidationError(
+        f"Duplicate channel numbers: {', '.join(details)}. "
+        "Give each channel a unique number before importing."
+    )

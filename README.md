@@ -104,12 +104,15 @@ See `config.example.json` for a sample configuration.
 
 Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is compatible). Each channel has:
 
+- `number` — must be unique across the list (fix duplicate numbers in the export before import)
 - `package_name` (+ optional `alternate_package_name`)
 - `url` — deep link (intent data), e.g. `https://tv.youtube.com/watch/...`
 - `action` (default `android.intent.action.VIEW`)
 - `component` — explicit activity (used by the Agent backend; Android 12+)
 - `key_macro` — keys sent after launch to dismiss prompts (remote backend only)
 - `compatibility_mode`, `tvc_guide_stationid`
+
+ADBTuner exports sometimes have `"number": null`. APITuner fills that from `sort_order` when present; otherwise import returns a clear 400 error naming the channel instead of an internal server error.
 
 ## Connect to Channels DVR
 
@@ -184,11 +187,18 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Tune times out, TV shows "Open with" | `androidtv_remote` backend | Switch to `http_agent` and install the Agent APK |
 | Agent launch succeeds but app doesn't open | Missing "Display over other apps" | Grant overlay permission on the device |
 | Same-app channel switch times out | Usage Access not granted | Grant Usage Access; use latest server |
-| Discover finds nothing in Docker | Bridge network blocks mDNS | Use `network_mode: host` or add tuners manually |
+| Discover finds nothing in Docker | Bridge network blocks mDNS | Use `network_mode: host` or add tuners manually by IP |
+| Agent reachable from host, **Unreachable** from dashboard | Container cannot reach device LAN (common on Synology / some NAS bridges) | From the host: `curl http://DEVICE_IP:9092/api/health`. From the container: `docker exec apituner curl -v --connect-timeout 5 http://DEVICE_IP:9092/api/health`. If host works but container fails, try host networking, check the NAS firewall for **outbound** TCP 9092, or use a macvlan/host network so the container shares the LAN |
+| Discover shows device but Add fails / "Tuner not found" | Older UI bug treating Discover as an edit | Update to a build that posts new tuners from Discover; fill in the encoder stream URL before saving |
+| Import fails / Internal Server Error | Null `number` or duplicate channel numbers in ADBTuner JSON | Fix numbers in the export (or rely on `sort_order`); current builds return a named 400 error instead of 500 |
 | HDHomeRun not auto-detected | SSDP/UDP 65001 blocked on Docker bridge | Host networking, or add source URL `http://<host>:6592` manually |
 | HDHomeRun guide empty | XMLTV not configured | Set Channels DVR URL + XMLTV source device; use Custom URL `…/xmltv.xml` |
 | `androidtv_remote` playback never ready | Cast/mDNS unreachable from Docker | Use Agent backend, or host networking |
+| Agent crashes on open (Fire OS 7 / Android 9) | Older Agent used an API 29 AppOps call | Update to Agent **0.1.6+**. After reinstall, re-enable Accessibility if keys stop working |
+| Accessibility / keys lost after APK reinstall | Fire OS may clear the accessibility binding | Re-enable APITuner Agent under Accessibility (or via ADB `settings put secure enabled_accessibility_services`) |
 | No free tuner | All tuners locked | Wait for stream to end, or lower idle/stuck timeouts |
+
+**Note on host networking:** needed for mDNS Discover and HDHomeRun auto-discovery. Bridge mode is fine for day-to-day tuning if you add tuners **by IP** and add Channels sources by URL. Prefer bridge when you do not need multicast discovery.
 
 ## Security
 
@@ -204,8 +214,8 @@ Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 To cut a release:
 
 ```bash
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.6
+git push origin v0.1.6
 ```
 
 Bump `server/apituner/__init__.py` and the Agent `versionName`/`versionCode` first, move `[Unreleased]` notes in `CHANGELOG.md` into the new version section, then tag. Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.

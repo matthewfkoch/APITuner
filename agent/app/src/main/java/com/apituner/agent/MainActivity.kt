@@ -35,7 +35,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tokenInput: EditText
     private lateinit var autoUpdateButton: Button
     private lateinit var checkUpdateButton: Button
+    private lateinit var editTokenButton: Button
+    private lateinit var saveTokenButton: Button
+    private lateinit var tokenEditor: LinearLayout
     private val permissionBadges = mutableMapOf<String, TextView>()
+    private val permissionButtons = mutableMapOf<String, Button>()
+    private val permissionGranted = mutableMapOf<String, () -> Boolean>()
+    private val focusables = mutableListOf<View>()
     private val updateExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,26 +50,32 @@ class MainActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(28), dp(24), dp(32))
+            setPadding(dp(32), dp(28), dp(32), dp(40))
             setBackgroundColor(color(R.color.bg))
+            descendantFocusability = LinearLayout.FOCUS_AFTER_DESCENDANTS
         }
 
         root.addView(buildBrandHeader())
         root.addView(spacer(20))
         root.addView(buildConnectionCard())
         root.addView(spacer(16))
-        root.addView(buildUpdatesCard())
-        root.addView(spacer(16))
         root.addView(buildPermissionsCard())
+        root.addView(spacer(16))
+        root.addView(buildUpdatesCard())
         root.addView(spacer(16))
         root.addView(buildTokenCard())
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
+            isFocusable = false
+            isFocusableInTouchMode = false
+            descendantFocusability = ScrollView.FOCUS_AFTER_DESCENDANTS
             setBackgroundColor(color(R.color.bg))
             addView(root)
         }
         setContentView(scroll)
+        wireFocusChain()
+        scroll.post { focusFirstAction() }
     }
 
     override fun onDestroy() {
@@ -140,17 +152,12 @@ class MainActivity : AppCompatActivity() {
             val next = !AgentPrefs.isAutoUpdateEnabled(this)
             AgentPrefs.setAutoUpdateEnabled(this, next)
             autoUpdateButton.text = autoUpdateLabel()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) }
-        }
+        }.also { focusables += it }
         card.addView(autoUpdateButton)
 
         checkUpdateButton = primaryButton(getString(R.string.check_for_updates)) {
             runManualUpdateCheck()
-        }
+        }.also { focusables += it }
         card.addView(checkUpdateButton)
         return card
     }
@@ -259,25 +266,53 @@ class MainActivity : AppCompatActivity() {
         card.addView(cardTitle(getString(R.string.token_title)))
         card.addView(cardHint(getString(R.string.token_hint)))
 
+        // Keep the text field out of the D-pad path until the user chooses Edit.
+        editTokenButton = secondaryButton(getString(R.string.edit_token)) {
+            showTokenEditor()
+        }.also { focusables += it }
+        card.addView(editTokenButton)
+
+        tokenEditor = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
         tokenInput = EditText(this).apply {
             hint = getString(R.string.token_placeholder)
             setText(AgentPrefs.getToken(this@MainActivity))
             setTextColor(color(R.color.text))
             setHintTextColor(color(R.color.text_muted))
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(16), dp(14), dp(16), dp(14))
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_input)
-            textSize = 14f
+            textSize = 16f
+            // TV remotes: don't steal focus until Edit is pressed.
+            isFocusable = false
+            isFocusableInTouchMode = false
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) }
+            ).apply { topMargin = dp(4) }
         }
-        card.addView(tokenInput)
-        card.addView(primaryButton(getString(R.string.save_token)) {
+        tokenEditor.addView(tokenInput)
+        saveTokenButton = primaryButton(getString(R.string.save_token)) {
             AgentPrefs.setToken(this, tokenInput.text.toString().trim())
+            tokenEditor.visibility = View.GONE
+            editTokenButton.visibility = View.VISIBLE
+            tokenInput.isFocusable = false
+            tokenInput.isFocusableInTouchMode = false
             refreshStatus()
-        })
+            editTokenButton.requestFocus()
+        }
+        tokenEditor.addView(saveTokenButton)
+        card.addView(tokenEditor)
         return card
+    }
+
+    private fun showTokenEditor() {
+        editTokenButton.visibility = View.GONE
+        tokenEditor.visibility = View.VISIBLE
+        tokenInput.isFocusable = true
+        tokenInput.isFocusableInTouchMode = true
+        tokenInput.requestFocus()
     }
 
     private fun addPermission(
@@ -291,9 +326,11 @@ class MainActivity : AppCompatActivity() {
         granted: () -> Boolean,
         action: () -> Unit,
     ) {
+        permissionGranted[key] = granted
+
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(14), 0, dp(14))
+            setPadding(0, dp(12), 0, dp(12))
         }
 
         val head = LinearLayout(this).apply {
@@ -304,16 +341,16 @@ class MainActivity : AppCompatActivity() {
         val titleView = TextView(this).apply {
             text = title
             setTextColor(color(R.color.text))
-            textSize = 15f
+            textSize = 17f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         head.addView(titleView)
 
         val badge = TextView(this).apply {
-            textSize = 11f
+            textSize = 12f
             setTypeface(typeface, Typeface.BOLD)
-            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setPadding(dp(10), dp(5), dp(10), dp(5))
         }
         permissionBadges[key] = badge
         head.addView(badge)
@@ -322,11 +359,15 @@ class MainActivity : AppCompatActivity() {
         row.addView(TextView(this).apply {
             text = description
             setTextColor(color(R.color.text_secondary))
-            textSize = 13f
-            setPadding(0, dp(4), 0, dp(10))
+            textSize = 14f
+            setPadding(0, dp(6), 0, dp(10))
         })
 
-        row.addView(secondaryButton(getString(R.string.grant), action))
+        val button = secondaryButton(getString(R.string.grant_needed), action).also {
+            permissionButtons[key] = it
+            focusables += it
+        }
+        row.addView(button)
         card.addView(row)
         if (showDivider) card.addView(divider())
     }
@@ -351,6 +392,15 @@ class MainActivity : AppCompatActivity() {
         updateBadge("notification", PlaybackDetector(this).hasPermission())
         updateBadge("accessibility", KeyAccessibilityService.isEnabled(), optional = true)
         updateBadge("home", false, optional = true)
+
+        for ((key, button) in permissionButtons) {
+            val ok = permissionGranted[key]?.invoke() == true
+            button.text = if (ok) {
+                getString(R.string.grant_review)
+            } else {
+                getString(R.string.grant_needed)
+            }
+        }
     }
 
     private fun updateBadge(key: String, granted: Boolean, required: Boolean = false, optional: Boolean = false) {
@@ -382,20 +432,24 @@ class MainActivity : AppCompatActivity() {
     private fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_card)
-        setPadding(dp(18), dp(18), dp(18), dp(18))
+        setPadding(dp(20), dp(20), dp(20), dp(20))
+        // Cards themselves should not steal D-pad focus from buttons.
+        isFocusable = false
+        descendantFocusability = LinearLayout.FOCUS_AFTER_DESCENDANTS
     }
 
     private fun cardTitle(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(color(R.color.text))
-        textSize = 17f
+        textSize = 18f
         setTypeface(typeface, Typeface.BOLD)
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     private fun cardHint(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(color(R.color.text_secondary))
-        textSize = 13f
+        textSize = 14f
         setPadding(0, dp(6), 0, 0)
     }
 
@@ -403,12 +457,13 @@ class MainActivity : AppCompatActivity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(12), 0, 0)
+            isFocusable = false
         }
         row.addView(TextView(this).apply {
             text = label
             setTextColor(color(R.color.text_muted))
-            textSize = 13f
-            layoutParams = LinearLayout.LayoutParams(dp(110), LinearLayout.LayoutParams.WRAP_CONTENT)
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(dp(120), LinearLayout.LayoutParams.WRAP_CONTENT)
         })
         row.addView(valueView)
         return row
@@ -416,7 +471,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun monoValue(): TextView = TextView(this).apply {
         setTextColor(color(R.color.accent))
-        textSize = 13f
+        textSize = 14f
         typeface = Typeface.MONOSPACE
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -429,8 +484,12 @@ class MainActivity : AppCompatActivity() {
         isAllCaps = false
         setTextColor(color(R.color.accent_dark))
         setTypeface(typeface, Typeface.BOLD)
+        textSize = 16f
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
-        setPadding(dp(16), dp(12), dp(16), dp(12))
+        setPadding(dp(18), dp(16), dp(18), dp(16))
+        minHeight = dp(56)
+        isFocusable = true
+        isFocusableInTouchMode = false
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -444,15 +503,45 @@ class MainActivity : AppCompatActivity() {
         this.text = text
         isAllCaps = false
         setTextColor(color(R.color.text))
+        textSize = 16f
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_secondary)
-        setPadding(dp(14), dp(10), dp(14), dp(10))
+        setPadding(dp(18), dp(16), dp(18), dp(16))
+        minHeight = dp(56)
+        isFocusable = true
+        isFocusableInTouchMode = false
         layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        )
+        ).apply { topMargin = dp(8) }
         setOnClickListener { onClick() }
         stateListAnimator = null
         elevation = 0f
+    }
+
+    /** Keep D-pad up/down moving through action buttons in a predictable order. */
+    private fun wireFocusChain() {
+        for (view in focusables) {
+            if (view.id == View.NO_ID) view.id = View.generateViewId()
+        }
+        for (i in focusables.indices) {
+            val view = focusables[i]
+            if (i > 0) view.nextFocusUpId = focusables[i - 1].id
+            if (i < focusables.lastIndex) view.nextFocusDownId = focusables[i + 1].id
+        }
+    }
+
+    private fun focusFirstAction() {
+        // Prefer the first permission that still needs granting.
+        val order = listOf("overlay", "usage", "notification", "accessibility", "home")
+        for (key in order) {
+            val granted = permissionGranted[key]?.invoke() == true
+            val button = permissionButtons[key] ?: continue
+            if (!granted) {
+                button.requestFocus()
+                return
+            }
+        }
+        focusables.firstOrNull()?.requestFocus()
     }
 
     private fun divider(): View = View(this).apply {
@@ -461,6 +550,7 @@ class MainActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             dp(1),
         )
+        isFocusable = false
     }
 
     private fun spacer(heightDp: Int): View = View(this).apply {

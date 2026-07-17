@@ -49,12 +49,13 @@ const CAP_DEFS = {
 
 // ---- UI utilities ----
 function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
-function toast(msg, isErr) {
+function toast(msg, isErr, ms) {
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.className = "toast" + (isErr ? " err" : "");
   t.classList.remove("hidden");
-  setTimeout(() => t.classList.add("hidden"), 3200);
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => t.classList.add("hidden"), ms || (isErr ? 8000 : 3200));
 }
 function openModal(title, node) {
   document.getElementById("modal-title").textContent = title;
@@ -184,6 +185,7 @@ async function loadTuners() {
       </div>
       <div class="card-actions">
         <button class="btn btn-sm btn-secondary" data-act="health" title="Ping the device to verify the Agent APK or TV remote is reachable on the network">Recheck connection</button>
+        ${isAgent ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="One-time setup for Fire TV: grant overlay/usage/notification via network ADB. Day-to-day tuning stays on the Agent HTTP API.">Grant permissions (ADB)</button>` : ""}
         ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Download the latest Agent APK and open the Install dialog on the TV">Update Agent</button>` : ""}
         ${t.control.type === "androidtv_remote" ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
         <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
@@ -195,6 +197,7 @@ async function loadTuners() {
     const healthBadge = card.querySelector("[data-health]");
     const versionBadge = card.querySelector("[data-agent-version]");
     const updateBtn = card.querySelector('[data-act="update-agent"]');
+    const grantBtn = card.querySelector('[data-act="grant-perms"]');
     const setHealth = (online) => {
       healthBadge.className = `badge ${online ? "on" : "off"}`;
       healthBadge.textContent = online ? "Reachable" : "Unreachable";
@@ -258,6 +261,35 @@ async function loadTuners() {
       healthBtn.textContent = "Recheck connection";
     };
     healthBtn.addEventListener("click", runHealthCheck);
+    if (grantBtn) {
+      grantBtn.addEventListener("click", async () => {
+        const proceed = window.confirm(
+          "One-time Fire TV / Fire Stick setup via network ADB.\n\n" +
+            "Requires ADB debugging on the device (and an accepted RSA prompt). " +
+            "Appends Agent notification/accessibility bindings without removing other apps. " +
+            "Day-to-day tuning stays on the Agent HTTP API (no ADB).\n\nContinue?",
+        );
+        if (!proceed) return;
+        grantBtn.disabled = true;
+        grantBtn.textContent = "Granting…";
+        try {
+          const r = await api.post(`/api/tuners/${t.id}/grant-permissions`, {});
+          const tail = Array.isArray(r.messages) && r.messages.length
+            ? " — " + r.messages.slice(-3).join("; ")
+            : "";
+          if (r.success) {
+            toast((r.message || "Permissions granted") + tail, false, 6000);
+          } else {
+            toast((r.message || "Partial grant — check device ADB") + tail, true, 10000);
+          }
+          await runHealthCheck();
+        } catch (err) {
+          toast(err.message, true, 10000);
+        }
+        grantBtn.disabled = false;
+        grantBtn.textContent = "Grant permissions (ADB)";
+      });
+    }
     if (updateBtn) {
       updateBtn.addEventListener("click", async () => {
         updateBtn.disabled = true;

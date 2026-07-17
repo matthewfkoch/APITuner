@@ -1,11 +1,29 @@
 # Changelog
 
-All notable changes to APITuner are documented here. Version numbers match
-`server/apituner/__init__.py` and the Agent APK `versionName`.
+All notable changes to APITuner are documented here. Tagged releases keep
+`server/apituner/__init__.py` and the Agent APK `versionName` in sync; work under
+`[Unreleased]` may briefly advance the Agent ahead of the server.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
+
+## [0.1.7] - 2026-07-17
+
+### Added
+- Dashboard **Grant permissions (ADB)** for one-time Fire Stick / Fire TV Agent setup (overlay, usage, notification). Day-to-day tuning remains on the Agent HTTP API
+- Docker image includes `adb` for that Fire setup path
+
+### Fixed
+- Agent permission buttons on Android 14 Google TV / Chromecast: Settings intents were filtered out by package-visibility `resolveActivity` checks, so taps only showed a Toast. Buttons now open the matching Special app access / Accessibility / Home screens
+- ADB grant no longer overwrites other apps’ notification-listener / accessibility-service entries (append/merge instead)
+- Dashboard grant toast honors `success` / shows ADB detail; confirm dialog before running
+- Fire Agent: “Open settings” after a successful grant no longer re-opens the ADB help dialog
+- Agent `isDebugBuild` detection (debug APKs were misclassified as release)
+- Agent Default Home badge reflects whether the Agent holds the HOME role
+
+### Changed
+- README / agent / distribution / SECURITY docs cover the Fire Stick one-time network-ADB exception and Android 14 rationale
 
 ## [0.1.6] - 2026-07-15
 
@@ -70,7 +88,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.7
 [0.1.6]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.6
 [0.1.5]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.5
 [0.1.4]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.4

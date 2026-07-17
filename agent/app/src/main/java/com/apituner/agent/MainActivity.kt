@@ -1,8 +1,10 @@
 package com.apituner.agent
 
+import android.app.AlertDialog
+import android.app.role.RoleManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Typeface
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -22,6 +24,7 @@ import com.apituner.agent.control.KeyAccessibilityService
 import com.apituner.agent.control.PlaybackDetector
 import com.apituner.agent.util.AgentPrefs
 import com.apituner.agent.util.AgentVersion
+import com.apituner.agent.util.SettingsNavigator
 import com.apituner.agent.util.UpdateChecker
 import java.net.NetworkInterface
 import java.util.concurrent.Executors
@@ -43,6 +46,9 @@ class MainActivity : AppCompatActivity() {
     private val permissionGranted = mutableMapOf<String, () -> Boolean>()
     private val focusables = mutableListOf<View>()
     private val updateExecutor = Executors.newSingleThreadExecutor()
+    private val isFireTv: Boolean =
+        Build.MANUFACTURER.equals("Amazon", ignoreCase = true) ||
+            Build.MODEL.startsWith("AFT", ignoreCase = true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -212,7 +218,7 @@ class MainActivity : AppCompatActivity() {
             required = true,
             granted = { Settings.canDrawOverlays(this) },
         ) {
-            openOverlaySettings()
+            onPermissionAction("overlay") { SettingsNavigator.openOverlaySettings(this) }
         }
 
         addPermission(
@@ -222,7 +228,7 @@ class MainActivity : AppCompatActivity() {
             description = "Detects which app is in the foreground after a tune.",
             granted = { ForegroundAppDetector(this).hasPermission() },
         ) {
-            open(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            onPermissionAction("usage") { SettingsNavigator.openUsageAccessSettings(this) }
         }
 
         addPermission(
@@ -232,7 +238,9 @@ class MainActivity : AppCompatActivity() {
             description = "Reads media playback state to confirm a channel is playing.",
             granted = { PlaybackDetector(this).hasPermission() },
         ) {
-            open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            onPermissionAction("notification") {
+                SettingsNavigator.openNotificationListenerSettings(this)
+            }
         }
 
         addPermission(
@@ -243,7 +251,8 @@ class MainActivity : AppCompatActivity() {
             granted = { KeyAccessibilityService.isEnabled() },
             optional = true,
         ) {
-            open(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            // Accessibility settings screen does open on Fire TV.
+            SettingsNavigator.openAccessibilitySettings(this)
         }
 
         addPermission(
@@ -251,11 +260,11 @@ class MainActivity : AppCompatActivity() {
             key = "home",
             title = "Default Home app",
             description = "Optional. Set APITuner Agent as the launcher for kiosk setups.",
-            granted = { false },
+            granted = { isDefaultHomeApp() },
             optional = true,
             showDivider = false,
         ) {
-            open(Settings.ACTION_HOME_SETTINGS)
+            SettingsNavigator.openHomeSettings(this)
         }
 
         return card
@@ -391,16 +400,68 @@ class MainActivity : AppCompatActivity() {
         updateBadge("usage", ForegroundAppDetector(this).hasPermission())
         updateBadge("notification", PlaybackDetector(this).hasPermission())
         updateBadge("accessibility", KeyAccessibilityService.isEnabled(), optional = true)
-        updateBadge("home", false, optional = true)
+        updateBadge("home", isDefaultHomeApp(), optional = true)
 
         for ((key, button) in permissionButtons) {
             val ok = permissionGranted[key]?.invoke() == true
-            button.text = if (ok) {
-                getString(R.string.grant_review)
-            } else {
-                getString(R.string.grant_needed)
+            button.text = when {
+                ok -> getString(R.string.grant_review)
+                isFireTv && key in fireHiddenPermissions -> getString(R.string.grant_fire_setup)
+                else -> getString(R.string.grant_needed)
             }
         }
+    }
+
+    /** Fire OS does not expose these special-access toggles for sideloaded apps. */
+    private val fireHiddenPermissions = setOf("overlay", "usage", "notification")
+
+    private fun isDefaultHomeApp(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = getSystemService(RoleManager::class.java)
+            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
+                return roleManager.isRoleHeld(RoleManager.ROLE_HOME)
+            }
+        }
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolved = packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+        return resolved?.activityInfo?.packageName == packageName
+    }
+
+    private fun onPermissionAction(key: String, openSettings: () -> Unit) {
+        // Only show the ADB setup dialog when the permission is still missing.
+        // After a successful grant, "Open settings" should open Settings (or app details).
+        val granted = permissionGranted[key]?.invoke() == true
+        if (isFireTv && key in fireHiddenPermissions && !granted) {
+            showFirePermissionHelp(key)
+            return
+        }
+        openSettings()
+    }
+
+    private fun showFirePermissionHelp(key: String) {
+        val detail = when (key) {
+            "overlay" -> "Display over other apps"
+            "usage" -> "Usage Access"
+            "notification" -> "Notification Access"
+            else -> "This permission"
+        }
+        val message =
+            "$detail isn’t shown in Fire TV Settings for sideloaded apps " +
+                "(no Permissions page), and the Agent cannot grant it itself.\n\n" +
+                "One-time setup: on the APITuner dashboard open this tuner → " +
+                "Grant permissions (ADB). That uses network ADB only for setup; " +
+                "day-to-day tuning stays on the Agent HTTP API (no ADB).\n\n" +
+                "On the Fire TV first enable Developer Options → ADB debugging and " +
+                "accept the computer’s RSA prompt.\n\n" +
+                "Accessibility (HOME/BACK) can still be opened from the button below."
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fire_grant_title)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNeutralButton(R.string.open_accessibility) { _, _ ->
+                SettingsNavigator.openAccessibilitySettings(this)
+            }
+            .show()
     }
 
     private fun updateBadge(key: String, granted: Boolean, required: Boolean = false, optional: Boolean = false) {
@@ -558,27 +619,6 @@ class MainActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             dp(heightDp),
         )
-    }
-
-    private fun openOverlaySettings() {
-        try {
-            startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName"),
-                ),
-            )
-        } catch (_: Exception) {
-            open(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-        }
-    }
-
-    private fun open(action: String) {
-        try {
-            startActivity(Intent(action))
-        } catch (_: Exception) {
-            startActivity(Intent(Settings.ACTION_SETTINGS))
-        }
     }
 
     private fun localIp(): String {

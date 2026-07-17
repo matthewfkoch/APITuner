@@ -1,6 +1,6 @@
 # APITuner
 
-An **ADB-free** virtual tuner for [Channels DVR](https://getchannels.com/). APITuner controls networked Android TV / Google TV devices and relays each device's HDMI-encoder stream to Channels — preferably as an **HDHomeRun-compatible tuner** (Tuner Sharing / multi-TV sync), or as a Custom Channels (M3U) source.
+An **ADB-free day-to-day** virtual tuner for [Channels DVR](https://getchannels.com/). APITuner controls networked Android TV / Google TV devices and relays each device's HDMI-encoder stream to Channels — preferably as an **HDHomeRun-compatible tuner** (Tuner Sharing / multi-TV sync), or as a Custom Channels (M3U) source. (Fire Stick setup may use one-time network ADB for Agent permissions — see the [main README](https://github.com/matthewfkoch/APITuner/blob/main/README.md).)
 
 - **Source:** [matthewfkoch/APITuner](https://github.com/matthewfkoch/APITuner)
 - **Agent APK downloads:** [Releases](https://github.com/matthewfkoch/APITuner-releases/releases)
@@ -16,9 +16,12 @@ docker run -d \
   --name apituner \
   -p 6592:6592 \
   -v "$(pwd)/apituner-data:/data" \
+  -v "$HOME/.android:/root/.android" \
   --restart unless-stopped \
   ghcr.io/matthewfkoch/apituner:latest
 ```
+
+Mounting `~/.android` shares host ADB keys so dashboard **Grant permissions (ADB)** (Fire Stick setup) can reuse an already-accepted RSA prompt. Omit that volume if you do not use Fire devices.
 
 For HDHomeRun auto-discovery (SSDP / UDP 65001), prefer host networking:
 
@@ -27,6 +30,7 @@ docker run -d \
   --name apituner \
   --network host \
   -v "$(pwd)/apituner-data:/data" \
+  -v "$HOME/.android:/root/.android" \
   --restart unless-stopped \
   ghcr.io/matthewfkoch/apituner:latest
 ```
@@ -52,8 +56,9 @@ Install `apituner-agent-<version>.apk` on each Android TV / Google TV device.
 1. Open the app and grant:
    - **Display over other apps** — required
    - **Usage Access** — recommended
-   - **Notification Access** — optional
+   - **Notification Access** — optional (playback detection)
    - **Accessibility** — optional (BACK / HOME / RECENTS)
+   - On **Fire Stick / Fire TV**, if Settings has no Permissions page, use the dashboard **Grant permissions (ADB)** button once (network ADB). Tuning itself stays on the Agent HTTP API.
 2. In the APITuner dashboard, click **Add tuner**:
    - Backend: `http_agent`
    - Device IP and port: `9092`

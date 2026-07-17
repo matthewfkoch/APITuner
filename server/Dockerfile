@@ -7,12 +7,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# System deps for zeroconf/pychromecast networking are already in slim.
-# curl is included so operators can diagnose Agent reachability from inside
-# the container (e.g. docker exec apituner curl http://DEVICE_IP:9092/api/health).
+# curl: diagnose Agent reachability from inside the container.
+# adb: one-time Fire TV Agent permission grant (see README — day-to-day tuning is ADB-free).
 COPY requirements.txt .
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl adb \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 

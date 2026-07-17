@@ -1,8 +1,8 @@
 """HTTP Agent backend: drives the DisplayLauncher-derived APITuner Agent APK.
 
-Secondary backend for devices without the Android TV Remote Service (e.g. Fire
-TV) and for app list/install features. All capabilities are ADB-free and rely
-on permissions the user grants through the Agent's on-device settings.
+Recommended for Google TV / YouTube TV / Fire TV. Day-to-day control is ADB-free
+(Agent HTTP API). Permissions are normally granted in the Agent Settings UI; on
+Fire OS, overlay/usage/notification may require a one-time dashboard ADB grant.
 """
 
 from __future__ import annotations

@@ -1,11 +1,13 @@
 # APITuner
 
-An **ADB-free** virtual tuner for [Channels DVR](https://getchannels.com/), in the spirit of ADBTuner. APITuner controls networked Android TV / Google TV devices through pluggable, ADB-free control backends and relays each device's paired HDMI-encoder stream to Channels — as an **HDHomeRun-compatible tuner** (recommended, for Tuner Sharing / multi-TV sync) or as a Custom Channels (M3U) source.
+An **ADB-free day-to-day** virtual tuner for [Channels DVR](https://getchannels.com/), in the spirit of ADBTuner. APITuner controls networked Android TV / Google TV devices through pluggable control backends and relays each device's paired HDMI-encoder stream to Channels — as an **HDHomeRun-compatible tuner** (recommended, for Tuner Sharing / multi-TV sync) or as a Custom Channels (M3U) source.
 
-- **No ADB. No root. No developer mode.**
+- **Day-to-day tuning uses the Agent HTTP API — not ADB.** That is the point of APITuner vs ADBTuner: **Android 14 broke reliable wired ADB** on modern Google TV / Android TV devices, so APITuner moved control off ADB entirely for normal operation.
 - **Default backend:** the bundled **APITuner Agent** APK (derived from [DisplayLauncher](https://github.com/mouldybread/DisplayLauncher)) — package-pinned deep links that work reliably with YouTube TV and other streaming apps.
 - **Alternate backend:** the Android TV Remote protocol v2 via [`androidtvremote2`](https://github.com/tronikos/androidtvremote2), with optional [`pychromecast`](https://github.com/home-assistant-libs/pychromecast) for playback detection. Simpler setup (pair once, no APK) but **cannot pin the target app** on deep links, which often triggers Android's "Open with" chooser.
 - Runs in Docker. Web dashboard on port **6592**.
+
+> **Fire Stick / Fire TV exception (setup only):** Fire OS does not expose a Permissions page for sideloaded apps, so overlay / usage / notification access cannot be toggled in Settings. APITuner can grant those **once** over **network ADB** from the dashboard (**Grant permissions (ADB)**). Fire Sticks run older Android builds and are **not** impacted by the Android 14 ADB regressions that broke ADBTuner on modern TVs. After that one-time grant, tuning still goes through the Agent HTTP API — ADB is not used per tune.
 
 > APITuner still requires an **HDMI encoder** per device (like ADBTuner). Streaming apps are DRM-protected, so a device cannot screen-capture itself; the encoder captures the device's HDMI output and serves it as MPEG-TS.
 
@@ -43,12 +45,39 @@ Use `androidtv_remote` only when you cannot install the Agent APK.
 ### Agent setup (per device)
 
 1. Install the APK from [GitHub Releases](https://github.com/matthewfkoch/APITuner-releases/releases) (or build from `agent/`).
-2. Open the app and grant:
-   - **Display over other apps** — **required** (allows background app launches)
-   - **Usage Access** — **recommended** (foreground-app tune readiness)
-   - **Notification Access** — optional (playback-state detection)
-   - **Accessibility** — optional (BACK/HOME/RECENTS keys)
-3. In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and the HDMI encoder stream URL.
+2. Open the app and grant permissions:
+
+#### Google TV / Android TV 10+
+
+Use the Agent’s **Open settings** buttons (or system Settings):
+
+- **Display over other apps** — **required** (allows background app launches)
+- **Usage Access** — **recommended** (foreground-app tune readiness)
+- **Notification Access** — optional (playback-state detection)
+- **Accessibility** — optional (BACK/HOME/RECENTS keys)
+
+No ADB is required.
+
+#### Fire Stick / Fire TV (one-time network ADB)
+
+Fire OS typically **does not show a Permissions page** for sideloaded apps, so the overlay / usage / notification toggles cannot be opened from the Agent. That is separate from day-to-day control:
+
+| | ADBTuner (why people left) | APITuner |
+| --- | --- | --- |
+| Modern Google TV (Android 14+) | Wired ADB often broken / unreliable | **No ADB for tuning** — Agent HTTP API |
+| Fire Stick (older Fire OS) | ADB still usually works | **One-time network ADB** only to grant Agent permissions; **tuning is still Agent HTTP** |
+
+**Setup:**
+
+1. On the Fire TV: **Settings → My Fire TV → Developer Options** → enable **ADB debugging** (and Apps from Unknown Sources if needed).
+2. From a computer on the LAN, accept the **Allow USB debugging?** prompt the first time APITuner connects (`adb connect DEVICE_IP:5555`).
+3. In the APITuner dashboard, open the Fire Stick tuner card → **Grant permissions (ADB)**.
+4. Optionally open **Accessibility** from the Agent app if you want HOME/BACK keys (Fire may still ask for an on-device confirm).
+5. After grants succeed, you can leave ADB debugging on or turn it off — **Channels tunes do not use ADB**.
+
+The Docker image includes `adb` so the grant button works from the container when the device is reachable on the LAN. Local `docker-compose.yml` mounts `~/.android` so host “Always allow” ADB keys are reused; otherwise accept the RSA prompt that appears for the container’s key.
+
+3. In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and the HDMI encoder stream URL (do this before or after the Fire grant step above).
 
 ---
 
@@ -62,9 +91,12 @@ docker run -d \
   --name apituner \
   -p 6592:6592 \
   -v "$(pwd)/apituner-data:/data" \
+  -v "$HOME/.android:/root/.android" \
   --restart unless-stopped \
   ghcr.io/matthewfkoch/apituner:latest
 ```
+
+The `~/.android` mount is optional but recommended if you use dashboard **Grant permissions (ADB)** for Fire Stick setup (shares host ADB keys with the container).
 
 ### Build locally
 
@@ -191,11 +223,14 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Agent reachable from host, **Unreachable** from dashboard | Container cannot reach device LAN (common on Synology / some NAS bridges) | From the host: `curl http://DEVICE_IP:9092/api/health`. From the container: `docker exec apituner curl -v --connect-timeout 5 http://DEVICE_IP:9092/api/health`. If host works but container fails, try host networking, check the NAS firewall for **outbound** TCP 9092, or use a macvlan/host network so the container shares the LAN |
 | Discover shows device but Add fails / "Tuner not found" | Older UI bug treating Discover as an edit | Update to a build that posts new tuners from Discover; fill in the encoder stream URL before saving |
 | Import fails / Internal Server Error | Null `number` or duplicate channel numbers in ADBTuner JSON | Fix numbers in the export (or rely on `sort_order`); current builds return a named 400 error instead of 500 |
+| Fire TV Agent has no Permissions page / tune times out on Fire | Fire OS hides overlay/usage/notification toggles for sideloaded apps | One-time: enable Fire **ADB debugging**, then dashboard → tuner → **Grant permissions (ADB)**. Day-to-day tuning stays on the Agent (no ADB). Fire Sticks are not affected by Android 14’s wired-ADB breakage |
+| Grant permissions (ADB) → unauthorized / unreachable | Container has different ADB keys than the host, or TCP **5555** blocked | Mount `$HOME/.android` into the container (see `docker-compose.yml` / `docker run` above); accept **Allow USB debugging** on the TV; ensure the container can reach `DEVICE_IP:5555` |
+| Grant reports success but Agent badges stay red | Agent still restarting, or capability refresh raced | Wait a few seconds → **Recheck connection**; confirm overlay/usage with the Agent UI |
+| Accessibility / keys lost after APK reinstall | Fire OS may clear the accessibility binding | Re-run **Grant permissions (ADB)** or enable APITuner Agent under Settings → Accessibility |
+| Agent crashes on open (Fire OS 7 / Android 9) | Older Agent used an API 29 AppOps call | Update to Agent **0.1.6+**. After reinstall, re-grant permissions if needed |
 | HDHomeRun not auto-detected | SSDP/UDP 65001 blocked on Docker bridge | Host networking, or add source URL `http://<host>:6592` manually |
 | HDHomeRun guide empty | XMLTV not configured | Set Channels DVR URL + XMLTV source device; use Custom URL `…/xmltv.xml` |
 | `androidtv_remote` playback never ready | Cast/mDNS unreachable from Docker | Use Agent backend, or host networking |
-| Agent crashes on open (Fire OS 7 / Android 9) | Older Agent used an API 29 AppOps call | Update to Agent **0.1.6+**. After reinstall, re-enable Accessibility if keys stop working |
-| Accessibility / keys lost after APK reinstall | Fire OS may clear the accessibility binding | Re-enable APITuner Agent under Accessibility (or via ADB `settings put secure enabled_accessibility_services`) |
 | No free tuner | All tuners locked | Wait for stream to end, or lower idle/stuck timeouts |
 
 **Note on host networking:** needed for mDNS Discover and HDHomeRun auto-discovery. Bridge mode is fine for day-to-day tuning if you add tuners **by IP** and add Channels sources by URL. Prefer bridge when you do not need multicast discovery.
@@ -214,8 +249,8 @@ Tagged releases (`v*`) trigger `.github/workflows/release.yml`, which:
 To cut a release:
 
 ```bash
-git tag v0.1.6
-git push origin v0.1.6
+git tag v0.1.7
+git push origin v0.1.7
 ```
 
 Bump `server/apituner/__init__.py` and the Agent `versionName`/`versionCode` first, move `[Unreleased]` notes in `CHANGELOG.md` into the new version section, then tag. Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.

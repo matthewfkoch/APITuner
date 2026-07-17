@@ -6,7 +6,7 @@
     <string name="connection_title">Control server</string>
     <string name="connection_hint">Add this device in the APITuner dashboard using the http_agent backend. After the first launch, the control server auto-starts on reboot.</string>
     <string name="permissions_title">Permissions</string>
-    <string name="permissions_hint">Grant these on the device so APITuner can launch apps and detect playback.</string>
+    <string name="permissions_hint">Grant these on the device so APITuner can launch apps and detect playback. On Fire TV, use the APITuner dashboard Grant permissions (ADB) button for overlay / usage / notification.</string>
     <string name="token_title">API token</string>
     <string name="token_hint">Optional. If set, APITuner must send this value as X-Auth-Token.</string>
     <string name="token_placeholder">Leave blank for no auth</string>
@@ -14,6 +14,9 @@
     <string name="save_token">Save token</string>
     <string name="grant_needed">Grant permission</string>
     <string name="grant_review">Open settings</string>
+    <string name="grant_fire_setup">Fire TV setup…</string>
+    <string name="fire_grant_title">Fire TV setup</string>
+    <string name="open_accessibility">Open Accessibility</string>
     <string name="updates_title">Updates</string>
     <string name="updates_hint">Checks GitHub Releases for a newer Agent APK. Install still requires one confirmation on this TV.</string>
     <string name="check_for_updates">Check for updates</string>
@@ -28,5 +31,4 @@
     <string name="badge_granted">Granted</string>
     <string name="badge_needed">Needed</string>
     <string name="badge_optional">Optional</string>
-    <string name="grant">Open settings</string>
 </resources>

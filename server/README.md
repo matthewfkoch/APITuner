@@ -39,6 +39,7 @@ pytest
 | `stream.py` | MPEG-TS proxy / redirect |
 | `config.py` | Persistent `config.json` + ADBTuner import/export |
 | `discovery.py` | mDNS discovery for Agent / Android TV Remote |
+| `adb_grant.py` | One-time Fire TV Agent permission grant via network ADB |
 | `web/` | Dashboard static assets |
 
 Runtime data (config, pairing certs) lives under `APITUNER_DATA_DIR` (default

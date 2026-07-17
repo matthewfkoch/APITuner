@@ -10,7 +10,8 @@ data class AgentVersionInfo(
     val apkNameHint: String,
 ) {
     val isDebugBuild: Boolean
-        get() = apkNameHint.contains("-debug", ignoreCase = true) ||
+        get() = apkNameHint.equals("debug", ignoreCase = true) ||
+            apkNameHint.contains("-debug", ignoreCase = true) ||
             versionName.contains("debug", ignoreCase = true)
 }
 

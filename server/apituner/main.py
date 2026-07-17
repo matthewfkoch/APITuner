@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .adb_grant import AdbGrantError, grant_agent_permissions
 from .agent_update import AgentUpdateError, download_apk, latest_cache
 from .backends import BackendNotPaired, BackendUnavailable
 from .backends.http_agent import HttpAgentBackend
@@ -434,6 +435,41 @@ async def agent_latest(force: bool = False) -> dict[str, Any]:
     except AgentUpdateError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return latest.to_dict()
+
+
+@app.post("/api/tuners/{tuner_id}/grant-permissions")
+async def grant_tuner_permissions(tuner_id: str, request: Request) -> dict:
+    """One-time Agent permission grant via network ADB (Fire TV setup).
+
+    Day-to-day tuning stays on the Agent HTTP API. Fire OS hides special-access
+    Settings toggles for sideloaded apps; network ADB is only used here for setup.
+    """
+    store = _store(request)
+    tuner = next((t for t in store.config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    if tuner.control.type != "http_agent":
+        raise HTTPException(
+            status_code=400,
+            detail="Permission grant via ADB is only for http_agent tuners",
+        )
+    try:
+        result = await grant_agent_permissions(tuner.control.host)
+    except AdbGrantError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    await _manager(request).refresh_info(tuner_id)
+    payload = result.to_dict()
+    payload["message"] = (
+        "Granted overlay, usage, and notification access"
+        if payload["success"]
+        else "Partial grant — check messages"
+    )
+    if not result.accessibility:
+        payload["message"] += (
+            ". If HOME/BACK keys are needed, also enable APITuner Agent under "
+            "Settings → Accessibility on the device (Fire may require a one-time confirm)."
+        )
+    return payload
 
 
 @app.post("/api/tuners/{tuner_id}/update-agent")

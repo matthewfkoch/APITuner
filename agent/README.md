@@ -12,12 +12,15 @@ Use this backend for **Google TV, YouTube TV, and Fire TV**. It package-pins dee
   - **Display over other apps** → required to launch apps from the background (REQUIRED)
   - **Usage Access** → foreground-app detection (`current_app`)
   - **Notification Access** → media playback state (`playback_state`)
-  - **Accessibility** → global `BACK` / `HOME` / `RECENTS` keys
+  - **Accessibility** → global `BACK` / `HOME` / `RECENTS` keys (optional)
+  - **Default Home app** → optional kiosk / launcher setups only
 - The app runs a foreground service on **port 9092** and advertises itself over mDNS (`_apituner._tcp`).
 - After the first launch, the service **auto-starts on device reboot** (and after APK updates) — you do not need to open the app again.
 - The Agent registers as an optional HOME / launcher candidate (DisplayLauncher heritage). You do not need to set it as the default launcher for normal `http_agent` tuning.
 
-All permissions are granted by the user in Settings — no ADB, no root.
+**Google TV / Android TV:** grant permissions in Settings via the Agent’s buttons (no ADB).
+
+**Fire Stick / Fire TV:** Fire OS often hides overlay / usage / notification toggles for sideloaded apps. Use the APITuner dashboard **Grant permissions (ADB)** once (network ADB). Day-to-day tuning stays on this HTTP API — that one-time ADB step is only for setup. See the root [README](../README.md).
 
 ## HTTP API (port 9092)
 

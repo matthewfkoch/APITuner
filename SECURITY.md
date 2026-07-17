@@ -8,8 +8,9 @@ APITuner exposes an **unauthenticated** web dashboard and REST API on port **659
 - Change global tuning options
 - Trigger pairing flows
 - Start streams (which launches apps on connected devices)
+- Call **Grant permissions (ADB)** (`POST /api/tuners/{id}/grant-permissions`), which uses network ADB to change special-access settings on a device that has already authorized this host’s ADB key (intended for Fire Stick setup)
 
-**Do not expose port 6592 to the public internet.** Run APITuner on a trusted LAN, or place it behind a VPN / reverse proxy with authentication.
+**Do not expose port 6592 to the public internet.** Run APITuner on a trusted LAN, or place it behind a VPN / reverse proxy with authentication. Keep Fire TV **ADB debugging** off when you are not setting up permissions, or revoke unused ADB authorizations.
 
 ## Agent APK
 

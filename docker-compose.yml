@@ -13,6 +13,9 @@ services:
     volumes:
       # Persists config.json and Android TV Remote pairing certificates.
       - ./data:/data
+      # Share host ADB keys so Fire Stick "Always allow" authorizations work
+      # for dashboard Grant permissions (ADB) from the container.
+      - ${HOME}/.android:/root/.android
     environment:
       - APITUNER_PORT=6592
       - APITUNER_DATA_DIR=/data

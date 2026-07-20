@@ -28,9 +28,20 @@ async def _proxy_iter(
 ) -> AsyncIterator[bytes]:
     """Relay the encoder's MPEG-TS to the client, tracking bytes for lifecycle."""
     url = lease.tuner.stream_endpoint
-    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=15.0))
+    # follow_redirects: some encoders 301/302 (trailing slash, http→https).
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(None, connect=15.0),
+        follow_redirects=True,
+    )
     try:
         async with client.stream("GET", url) as resp:
+            if resp.status_code >= 400:
+                logger.warning(
+                    "Stream %s encoder returned HTTP %s for %s (after redirects)",
+                    lease.tune_id,
+                    resp.status_code,
+                    url,
+                )
             resp.raise_for_status()
             async for chunk in resp.aiter_bytes(_CHUNK):
                 if await request.is_disconnected():
@@ -38,7 +49,10 @@ async def _proxy_iter(
                 manager.touch(lease.tune_id, len(chunk))
                 yield chunk
     except (httpx.HTTPError, asyncio.CancelledError, GeneratorExit) as exc:
-        logger.info("Stream %s ended: %s", lease.tune_id, type(exc).__name__)
+        detail = ""
+        if isinstance(exc, httpx.HTTPStatusError):
+            detail = f" HTTP {exc.response.status_code}"
+        logger.info("Stream %s ended: %s%s", lease.tune_id, type(exc).__name__, detail)
     finally:
         await client.aclose()
         # Release after a short grace, matching ADBTuner's ~5s unlock delay.

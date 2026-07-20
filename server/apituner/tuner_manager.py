@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .backends import ControlBackend, DeviceInfo, PlaybackState, build_backend
+from .backends import Capabilities
 from .config import ConfigStore
 from .models import Channel, GlobalOptions, Tuner
 
@@ -346,7 +347,7 @@ class TunerManager:
         launch_at: Optional[float] = None,
     ) -> bool:
         loop = asyncio.get_event_loop()
-        caps = backend.capabilities
+        caps = await self._effective_capabilities(backend)
         targets = {chosen_pkg, channel.package_name}
         if channel.alternate_package_name:
             targets.add(channel.alternate_package_name)
@@ -369,13 +370,12 @@ class TunerManager:
             return True
 
         while loop.time() < deadline:
-            # In-app channel changes do not emit a fresh foreground event.
-            if same_app_switch and loop.time() - launch_at >= same_app_ready_delay:
-                return True
-
             if use_playback:
                 ps = await backend.playback_state()
                 if ps == PlaybackState.PLAYING:
+                    settle = max(0.0, float(options.ready_settle_seconds))
+                    if settle:
+                        await asyncio.sleep(min(settle, max(0.0, deadline - loop.time())))
                     return True
                 if ps == PlaybackState.UNKNOWN:
                     if playback_unknown_since is None:
@@ -392,10 +392,16 @@ class TunerManager:
                     playback_unknown_since = None
                     playback_idle_since = None
 
-            if caps.current_app:
-                app = await backend.current_app()
-                if app and app in targets:
+            # While still waiting on a usable playback signal, do not accept on
+            # foreground alone (avoids opening the HDMI stream on splash/home).
+            if not use_playback:
+                # In-app channel changes do not emit a fresh foreground event.
+                if same_app_switch and loop.time() - launch_at >= same_app_ready_delay:
                     return True
+                if caps.current_app:
+                    app = await backend.current_app()
+                    if app and app in targets:
+                        return True
 
             await asyncio.sleep(0.75)
 
@@ -407,6 +413,27 @@ class TunerManager:
         if same_app_switch:
             return True
         return False
+
+    async def _effective_capabilities(self, backend: ControlBackend) -> Capabilities:
+        """Prefer live Agent permission flags when available."""
+        caps = backend.capabilities
+        getter = getattr(backend, "get_live_capabilities", None)
+        if getter is None:
+            return caps
+        try:
+            live = await getter()
+        except Exception:  # noqa: BLE001
+            return caps
+        if not isinstance(live, dict) or not live:
+            return caps
+        return Capabilities(
+            keys=bool(live.get("keys", caps.keys)),
+            current_app=bool(live.get("current_app", caps.current_app)),
+            playback_state=bool(live.get("playback_state", caps.playback_state)),
+            power=bool(live.get("power", caps.power)),
+            app_list=bool(live.get("app_list", caps.app_list)),
+            install=bool(live.get("install", caps.install)),
+        )
 
     # -- Streaming lifecycle --
 

@@ -174,6 +174,9 @@ async def grant_agent_permissions(host: str, *, adb_port: int = 5555) -> GrantRe
         "enabled_notification_listeners",
         notif_list,
     )
+    # Fire OS also honors cmd notification allow_listener (more durable than
+    # settings alone on some builds).
+    await shell("cmd", "notification", "allow_listener", NOTIFICATION_LISTENER)
 
     _, cur_a11y = await shell(
         "settings", "get", "secure", "enabled_accessibility_services"
@@ -204,7 +207,10 @@ async def grant_agent_permissions(host: str, *, adb_port: int = 5555) -> GrantRe
     notif_ok = notif_ok and AGENT_PACKAGE in (notif_verify or "")
     a11y_ok = a11y_ok and AGENT_PACKAGE in (a11y_verify or "")
 
-    await shell("am", "force-stop", AGENT_PACKAGE)
+    # Do NOT am force-stop the Agent after granting. On Fire OS, force-stop
+    # clears enabled_accessibility_services (and can unbind the notification
+    # listener), which is exactly what Grant permissions just set. Bring the
+    # Agent UI forward so badges refresh without wiping the bindings.
     await shell("am", "start", "-n", f"{AGENT_PACKAGE}/.MainActivity")
 
     result = GrantResult(

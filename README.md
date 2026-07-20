@@ -186,7 +186,8 @@ Configurable in the dashboard:
 | Option | Description |
 | ------ | ----------- |
 | Tune timeout | Max seconds to wait for a channel to become ready |
-| Wait for playback | Prefer playback-state signal before accepting tune |
+| Wait for playback | Prefer a playing MediaSession before accepting a tune (falls back to foreground if playback never appears) |
+| Ready settle | Extra seconds after playback is detected before opening the HDMI stream |
 | Stop on release | Send HOME when the stream ends |
 | Keep apps running | When off, always send HOME on release (overrides keep-warm behavior) |
 | Retry on other tuner | Try another eligible tuner if a tune fails |
@@ -220,12 +221,15 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Agent launch succeeds but app doesn't open | Missing "Display over other apps" | Grant overlay permission on the device |
 | Same-app channel switch times out | Usage Access not granted | Grant Usage Access; use latest server |
 | Discover finds nothing in Docker | Bridge network blocks mDNS | Use `network_mode: host` or add tuners manually by IP |
+| Tune succeeds but Channels shows 503 / no video | Encoder URL returns HTTP 301/302 and older builds did not follow redirects | Update server; confirm encoder URL in a browser/`curl -L`. Proxy mode now follows redirects |
+| Need logs for forum support | — | Options → **Download diagnostics** (redacted JSON: recent logs, tuner probes; tokens stripped) |
 | Agent reachable from host, **Unreachable** from dashboard | Container cannot reach device LAN (common on Synology / some NAS bridges) | From the host: `curl http://DEVICE_IP:9092/api/health`. From the container: `docker exec apituner curl -v --connect-timeout 5 http://DEVICE_IP:9092/api/health`. If host works but container fails, try host networking, check the NAS firewall for **outbound** TCP 9092, or use a macvlan/host network so the container shares the LAN |
 | Discover shows device but Add fails / "Tuner not found" | Older UI bug treating Discover as an edit | Update to a build that posts new tuners from Discover; fill in the encoder stream URL before saving |
 | Import fails / Internal Server Error | Null `number` or duplicate channel numbers in ADBTuner JSON | Fix numbers in the export (or rely on `sort_order`); current builds return a named 400 error instead of 500 |
 | Fire TV Agent has no Permissions page / tune times out on Fire | Fire OS hides overlay/usage/notification toggles for sideloaded apps | One-time: enable Fire **ADB debugging**, then dashboard → tuner → **Grant permissions (ADB)**. Day-to-day tuning stays on the Agent (no ADB). Fire Sticks are not affected by Android 14’s wired-ADB breakage |
 | Grant permissions (ADB) → unauthorized / unreachable | Container has different ADB keys than the host, or TCP **5555** blocked | Mount `$HOME/.android` into the container (see `docker-compose.yml` / `docker run` above); accept **Allow USB debugging** on the TV; ensure the container can reach `DEVICE_IP:5555` |
 | Grant reports success but Agent badges stay red | Agent still restarting, or capability refresh raced | Wait a few seconds → **Recheck connection**; confirm overlay/usage with the Agent UI |
+| Grant succeeds but Accessibility / Send keys goes red again | Older builds `am force-stop`’d the Agent after grant; Fire OS clears `enabled_accessibility_services` on force-stop | Update APITuner (grant no longer force-stops) and re-run **Grant permissions (ADB)**; or enable APITuner Agent under Settings → Accessibility |
 | Accessibility / keys lost after APK reinstall | Fire OS may clear the accessibility binding | Re-run **Grant permissions (ADB)** or enable APITuner Agent under Settings → Accessibility |
 | Agent crashes on open (Fire OS 7 / Android 9) | Older Agent used an API 29 AppOps call | Update to Agent **0.1.6+**. After reinstall, re-grant permissions if needed |
 | HDHomeRun not auto-detected | SSDP/UDP 65001 blocked on Docker bridge | Host networking, or add source URL `http://<host>:6592` manually |

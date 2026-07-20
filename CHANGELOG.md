@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-20
+
+### Added
+- Dashboard **Download diagnostics** (`GET /api/diagnostics`): redacted support bundle with recent server logs, tuner status, and live Agent probes (tokens stripped; LAN IPs may appear). Agent adds `GET /api/diagnostics` for permission/capability snapshots
+- `ready_settle_seconds` option (default 1s): brief wait after MediaSession PLAYING before opening the HDMI stream
+
+### Fixed
+- Fire Stick **Grant permissions (ADB)** no longer `am force-stop`s the Agent afterward (Fire OS clears Accessibility on force-stop, leaving Send keys red). Also calls `cmd notification allow_listener` for a more durable notification grant
+- Encoder stream proxy follows HTTP 301/302 redirects (fixes Channels 503 when the encoder redirects, e.g. trailing slash)
+- Tune readiness no longer treats “app in foreground” alone as ready while waiting for playback — reduces home/YTTV splash in the stream when Notification Access works
+
+### Changed
+- Dashboard setup copy calls out **Grant permissions (ADB)** on each Agent tuner card for Fire TV
+- Playback check / wait-for-playback copy clarifies MediaSession-based readiness
+
 ## [0.1.7] - 2026-07-17
 
 ### Added

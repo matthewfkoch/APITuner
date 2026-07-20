@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+  <!-- Monochrome dial for teal gradient badge (currentColor) -->
+  <circle cx="12" cy="12" r="9.15" stroke="currentColor" stroke-width="1.65"/>
+  <g stroke="currentColor" stroke-linecap="round">
+    <path d="M12 5.4V3" stroke-width="1.7"/>
+    <path d="M17.09 6.91L18.36 5.64" stroke-width="1.35" opacity="0.65"/>
+    <path d="M18.6 12H21" stroke-width="1.7"/>
+    <path d="M17.09 17.09L18.36 18.36" stroke-width="1.35" opacity="0.65"/>
+    <path d="M12 18.6V21" stroke-width="1.7"/>
+    <path d="M6.91 17.09L5.64 18.36" stroke-width="1.35" opacity="0.65"/>
+    <path d="M5.4 12H3" stroke-width="1.7"/>
+    <path d="M6.91 6.91L5.64 5.64" stroke-width="1.35" opacity="0.65"/>
+  </g>
+  <path d="M10.44 12.9L17.02 9.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+  <circle cx="17.02" cy="9.1" r="1.2" fill="currentColor"/>
+  <circle cx="12" cy="12" r="1.85" fill="currentColor"/>
+</svg>

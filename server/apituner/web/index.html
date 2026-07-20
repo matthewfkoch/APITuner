@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>APITuner</title>
+  <meta name="theme-color" content="#080b10" />
+  <meta name="description" content="ADB-free virtual tuner for Channels DVR" />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/static/logo.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -14,7 +18,22 @@
     <aside class="sidebar">
       <div class="sidebar-brand">
         <div class="logo-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16v10H4z" stroke="currentColor" stroke-width="1.5"/><path d="M8 11l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9.15" stroke="currentColor" stroke-width="1.65"/>
+            <g stroke="currentColor" stroke-linecap="round">
+              <path d="M12 5.4V3" stroke-width="1.7"/>
+              <path d="M17.09 6.91L18.36 5.64" stroke-width="1.35" opacity="0.65"/>
+              <path d="M18.6 12H21" stroke-width="1.7"/>
+              <path d="M17.09 17.09L18.36 18.36" stroke-width="1.35" opacity="0.65"/>
+              <path d="M12 18.6V21" stroke-width="1.7"/>
+              <path d="M6.91 17.09L5.64 18.36" stroke-width="1.35" opacity="0.65"/>
+              <path d="M5.4 12H3" stroke-width="1.7"/>
+              <path d="M6.91 6.91L5.64 5.64" stroke-width="1.35" opacity="0.65"/>
+            </g>
+            <path d="M10.44 12.9L17.02 9.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+            <circle cx="17.02" cy="9.1" r="1.2" fill="currentColor"/>
+            <circle cx="12" cy="12" r="1.85" fill="currentColor"/>
+          </svg>
         </div>
         <div>
           <div class="brand-name">APITuner</div>
@@ -96,7 +115,7 @@
             <div class="info-card-icon" aria-hidden="true">ℹ</div>
             <div>
               <strong>Recommended setup</strong>
-              <p>Install the <a class="agent-apk-link" href="{{AGENT_APK_RELEASES_URL}}" target="_blank" rel="noopener">APITuner Agent APK</a>, grant <b>Display over other apps</b>, <b>Usage Access</b>, and <b>Notification Access</b>, then add the device with backend <code>http_agent</code> on port <code>9092</code>. Feature badges on each tuner card show what the backend supports; green means that feature is active on the device.</p>
+              <p>Install the <a class="agent-apk-link" href="{{AGENT_APK_RELEASES_URL}}" target="_blank" rel="noopener">APITuner Agent APK</a>, grant <b>Display over other apps</b>, <b>Usage Access</b>, and <b>Notification Access</b>, then add the device with backend <code>http_agent</code> on port <code>9092</code>. Feature badges on each tuner card show what the backend supports; green means that feature is active on the device. On Fire Stick / Fire TV, use <b>Grant permissions (ADB)</b> on the tuner card (one-time network ADB) — those toggles are hidden in Fire Settings.</p>
             </div>
           </div>
 
@@ -162,7 +181,17 @@
               <h1>Global Options</h1>
               <p class="page-desc">Tune behavior and stream relay settings for all tuners.</p>
             </div>
+            <div class="page-actions">
+              <button id="download-diagnostics" class="btn btn-secondary" title="Download a redacted support bundle with recent logs and tuner status">Download diagnostics</button>
+            </div>
           </header>
+          <div class="info-card" style="margin-bottom:16px">
+            <div class="info-card-icon" aria-hidden="true">ℹ</div>
+            <div>
+              <strong>Share diagnostics when asking for help</strong>
+              <p>Download includes recent server logs, tuner reachability, and Agent permission probes. Tokens are redacted; LAN IPs and encoder URLs may still appear. Attach the file on the Channels community forum.</p>
+            </div>
+          </div>
           <div class="options-card">
             <form id="options-form" class="form-grid"></form>
             <div class="form-actions">

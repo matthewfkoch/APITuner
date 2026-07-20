@@ -19,10 +19,12 @@ from .backends import BackendNotPaired, BackendUnavailable
 from .backends.http_agent import HttpAgentBackend
 from .channels import ChannelValidationError, validate_channel_numbers
 from .config import ConfigStore
+from .diagnostics import build_diagnostics
 from .discovery import discover
 from .hdhr.discovery import DiscoverIdentity, HdhrDiscoveryService
 from .hdhr.lineup import resolve_base_url
 from .hdhr.routes import router as hdhr_router
+from .log_buffer import install_log_buffer
 from .models import Channel, GlobalOptions, Tuner
 from .playlist import build_m3u, filter_channels_by_provider
 from .stream import open_stream
@@ -32,6 +34,7 @@ logging.basicConfig(
     level=os.environ.get("APITUNER_LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+install_log_buffer()
 logger = logging.getLogger("apituner")
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -556,6 +559,24 @@ async def status(request: Request) -> dict:
             is not None,
         },
     }
+
+
+@app.get("/api/diagnostics")
+async def diagnostics(request: Request) -> Response:
+    """Downloadable support bundle (tokens redacted; may include LAN IPs)."""
+    import json
+    from datetime import datetime, timezone
+
+    bundle = await build_diagnostics(_store(request), _manager(request))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    body = json.dumps(bundle, indent=2, sort_keys=False)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="apituner-diagnostics-{stamp}.json"'
+        },
+    )
 
 
 # Static assets (css/js). Mounted last so explicit routes win.

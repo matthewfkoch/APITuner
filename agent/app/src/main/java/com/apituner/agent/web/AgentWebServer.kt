@@ -8,6 +8,7 @@ package com.apituner.agent.web
 
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import com.apituner.agent.control.AppLauncher
 import com.apituner.agent.control.ForegroundAppDetector
@@ -45,6 +46,7 @@ class AgentWebServer(
                 uri == "/api/health" && method == Method.GET -> json(mapOf("success" to true, "message" to "APITuner Agent running"))
                 uri == "/api/apps" && method == Method.GET -> getApps()
                 uri == "/api/info" && method == Method.GET -> getInfo()
+                uri == "/api/diagnostics" && method == Method.GET -> getDiagnostics()
                 uri == "/api/foreground" && method == Method.GET -> getForeground()
                 uri == "/api/playback" && method == Method.GET -> getPlayback()
                 uri == "/api/launch" && method == Method.POST -> launch(session)
@@ -101,6 +103,44 @@ class AgentWebServer(
                 "versionCode" to version.versionCode,
                 "packages" to appLauncher.getInstalledPackageNames(),
                 "capabilities" to caps,
+            )
+        )
+    }
+
+    private fun getDiagnostics(): Response {
+        val version = AgentVersion.current(context)
+        val (playing, pkg) = playback.playbackState()
+        return json(
+            mapOf(
+                "model" to Build.MODEL,
+                "manufacturer" to Build.MANUFACTURER,
+                "androidVersion" to Build.VERSION.RELEASE,
+                "sdkInt" to Build.VERSION.SDK_INT,
+                "versionName" to version.versionName,
+                "versionCode" to version.versionCode,
+                "permissions" to mapOf(
+                    "overlay" to Settings.canDrawOverlays(context),
+                    "usage" to foreground.hasPermission(),
+                    "notification" to playback.hasPermission(),
+                    "accessibility" to KeyAccessibilityService.isEnabled(),
+                ),
+                "capabilities" to mapOf(
+                    "keys" to KeyAccessibilityService.isEnabled(),
+                    "current_app" to foreground.hasPermission(),
+                    "playback_state" to playback.hasPermission(),
+                    "power" to false,
+                    "app_list" to true,
+                    "install" to true,
+                ),
+                "foreground" to mapOf(
+                    "packageName" to foreground.currentForegroundPackage(),
+                    "hasPermission" to foreground.hasPermission(),
+                ),
+                "playback" to mapOf(
+                    "playing" to playing,
+                    "package" to pkg,
+                    "hasPermission" to playback.hasPermission(),
+                ),
             )
         )
     }
@@ -208,9 +248,11 @@ class AgentWebServer(
               .brand { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
               .logo {
                 width:44px; height:44px; border-radius:11px;
-                background:linear-gradient(135deg,#14b8a6,#0d9488);
-                display:grid; place-items:center; color:var(--accent-dark); font-weight:700;
+                background:linear-gradient(145deg,#2dd4bf,#14b8a6 48%,#0f766e);
+                display:grid; place-items:center; color:var(--accent-dark);
+                box-shadow:0 4px 16px rgba(45,212,191,.28), inset 0 1px 0 rgba(255,255,255,.18);
               }
+              .logo svg { width:26px; height:26px; display:block; }
               h1 { margin:0; font-size:22px; letter-spacing:-.02em; }
               .sub { color:#64748b; font-size:12px; margin-top:2px; }
               .card {
@@ -228,7 +270,24 @@ class AgentWebServer(
             </style></head>
             <body>
               <div class="brand">
-                <div class="logo">AT</div>
+                <div class="logo" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="9.15" stroke="currentColor" stroke-width="1.65"/>
+                    <g stroke="currentColor" stroke-linecap="round">
+                      <path d="M12 5.4V3" stroke-width="1.7"/>
+                      <path d="M17.09 6.91L18.36 5.64" stroke-width="1.35" opacity="0.65"/>
+                      <path d="M18.6 12H21" stroke-width="1.7"/>
+                      <path d="M17.09 17.09L18.36 18.36" stroke-width="1.35" opacity="0.65"/>
+                      <path d="M12 18.6V21" stroke-width="1.7"/>
+                      <path d="M6.91 17.09L5.64 18.36" stroke-width="1.35" opacity="0.65"/>
+                      <path d="M5.4 12H3" stroke-width="1.7"/>
+                      <path d="M6.91 6.91L5.64 5.64" stroke-width="1.35" opacity="0.65"/>
+                    </g>
+                    <path d="M10.44 12.9L17.02 9.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+                    <circle cx="17.02" cy="9.1" r="1.2" fill="currentColor"/>
+                    <circle cx="12" cy="12" r="1.85" fill="currentColor"/>
+                  </svg>
+                </div>
                 <div>
                   <h1>APITuner Agent</h1>
                   <div class="sub">HTTP control endpoint</div>

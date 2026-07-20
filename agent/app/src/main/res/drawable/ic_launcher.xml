@@ -4,17 +4,114 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Teal badge -->
     <path
         android:fillColor="#14B8A6"
         android:pathData="M0,0h108v108h-108z" />
     <path
-        android:fillColor="#042F2E"
-        android:pathData="M24,30h60a6,6 0 0 1 6,6v36a6,6 0 0 1 -6,6h-60a6,6 0 0 1 -6,-6v-36a6,6 0 0 1 6,-6z" />
+        android:fillColor="#2DD4BF"
+        android:fillAlpha="0.4"
+        android:pathData="M0,0h108v50h-108z" />
+    <!-- Dial face -->
     <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M38,48l10,10 22,-26"
+        android:fillColor="#042F2E"
+        android:pathData="M54,54m-39,0a39,39 0,1 1,78,0a39,39 0,1 1,-78,0" />
+    <!-- Frequency ticks (12) — scaled from 32px dial * 3.375 -->
+    <path
+        android:pathData="M54,25.65V16.2"
+        android:strokeWidth="5.5"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M69.2,27.7L72.9,21.26"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M80.3,38.8L86.75,35.1"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M82.35,54H91.8"
+        android:strokeWidth="5.5"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M80.3,69.2L86.75,72.9"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M69.2,80.3L72.9,86.75"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M54,82.35V91.8"
+        android:strokeWidth="5.5"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M38.8,80.3L35.1,86.75"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M27.7,69.2L21.26,72.9"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M25.65,54H16.2"
+        android:strokeWidth="5.5"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M27.7,38.8L21.26,35.1"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:pathData="M38.8,27.7L35.1,21.26"
+        android:strokeWidth="4.2"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7"
+        android:fillColor="@android:color/transparent" />
+    <!-- Needle at ~2 o'clock -->
+    <path
+        android:pathData="M47.55,57.7L75.06,41.85"
+        android:strokeWidth="7"
         android:strokeColor="#2DD4BF"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="5" />
+        android:fillColor="@android:color/transparent" />
+    <path
+        android:fillColor="#5EEAD4"
+        android:pathData="M75.06,41.85m-5.2,0a5.2,5.2 0,1 1,10.4,0a5.2,5.2 0,1 1,-10.4,0" />
+    <!-- Pivot hub -->
+    <path
+        android:fillColor="#14B8A6"
+        android:pathData="M54,54m-8,0a8,8 0,1 1,16,0a8,8 0,1 1,-16,0" />
+    <path
+        android:fillColor="#042F2E"
+        android:pathData="M54,54m-3.9,0a3.9,3.9 0,1 1,7.8,0a3.9,3.9 0,1 1,-7.8,0" />
 </vector>

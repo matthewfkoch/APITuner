@@ -80,6 +80,7 @@ class GlobalOptions(BaseModel):
 
     tune_timeout_seconds: float = 30.0
     wait_for_playback: bool = True
+    ready_settle_seconds: float = 1.0
     stop_on_release: bool = False
     keep_apps_running: bool = True
     retry_on_other_tuner: bool = True

@@ -46,6 +46,7 @@
   "options": {
     "tune_timeout_seconds": 30.0,
     "wait_for_playback": true,
+    "ready_settle_seconds": 1.0,
     "stop_on_release": false,
     "keep_apps_running": true,
     "retry_on_other_tuner": true,

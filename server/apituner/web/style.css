@@ -86,17 +86,25 @@ code {
   width: 40px;
   height: 40px;
   border-radius: 11px;
-  background: linear-gradient(135deg, var(--accent-strong), #0d9488);
+  background: linear-gradient(145deg, #2dd4bf 0%, var(--accent-strong) 48%, #0f766e 100%);
   color: #042f2e;
   display: grid;
   place-items: center;
-  box-shadow: 0 4px 16px rgba(45, 212, 191, 0.25);
+  box-shadow:
+    0 4px 16px rgba(45, 212, 191, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
 }
 
-.logo-mark svg { width: 22px; height: 22px; }
+.logo-mark svg { width: 26px; height: 26px; }
 
-.brand-name { font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
-.brand-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+.brand-name {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+.brand-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; letter-spacing: 0.01em; }
 
 .sidebar-nav {
   display: flex;

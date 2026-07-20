@@ -35,7 +35,7 @@ const CAP_DEFS = {
   http_agent: [
     { label: "Launch channels", hint: "Opens the streaming app and deep link when a station is tuned.", always: true },
     { label: "Foreground app", hint: "Detects which app is on screen after a tune. Requires Usage Access on the device.", cap: "current_app" },
-    { label: "Playback check", hint: "Confirms video is playing before the HDMI stream is ready. Requires Notification Access.", cap: "playback_state" },
+    { label: "Playback check", hint: "Waits for a playing MediaSession before the HDMI stream is ready. Requires Notification Access.", cap: "playback_state" },
     { label: "Send keys", hint: "Sends BACK, HOME, and RECENTS through the Agent. Requires Accessibility on the device.", cap: "keys" },
     { label: "App list", hint: "Lists installed apps on the device — used when picking a package while editing channels.", cap: "app_list" },
     { label: "Install APKs", hint: "Can sideload APKs to the device through the Agent (advanced).", cap: "install" },
@@ -185,7 +185,7 @@ async function loadTuners() {
       </div>
       <div class="card-actions">
         <button class="btn btn-sm btn-secondary" data-act="health" title="Ping the device to verify the Agent APK or TV remote is reachable on the network">Recheck connection</button>
-        ${isAgent ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="One-time setup for Fire TV: grant overlay/usage/notification via network ADB. Day-to-day tuning stays on the Agent HTTP API.">Grant permissions (ADB)</button>` : ""}
+        ${isAgent ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="Fire TV one-time setup: grant overlay/usage/notification via network ADB. Day-to-day tuning stays on the Agent HTTP API.">Grant permissions (ADB)</button>` : ""}
         ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Download the latest Agent APK and open the Install dialog on the TV">Update Agent</button>` : ""}
         ${t.control.type === "androidtv_remote" ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
         <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
@@ -647,7 +647,8 @@ const OPTION_FIELDS = [
   ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number", null, "Reclaim tuners that stop making progress"],
   ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
   ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays MPEG-TS; redirect sends clients to the encoder"],
-  ["wait_for_playback", "Wait for playback signal", "bool", null, "Prefer playback/foreground before accepting a tune"],
+  ["wait_for_playback", "Wait for playback signal", "bool", null, "When on, wait for a playing MediaSession before accepting a tune (falls back to foreground if playback never appears)"],
+  ["ready_settle_seconds", "Ready settle (s)", "number", null, "Extra wait after playback is detected before opening the HDMI stream"],
   ["stop_on_release", "Stop app on release", "bool", null, "Send HOME when the stream ends"],
   ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send HOME on release"],
   ["retry_on_other_tuner", "Retry on another tuner", "bool", null, "Try another eligible tuner if a tune fails"],
@@ -703,6 +704,12 @@ document.getElementById("save-options").addEventListener("click", async () => {
     const status = await api.get("/api/status");
     initHdhr(status);
   } catch (e) { toast(e.message, true); }
+});
+
+document.getElementById("download-diagnostics").addEventListener("click", () => {
+  // Navigating to the endpoint triggers Content-Disposition download.
+  window.location.href = "/api/diagnostics";
+  toast("Downloading diagnostics…", false, 2500);
 });
 
 // ============================ STATUS ============================

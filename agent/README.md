@@ -30,6 +30,7 @@ If a token is configured on the device (APITuner Agent app → **Save API token*
 | ------ | -------------------- | --------------------------------------------------------------- |
 | GET    | `/api/health`        | `{ success, message }`                                          |
 | GET    | `/api/info`          | model, manufacturer, androidVersion, sdkInt, **versionName**, **versionCode**, packages, capabilities |
+| GET    | `/api/diagnostics`   | permissions, capabilities, foreground/playback snapshot (for support bundles) |
 | GET    | `/api/apps`          | `[ { name, packageName } ]`                                     |
 | GET    | `/api/foreground`    | `{ packageName, hasPermission }`                                |
 | GET    | `/api/playback`      | `{ playing, package, hasPermission }`                           |

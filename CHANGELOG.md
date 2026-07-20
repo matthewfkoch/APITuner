@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-07-20
+
+### Fixed
+- Fire Stick: Accessibility / Send keys never binds after ADB grant — `KeyAccessibilityService` must be `android:exported="true"` so Fire OS can bind it (still protected by `BIND_ACCESSIBILITY_SERVICE`)
+
 ## [0.1.9] - 2026-07-20
 
 ### Fixed

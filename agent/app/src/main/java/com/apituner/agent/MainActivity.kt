@@ -102,7 +102,11 @@ class MainActivity : AppCompatActivity() {
 
         val logoWrap = LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_logo_mark)
+            try {
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_logo_mark)
+            } catch (_: Exception) {
+                setBackgroundColor(color(R.color.accent))
+            }
             layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
                 marginEnd = dp(14)
             }

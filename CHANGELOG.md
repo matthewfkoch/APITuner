@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-07-20
+
+### Fixed
+- Fire Stick / Android 9: Agent UI crash on launch — logo gradient `angle` must be a multiple of 45 (`bg_logo_mark`)
+
 ## [0.1.8] - 2026-07-20
 
 ### Added

@@ -313,7 +313,7 @@ jobs:
 
       - name: Publish release
         id: release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: matthewfkoch/APITuner-releases
           token: ${{ secrets.RELEASES_REPO_TOKEN }}

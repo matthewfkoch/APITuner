@@ -1,18 +1,80 @@
+# Dependabot strategy for a solo-maintained Docker + Agent project:
+# - Weekly batch (Monday) instead of a drip of one-off PRs
+# - Group routine minor/patch updates per ecosystem
+# - Leave major bumps as individual PRs (breaking-change review)
+# - Bundle all GitHub Actions into one PR (CI-only, low risk as a group)
+# - Security updates stay enabled at the repo level and are grouped separately
+# - Short cooldown avoids day-0 broken releases (security updates ignore cooldown)
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /server
     schedule:
       interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: "deps(server)"
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     groups:
-      server:
+      server-security:
+        applies-to: security-updates
         patterns:
           - "*"
+      server-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: gradle
     directory: /agent
     schedule:
       interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - java
+    commit-message:
+      prefix: "deps(agent)"
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    groups:
+      agent-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      agent-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github_actions
+    commit-message:
+      prefix: "deps(ci)"
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns:
+          - "*"

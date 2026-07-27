@@ -12,7 +12,12 @@ from typing import Optional
 from .backends import ControlBackend, DeviceInfo, PlaybackState, build_backend
 from .backends import Capabilities
 from .config import ConfigStore
-from .models import Channel, GlobalOptions, Tuner
+from .config_interpreter import (
+    ConfigInterpreterError,
+    resolve_app_play_config,
+    run_commands,
+)
+from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +58,7 @@ class Lease:
     backend: ControlBackend
     tune_id: str
     channel: Channel
-
+    tune_configuration: Optional[TuneConfiguration] = None
 
 class TunerManager:
     def __init__(self, store: ConfigStore) -> None:
@@ -227,9 +232,18 @@ class TunerManager:
             backend = self.get_backend(tuner)
             tune_id = _new_tune_id()
             try:
-                await self._do_tune(tuner, backend, channel, tune_id, options)
+                app_play = resolve_app_play_config(
+                    channel, self._store.config.configurations
+                )
+                await self._do_tune(
+                    tuner, backend, channel, tune_id, options, app_play=app_play
+                )
                 return Lease(
-                    tuner=tuner, backend=backend, tune_id=tune_id, channel=channel
+                    tuner=tuner,
+                    backend=backend,
+                    tune_id=tune_id,
+                    channel=channel,
+                    tune_configuration=app_play,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Tune %s failed on %s: %s", tune_id, tuner.name, exc)
@@ -252,8 +266,19 @@ class TunerManager:
             backend = self.get_backend(tuner)
             tune_id = _new_tune_id()
             try:
-                await self._do_tune(tuner, backend, channel, tune_id, options)
-                return Lease(tuner=tuner, backend=backend, tune_id=tune_id, channel=channel)
+                app_play = resolve_app_play_config(
+                    channel, self._store.config.configurations
+                )
+                await self._do_tune(
+                    tuner, backend, channel, tune_id, options, app_play=app_play
+                )
+                return Lease(
+                    tuner=tuner,
+                    backend=backend,
+                    tune_id=tune_id,
+                    channel=channel,
+                    tune_configuration=app_play,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Tune %s failed on %s: %s", tune_id, tuner.name, exc)
                 st = self._state(tuner.id)
@@ -270,6 +295,8 @@ class TunerManager:
         channel: Channel,
         tune_id: str,
         options: GlobalOptions,
+        *,
+        app_play: Optional[TuneConfiguration] = None,
     ) -> None:
         loop = asyncio.get_event_loop()
         t0 = loop.time()
@@ -282,42 +309,48 @@ class TunerManager:
             await asyncio.sleep(1.0)
 
         chosen_pkg = self._choose_package(tuner.id, channel)
-        prior_app: Optional[str] = None
-        if backend.capabilities.current_app:
-            try:
-                prior_app = await backend.current_app()
-            except Exception:  # noqa: BLE001
-                pass
 
-        await backend.launch(
-            package=chosen_pkg,
-            deeplink=channel.url or None,
-            component=channel.component,
-            action=channel.action,
-            extras=channel.extra_string,
-        )
-        launch_at = loop.time()
-
-        deadline = launch_at + options.tune_timeout_seconds
-        ready = await self._wait_ready(
-            backend,
-            channel,
-            chosen_pkg,
-            options,
-            deadline,
-            prior_app=prior_app,
-            launch_at=launch_at,
-        )
-        if not ready:
-            raise TuneFailed(f"channel {channel.number} not ready within timeout")
-
-        if channel.key_macro and backend.capabilities.keys:
-            for key in channel.key_macro:
+        if app_play is not None:
+            await self._do_app_play_tune(
+                tuner, backend, channel, chosen_pkg, options, app_play
+            )
+        else:
+            prior_app: Optional[str] = None
+            if backend.capabilities.current_app:
                 try:
-                    await backend.send_key(key)
+                    prior_app = await backend.current_app()
                 except Exception:  # noqa: BLE001
                     pass
-                await asyncio.sleep(0.5)
+
+            await backend.launch(
+                package=chosen_pkg,
+                deeplink=channel.url or None,
+                component=channel.component,
+                action=channel.action,
+                extras=channel.extra_string,
+            )
+            launch_at = loop.time()
+
+            deadline = launch_at + options.tune_timeout_seconds
+            ready = await self._wait_ready(
+                backend,
+                channel,
+                chosen_pkg,
+                options,
+                deadline,
+                prior_app=prior_app,
+                launch_at=launch_at,
+            )
+            if not ready:
+                raise TuneFailed(f"channel {channel.number} not ready within timeout")
+
+            if channel.key_macro and backend.capabilities.keys:
+                for key in channel.key_macro:
+                    try:
+                        await backend.send_key(key)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    await asyncio.sleep(0.5)
 
         elapsed = loop.time() - t0
         st = self._state(tuner.id)
@@ -334,6 +367,81 @@ class TunerManager:
             channel.name,
             tuner.name,
         )
+
+    async def _do_app_play_tune(
+        self,
+        tuner: Tuner,
+        backend: ControlBackend,
+        channel: Channel,
+        chosen_pkg: str,
+        options: GlobalOptions,
+        app_play: TuneConfiguration,
+    ) -> None:
+        caps = await self._effective_capabilities(backend)
+        if not caps.dpad:
+            raise TuneFailed(
+                f"App Play channel {channel.number} ({channel.name}) requires a "
+                "D-pad backend (androidtv_remote, firetv_rest, or adb); "
+                f"tuner {tuner.name!r} uses {tuner.control.type}"
+            )
+
+        cfg_opts = app_play.global_options
+        identifier = channel.url if channel.url is not None else ""
+
+        try:
+            await run_commands(
+                backend,
+                app_play.pre_tune_commands,
+                package=chosen_pkg,
+                identifier=identifier,
+            )
+            await run_commands(
+                backend,
+                app_play.tune_commands,
+                package=chosen_pkg,
+                identifier=identifier,
+            )
+            if app_play.post_playback_start_commands:
+                await run_commands(
+                    backend,
+                    app_play.post_playback_start_commands,
+                    package=chosen_pkg,
+                    identifier=identifier,
+                )
+                wait_after = float(
+                    cfg_opts.wait_after_post_playback_start_commands_seconds or 0
+                )
+                if wait_after > 0:
+                    await asyncio.sleep(wait_after)
+        except ConfigInterpreterError as exc:
+            raise TuneFailed(str(exc)) from exc
+
+        # Babsonnexus App Play configs typically use fixed delay (no playback probe).
+        if cfg_opts.use_fixed_delay or not (
+            options.wait_for_playback and caps.playback_state
+        ):
+            delay = float(cfg_opts.fixed_delay_seconds or 0)
+            if delay <= 0:
+                delay = max(1.0, float(options.ready_settle_seconds or 1.0))
+            await asyncio.sleep(delay)
+            return
+
+        # Optional playback wait when the backend can report it.
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + options.tune_timeout_seconds
+        ready = await self._wait_ready(
+            backend,
+            channel,
+            chosen_pkg,
+            options,
+            deadline,
+            prior_app=None,
+            launch_at=loop.time(),
+        )
+        if not ready:
+            raise TuneFailed(
+                f"App Play channel {channel.number} not ready within timeout"
+            )
 
     async def _wait_ready(
         self,
@@ -428,6 +536,8 @@ class TunerManager:
             return caps
         return Capabilities(
             keys=bool(live.get("keys", caps.keys)),
+            dpad=bool(live.get("dpad", caps.dpad)),
+            shell=bool(live.get("shell", caps.shell)),
             current_app=bool(live.get("current_app", caps.current_app)),
             playback_state=bool(live.get("playback_state", caps.playback_state)),
             power=bool(live.get("power", caps.power)),
@@ -447,7 +557,20 @@ class TunerManager:
     async def release(self, lease: Lease) -> None:
         options = self._options
         self._unlock(lease.tuner.id)
-        if (
+        app_play = lease.tune_configuration
+        if app_play is not None and app_play.post_tune_commands:
+            chosen_pkg = self._choose_package(lease.tuner.id, lease.channel)
+            identifier = lease.channel.url if lease.channel.url is not None else ""
+            try:
+                await run_commands(
+                    lease.backend,
+                    app_play.post_tune_commands,
+                    package=chosen_pkg,
+                    identifier=identifier,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("App Play post_tune_commands failed: %s", exc)
+        elif (
             options.stop_on_release
             or not options.keep_apps_running
             or lease.channel.compatibility_mode
@@ -457,7 +580,6 @@ class TunerManager:
             except Exception:  # noqa: BLE001
                 pass
         logger.info("Released tuner %s (tune %s)", lease.tuner.name, lease.tune_id)
-
     # -- Status + reaper --
 
     def status(self) -> list[dict]:

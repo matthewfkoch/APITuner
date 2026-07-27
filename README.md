@@ -28,19 +28,20 @@ Channels DVR ──HDHomeRun /auto/v…──▶ APITuner ──control──▶
 
 ## Control backends
 
-| Capability       | `http_agent` (Agent APK) **recommended** | `androidtv_remote` (Google TV Remote) |
-| ---------------- | ---------------------------------------- | ------------------------------------- |
-| Launch/deeplink  | ✅ package-pinned (reliable)              | ⚠️ bare URL only (app chooser risk)   |
-| Key events       | ⚠️ BACK/HOME/RECENTS                     | ✅ full D-pad                         |
-| Foreground app   | ✅ (Usage Access)                         | ✅                                    |
-| Playback state   | ✅ (Notification Access)                  | ✅ (via Cast, LAN-dependent)          |
-| App list/install | ✅                                        | ❌                                    |
-| Setup            | Install APK + 2 permissions              | Pair once, no APK                     |
-| Best for         | **YouTube TV, Google TV, Fire TV**       | Simple key-only control, no APK       |
+| Capability       | `http_agent` (Agent APK) **recommended for deep links** | `androidtv_remote` (Google TV Remote) | `firetv_rest` (Fire TV Remote HTTP) | `adb` (network ADB) |
+| ---------------- | -------------------------------------------------------- | ------------------------------------- | ----------------------------------- | ------------------- |
+| Launch/deeplink  | ✅ package-pinned (reliable)                              | ⚠️ bare URL only (app chooser risk)   | ✅ package launch (no deep link)    | ✅ package + deep link |
+| Key events       | ⚠️ BACK/HOME/RECENTS                                     | ✅ full D-pad                         | ✅ full D-pad                       | ✅ full D-pad (+ force-stop) |
+| App Play configs | ❌                                                       | ✅                                    | ✅ (newer Fire with `:8080`)        | ✅ Fire fallback |
+| Foreground app   | ✅ (Usage Access)                                         | ✅                                    | ❌                                  | ✅ (dumpsys) |
+| Playback state   | ✅ (Notification Access)                                  | ✅ (via Cast, LAN-dependent)          | ❌ (use fixed delay)                | ❌ (use fixed delay) |
+| App list/install | ✅                                                        | ❌                                    | ❌                                  | ✅ list / ❌ install |
+| Setup            | Install APK + 2 permissions                              | Pair once, no APK                     | Pair once (PIN), no APK             | Enable network ADB |
+| Best for         | **YouTube TV, Google TV, Fire TV deep links**            | App Play on Google TV                 | App Play on newer Fire              | App Play on older Fire OS 7 |
 
-**Use `http_agent` for production tuning** (especially YouTube TV). The Agent sends intents with an explicit package, like ADBTuner's `am start`, so channels open directly instead of stalling on an "Open with" dialog.
+**Use `http_agent` for production deep-link tuning** (especially YouTube TV). The Agent sends intents with an explicit package, like ADBTuner's `am start`, so channels open directly instead of stalling on an "Open with" dialog.
 
-Use `androidtv_remote` only when you cannot install the Agent APK.
+Use `androidtv_remote`, `firetv_rest`, or `adb` when running babsonnexus **App Play** configurations (D-pad navigation). Prefer ADB-free backends when they work; use **`adb` on Fire** when `:8080` Fire TV REST is missing.
 
 ### Agent setup (per device)
 
@@ -71,9 +72,8 @@ Fire OS typically **does not show a Permissions page** for sideloaded apps, so t
 
 1. On the Fire TV: **Settings → My Fire TV → Developer Options** → enable **ADB debugging** (and Apps from Unknown Sources if needed).
 2. From a computer on the LAN, accept the **Allow USB debugging?** prompt the first time APITuner connects (`adb connect DEVICE_IP:5555`).
-3. In the APITuner dashboard, open the Fire Stick tuner card → **Grant permissions (ADB)**.
-4. Optionally open **Accessibility** from the Agent app if you want HOME/BACK keys (Fire may still ask for an on-device confirm).
-5. After grants succeed, you can leave ADB debugging on or turn it off — **Channels tunes do not use ADB**.
+3. In the APITuner dashboard, open the Fire Stick tuner card → **Grant permissions (ADB)**. That grants overlay, usage, notification, and Accessibility (Send keys). There is **no on-device Settings path** for these on Fire OS for sideloaded apps — ADB is required. Grant may reboot once so Accessibility binds.
+4. After grants succeed, you can leave ADB debugging on or turn it off — **Channels tunes do not use ADB**.
 
 The Docker image includes `adb` so the grant button works from the container when the device is reachable on the LAN. Local `docker-compose.yml` mounts `~/.android` so host “Always allow” ADB keys are reused; otherwise accept the RSA prompt that appears for the container’s key.
 
@@ -126,10 +126,12 @@ Config and pairing certs are stored under `APITUNER_DATA_DIR` (default `./data` 
 ## Set up a tuner
 
 1. **Add a tuner** in the dashboard (or click **Discover**).
-2. **Recommended — `http_agent`:** install the Agent APK (see above), grant permissions, enter the device IP (port `9092`).
-3. **Alternate — `androidtv_remote`:** enter the device IP, click **Pair**, enter the PIN shown on the TV. Pairing certs are stored under `data/certs/`.
+2. **Recommended for deep links (YouTube TV / HBO) — `http_agent`:** install the Agent APK (see above), grant permissions, enter the device IP (port `9092`).
+3. **App Play (babsonnexus native-app navigation) — pick a D-pad backend:**
+   - **`androidtv_remote`** (Google TV / Android TV): enter the device IP, click **Pair**, enter the PIN shown on the TV. Pairing certs are stored under `data/certs/`.
+   - **`firetv_rest`** (Fire Stick / Fire TV with `:8080` Remote API): uses the Fire TV Remote HTTP API — no ADB. Click **Pair**, enter the on-screen PIN. Default port `8080`.
+   - **`adb`** (Fire App Play **fallback**): network ADB on port `5555`. Use when `firetv_rest` is unavailable (common on older Fire OS 7 sticks). Enable ADB debugging, accept the RSA prompt once. Real `am force-stop` / `input keyevent` like ADBTuner. Google TV day-to-day tuning should still use Agent / Remote — reserve `adb` for Fire App Play.
 4. Enter the **encoder stream URL** — the HDMI encoder's MPEG-TS endpoint, e.g. `http://192.0.2.20/4.ts`.
-
 See `config.example.json` for a sample configuration.
 
 ## Configure channels
@@ -138,7 +140,8 @@ Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is
 
 - `number` — must be unique across the list (fix duplicate numbers in the export before import)
 - `package_name` (+ optional `alternate_package_name`)
-- `url` — deep link (intent data), e.g. `https://tv.youtube.com/watch/...`
+- `url` — deep link (intent data), e.g. `https://tv.youtube.com/watch/...`, **or** an App Play loop index (`"0"`, `"1"`, …)
+- `configuration_uuid` — optional; set for [babsonnexus HDMI Encoder Native Apps](https://github.com/babsonnexus/hdmi-encoder-native-apps) App Play stations
 - `action` (default `android.intent.action.VIEW`)
 - `component` — explicit activity (used by the Agent backend; Android 12+)
 - `key_macro` — keys sent after launch to dismiss prompts (remote backend only)
@@ -146,7 +149,17 @@ Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is
 
 ADBTuner exports sometimes have `"number": null`. APITuner fills that from `sort_order` when present; otherwise import returns a clear 400 error naming the channel instead of an internal server error.
 
-## Connect to Channels DVR
+### App Play configurations (babsonnexus)
+
+Native apps without reliable deep links (ESPN, CBS, Fox, NBC, …) use ADBTuner **configurations**: D-pad scripts with `adbtuner_open_app`, `input keyevent`, `sleep`, and `ADB_LOOP`. APITuner runs those **without ADB** on backends that expose full D-pad:
+
+1. In the dashboard **Configurations** tab, import JSON from `adbtuner_native/configurations/*.json`.
+2. On **Channels**, import the matching station list (keeps `configuration_uuid`).
+3. Use an **`androidtv_remote`**, **`firetv_rest`**, or **`adb`** tuner for those channels (`http_agent` cannot inject D-pad). On older Fire sticks without `:8080`, use **`adb`**.
+
+Deep-link stations (e.g. HBO Max with `https://…` URLs) still use the normal launch path even if a `configuration_uuid` is present. `am force-stop` is real on the `adb` backend; on Remote/FireTV REST it maps to best-effort HOME/stop.
+
+Fire TV REST notes: reverse-engineered Amazon protocol; TLS verification is disabled; may need a wake on port `8009`; can break on Fire OS updates. If `:8080` never opens after wake (common on Fire OS 7 / older sticks), switch the tuner to **`adb`**.## Connect to Channels DVR
 
 ### Recommended: HDHomeRun tuner (multi-TV sync)
 
@@ -229,8 +242,8 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Fire TV Agent has no Permissions page / tune times out on Fire | Fire OS hides overlay/usage/notification toggles for sideloaded apps | One-time: enable Fire **ADB debugging**, then dashboard → tuner → **Grant permissions (ADB)**. Day-to-day tuning stays on the Agent (no ADB). Fire Sticks are not affected by Android 14’s wired-ADB breakage |
 | Grant permissions (ADB) → unauthorized / unreachable | Container has different ADB keys than the host, or TCP **5555** blocked | Mount `$HOME/.android` into the container (see `docker-compose.yml` / `docker run` above); accept **Allow USB debugging** on the TV; ensure the container can reach `DEVICE_IP:5555` |
 | Grant reports success but Agent badges stay red | Agent still restarting, or capability refresh raced | Wait a few seconds → **Recheck connection**; confirm overlay/usage with the Agent UI |
-| Grant succeeds but Accessibility / Send keys goes red again | Older builds `am force-stop`’d the Agent after grant; Fire OS clears `enabled_accessibility_services` on force-stop | Update APITuner (grant no longer force-stops) and re-run **Grant permissions (ADB)**; or enable APITuner Agent under Settings → Accessibility |
-| Accessibility / keys lost after APK reinstall | Fire OS may clear the accessibility binding | Re-run **Grant permissions (ADB)** or enable APITuner Agent under Settings → Accessibility |
+| Grant succeeds but Accessibility / Send keys goes red again | Older builds `am force-stop`’d the Agent after grant; Fire OS clears `enabled_accessibility_services` on force-stop; or Accessibility listed in settings but not bound until reboot | Update APITuner and re-run **Grant permissions (ADB)** (grant may reboot once to bind). There is no on-device Settings grant path on Fire for sideloaded apps |
+| Accessibility / keys lost after APK reinstall | Fire OS may clear the accessibility binding | Re-run **Grant permissions (ADB)** (no on-device Settings toggle) |
 | Agent crashes on open (Fire OS 7 / Android 9) | Older Agent used an API 29 AppOps call | Update to Agent **0.1.6+**. After reinstall, re-grant permissions if needed |
 | HDHomeRun not auto-detected | SSDP/UDP 65001 blocked on Docker bridge | Host networking, or add source URL `http://<host>:6592` manually |
 | HDHomeRun guide empty | XMLTV not configured | Set Channels DVR URL + XMLTV source device; use Custom URL `…/xmltv.xml` |

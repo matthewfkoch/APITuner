@@ -58,7 +58,7 @@ Install `apituner-agent-<version>.apk` on each Android TV / Google TV device.
    - **Usage Access** — recommended
    - **Notification Access** — optional (playback detection)
    - **Accessibility** — optional (BACK / HOME / RECENTS)
-   - On **Fire Stick / Fire TV**, if Settings has no Permissions page, use the dashboard **Grant permissions (ADB)** button once (network ADB). Tuning itself stays on the Agent HTTP API.
+   - On **Fire Stick / Fire TV**, permissions (including Accessibility / Send keys) must be granted via the dashboard **Grant permissions (ADB)** button once — there is no usable on-device Settings path for sideloaded apps. Tuning itself stays on the Agent HTTP API.
 2. In the APITuner dashboard, click **Add tuner**:
    - Backend: `http_agent`
    - Device IP and port: `9092`

@@ -25,4 +25,12 @@ def build_backend(
         from .http_agent import HttpAgentBackend
 
         return HttpAgentBackend(tuner, request_timeout=request_timeout)
+    if ctype == "firetv_rest":
+        from .firetv_rest import FireTvRestBackend
+
+        return FireTvRestBackend(tuner, certs_dir, request_timeout=request_timeout)
+    if ctype == "adb":
+        from .adb import AdbBackend
+
+        return AdbBackend(tuner, request_timeout=request_timeout)
     raise ValueError(f"Unknown control backend type: {ctype!r}")

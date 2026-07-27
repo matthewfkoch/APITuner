@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-07-27
+
+### Added
+- **App Play configurations** (babsonnexus / ADBTuner): import configuration JSON, keep `configuration_uuid` on channels, and run D-pad scripts ADB-free via `androidtv_remote` or new `firetv_rest`
+- **`firetv_rest` backend**: Fire TV Remote HTTP API (pin pair, D-pad, package launch) for App Play on Fire Stick / Fire TV without ADB
+- **`adb` backend**: network ADB App Play fallback for Fire OS devices that lack the `:8080` Remote API (real force-stop / keyevents)
+- Dashboard **Configurations** tab for import/export of App Play scripts
+
+### Fixed
+- Fire Stick **Grant permissions (ADB)**: if Accessibility is written to settings but not bound, reboot once and re-apply (Fire OS often needs a reboot for Send keys)
+- Fire Stick docs / Agent UI: overlay, usage, notification, and Accessibility are **ADB-only** — no Settings → Accessibility fallback (Fire has no usable on-device grant path for sideloaded apps)
+
 ## [0.1.10] - 2026-07-20
 
 ### Fixed
@@ -113,7 +125,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.11
+[0.1.10]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.10
+[0.1.9]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.9
+[0.1.8]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.8
 [0.1.7]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.7
 [0.1.6]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.6
 [0.1.5]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.5

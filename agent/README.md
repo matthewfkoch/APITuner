@@ -20,7 +20,7 @@ Use this backend for **Google TV, YouTube TV, and Fire TV**. It package-pins dee
 
 **Google TV / Android TV:** grant permissions in Settings via the Agent’s buttons (no ADB).
 
-**Fire Stick / Fire TV:** Fire OS often hides overlay / usage / notification toggles for sideloaded apps. Use the APITuner dashboard **Grant permissions (ADB)** once (network ADB). Day-to-day tuning stays on this HTTP API — that one-time ADB step is only for setup. See the root [README](../README.md).
+**Fire Stick / Fire TV:** Fire OS has no usable Settings path to grant overlay / usage / notification / Accessibility for sideloaded apps. Use the APITuner dashboard **Grant permissions (ADB)** once (network ADB; may reboot so Accessibility binds). Day-to-day tuning stays on this HTTP API. See the root [README](../README.md).
 
 ## HTTP API (port 9092)
 

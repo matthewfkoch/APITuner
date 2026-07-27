@@ -33,11 +33,12 @@ pytest
 | ------ | ------- |
 | `main.py` | FastAPI app wiring and core REST routes |
 | `tuner_manager.py` | Tuner pool, tune orchestration, readiness |
-| `backends/` | `http_agent` and `androidtv_remote` control planes |
+| `backends/` | `http_agent`, `androidtv_remote`, `firetv_rest`, and `adb` control planes |
+| `config_interpreter.py` | ADBTuner / babsonnexus App Play command runner (Remote keys or ADB shell) |
 | `hdhr/` | HDHomeRun discovery, lineup, stream routes, XMLTV |
 | `playlist.py` | M3U / M3U8 generation for Channels DVR |
 | `stream.py` | MPEG-TS proxy / redirect |
-| `config.py` | Persistent `config.json` + ADBTuner import/export |
+| `config.py` | Persistent `config.json` + ADBTuner channel/config import/export |
 | `discovery.py` | mDNS discovery for Agent / Android TV Remote |
 | `adb_grant.py` | One-time Fire TV Agent permission grant via network ADB |
 | `web/` | Dashboard static assets |

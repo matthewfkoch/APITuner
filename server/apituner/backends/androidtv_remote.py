@@ -31,6 +31,7 @@ _CLIENT_NAME = "APITuner"
 class AndroidTvRemoteBackend(ControlBackend):
     capabilities = Capabilities(
         keys=True,
+        dpad=True,
         current_app=True,
         playback_state=True,  # best-effort via pychromecast
         power=True,

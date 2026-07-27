@@ -255,8 +255,9 @@ class MainActivity : AppCompatActivity() {
             granted = { KeyAccessibilityService.isEnabled() },
             optional = true,
         ) {
-            // Accessibility settings screen does open on Fire TV.
-            SettingsNavigator.openAccessibilitySettings(this)
+            onPermissionAction("accessibility") {
+                SettingsNavigator.openAccessibilitySettings(this)
+            }
         }
 
         addPermission(
@@ -417,7 +418,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Fire OS does not expose these special-access toggles for sideloaded apps. */
-    private val fireHiddenPermissions = setOf("overlay", "usage", "notification")
+    // Fire OS does not expose a usable grant UI for these; dashboard ADB only.
+    private val fireHiddenPermissions =
+        setOf("overlay", "usage", "notification", "accessibility")
 
     private fun isDefaultHomeApp(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -447,24 +450,22 @@ class MainActivity : AppCompatActivity() {
             "overlay" -> "Display over other apps"
             "usage" -> "Usage Access"
             "notification" -> "Notification Access"
+            "accessibility" -> "Accessibility (HOME/BACK keys)"
             else -> "This permission"
         }
         val message =
-            "$detail isn’t shown in Fire TV Settings for sideloaded apps " +
-                "(no Permissions page), and the Agent cannot grant it itself.\n\n" +
+            "$detail cannot be granted from Fire TV Settings for sideloaded apps, " +
+                "and the Agent cannot grant it itself.\n\n" +
                 "One-time setup: on the APITuner dashboard open this tuner → " +
-                "Grant permissions (ADB). That uses network ADB only for setup; " +
+                "Grant permissions (ADB). That uses network ADB only for setup " +
+                "(and may reboot once so Accessibility binds); " +
                 "day-to-day tuning stays on the Agent HTTP API (no ADB).\n\n" +
                 "On the Fire TV first enable Developer Options → ADB debugging and " +
-                "accept the computer’s RSA prompt.\n\n" +
-                "Accessibility (HOME/BACK) can still be opened from the button below."
+                "accept the computer’s RSA prompt."
         AlertDialog.Builder(this)
             .setTitle(R.string.fire_grant_title)
             .setMessage(message)
             .setPositiveButton(android.R.string.ok, null)
-            .setNeutralButton(R.string.open_accessibility) { _, _ ->
-                SettingsNavigator.openAccessibilitySettings(this)
-            }
             .show()
     }
 

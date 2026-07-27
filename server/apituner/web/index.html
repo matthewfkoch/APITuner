@@ -50,6 +50,10 @@
           <span class="nav-icon" aria-hidden="true">📺</span>
           <span>Channels</span>
         </button>
+        <button class="nav-item" data-tab="configurations">
+          <span class="nav-icon" aria-hidden="true">🎛</span>
+          <span>Configurations</span>
+        </button>
         <button class="nav-item" data-tab="status">
           <span class="nav-icon" aria-hidden="true">●</span>
           <span>Live Status</span>
@@ -115,7 +119,7 @@
             <div class="info-card-icon" aria-hidden="true">ℹ</div>
             <div>
               <strong>Recommended setup</strong>
-              <p>Install the <a class="agent-apk-link" href="{{AGENT_APK_RELEASES_URL}}" target="_blank" rel="noopener">APITuner Agent APK</a>, grant <b>Display over other apps</b>, <b>Usage Access</b>, and <b>Notification Access</b>, then add the device with backend <code>http_agent</code> on port <code>9092</code>. Feature badges on each tuner card show what the backend supports; green means that feature is active on the device. On Fire Stick / Fire TV, use <b>Grant permissions (ADB)</b> on the tuner card (one-time network ADB) — those toggles are hidden in Fire Settings.</p>
+              <p>Install the <a class="agent-apk-link" href="{{AGENT_APK_RELEASES_URL}}" target="_blank" rel="noopener">APITuner Agent APK</a>, grant <b>Display over other apps</b>, <b>Usage Access</b>, and <b>Notification Access</b>, then add the device with backend <code>http_agent</code> on port <code>9092</code>. Feature badges on each tuner card show what the backend supports; green means that feature is active on the device. On Fire Stick / Fire TV there is no on-device Settings path for those (or Accessibility / Send keys) — use <b>Grant permissions (ADB)</b> on the tuner card once (network ADB; may reboot to bind Accessibility).</p>
             </div>
           </div>
 
@@ -128,7 +132,7 @@
           <header class="page-header">
             <div>
               <h1>Channels</h1>
-              <p class="page-desc">Custom channels imported from ADBTuner or added manually. Click a row or use Edit to change channel details.</p>
+              <p class="page-desc">Custom channels imported from ADBTuner or added manually. Click a row or use Edit to change channel details. App Play stations also need matching entries under Configurations.</p>
             </div>
             <div class="page-actions">
               <button id="import-btn" class="btn btn-secondary">Import</button>
@@ -154,6 +158,34 @@
                   <th>Provider</th>
                   <th>Package</th>
                   <th>Deep link</th>
+                  <th class="col-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- CONFIGURATIONS (App Play) -->
+        <section id="tab-configurations" class="tab-panel">
+          <header class="page-header">
+            <div>
+              <h1>Configurations</h1>
+              <p class="page-desc">ADBTuner / babsonnexus App Play scripts (D-pad navigation). Import JSON from <code>adbtuner_native/configurations</code>, then import matching station lists on Channels. Requires <code>androidtv_remote</code>, <code>firetv_rest</code>, or <code>adb</code> (Fire fallback).</p>
+            </div>
+            <div class="page-actions">
+              <button id="import-config-btn" class="btn btn-secondary">Import</button>
+              <button id="export-config-btn" class="btn btn-secondary">Export</button>
+            </div>
+          </header>
+
+          <div class="table-shell">
+            <table class="table" id="config-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>UUID</th>
+                  <th>Version</th>
                   <th class="col-actions">Actions</th>
                 </tr>
               </thead>

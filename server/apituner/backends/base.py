@@ -32,6 +32,10 @@ class Capabilities:
     """What a backend can do, so the orchestrator can adapt its tune flow."""
 
     keys: bool = False
+    # Full D-pad / remote navigation (required for babsonnexus App Play configs).
+    dpad: bool = False
+    # Raw shell commands (network ADB) — real force-stop / input keyevent fidelity.
+    shell: bool = False
     current_app: bool = False
     playback_state: bool = False
     power: bool = False

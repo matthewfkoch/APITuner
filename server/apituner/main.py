@@ -272,7 +272,7 @@ async def tuner_apps(tuner_id: str, request: Request) -> list[dict]:
     return [{"name": p, "packageName": p} for p in info.packages]
 
 
-# ---- Pairing (androidtv_remote backend) ----
+# ---- Pairing (androidtv_remote / firetv_rest backends) ----
 
 
 @app.get("/api/tuners/{tuner_id}/pair/status")
@@ -310,7 +310,8 @@ async def pair_start(tuner_id: str, request: Request) -> dict:
 @app.post("/api/tuners/{tuner_id}/pair/finish")
 async def pair_finish(tuner_id: str, request: Request) -> dict:
     manager = _manager(request)
-    tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
+    store = _store(request)
+    tuner = next((t for t in store.config.tuners if t.id == tuner_id), None)
     if tuner is None:
         raise HTTPException(status_code=404, detail="Tuner not found")
     body = await request.json()
@@ -322,6 +323,11 @@ async def pair_finish(tuner_id: str, request: Request) -> dict:
         await backend.finish_pairing(pin)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Pairing failed: {exc}") from exc
+    # Persist Fire TV REST client token onto the tuner config when present.
+    token = getattr(backend, "client_token", None)
+    if token and tuner.control.type == "firetv_rest":
+        tuner.control.token = token
+        store.save()
     await manager.refresh_info(tuner_id)
     return {"success": True, "message": "Paired successfully"}
 
@@ -381,6 +387,46 @@ async def delete_channel(number: int, request: Request) -> dict:
     return {"success": True}
 
 
+# ---- Tune configurations (babsonnexus / ADBTuner App Play) ----
+
+
+@app.get("/api/configurations")
+async def list_configurations(request: Request) -> list[dict]:
+    return _store(request).export_configurations()
+
+
+@app.post("/api/configurations/import")
+async def import_configurations(request: Request) -> dict:
+    body = await request.json()
+    data = body.get("configurations", body) if isinstance(body, dict) else body
+    if isinstance(data, dict) and isinstance(data.get("configurations"), list):
+        data = data["configurations"]
+    replace = bool(body.get("replace")) if isinstance(body, dict) else False
+    try:
+        count = _store(request).import_configurations(data, replace=replace)
+    except ChannelValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "imported": count}
+
+
+@app.get("/api/configurations/export")
+async def export_configurations(request: Request) -> JSONResponse:
+    return JSONResponse(_store(request).export_configurations())
+
+
+@app.delete("/api/configurations/{uuid}")
+async def delete_configuration(uuid: str, request: Request) -> dict:
+    store = _store(request)
+    before = len(store.config.configurations)
+    store.config.configurations = [
+        c for c in store.config.configurations if c.uuid != uuid
+    ]
+    if len(store.config.configurations) == before:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+    store.save()
+    return {"success": True}
+
+
 # ---- Options, import/export, discovery, status ----
 
 
@@ -423,7 +469,6 @@ async def import_channels(request: Request) -> dict:
     except ChannelValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"success": True, "imported": count}
-
 
 @app.get("/api/discover")
 async def discover_devices(timeout: float = 5.0) -> list[dict[str, Any]]:
@@ -469,8 +514,8 @@ async def grant_tuner_permissions(tuner_id: str, request: Request) -> dict:
     )
     if not result.accessibility:
         payload["message"] += (
-            ". If HOME/BACK keys are needed, also enable APITuner Agent under "
-            "Settings → Accessibility on the device (Fire may require a one-time confirm)."
+            ". Accessibility / Send keys did not bind — re-run Grant permissions (ADB); "
+            "Fire OS often needs the one-time reboot that grant performs (no on-device toggle)."
         )
     return payload
 

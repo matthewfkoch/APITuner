@@ -6,11 +6,11 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import ValidationError
 
-from .models import AppConfig, Channel
+from .models import AppConfig, Channel, TuneConfiguration
 from .channels import ChannelValidationError, validate_channel_numbers
 
 # Fields ADBTuner uses in its channel export; we keep parity for drop-in import/export.
@@ -27,6 +27,7 @@ _ADBTUNER_CHANNEL_FIELDS = (
     "key_macro",
     "compatibility_mode",
     "tvc_guide_stationid",
+    "configuration_uuid",
 )
 
 
@@ -58,6 +59,12 @@ def normalize_adbtuner_channel(item: dict[str, Any]) -> dict[str, Any]:
 
     if out.get("alternate_package_name") == "":
         out["alternate_package_name"] = None
+
+    cuuid = out.get("configuration_uuid")
+    if cuuid is None or cuuid == "":
+        out["configuration_uuid"] = None
+    else:
+        out["configuration_uuid"] = str(cuuid)
 
     return out
 
@@ -115,6 +122,13 @@ class ConfigStore:
     def config(self) -> AppConfig:
         return self._config
 
+    def get_configuration(self, uuid: str) -> Optional[TuneConfiguration]:
+        with self._lock:
+            for cfg in self._config.configurations:
+                if cfg.uuid == uuid:
+                    return cfg
+        return None
+
     # -- Import / export (ADBTuner-compatible channel lists) --
 
     def export_channels(self) -> list[dict[str, Any]]:
@@ -159,5 +173,53 @@ class ConfigStore:
                     merged[ch.number] = ch
                 self._config.channels = list(merged.values())
             validate_channel_numbers(self._config.channels)
+            self.save()
+            return len(imported)
+
+    def export_configurations(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [c.model_dump() for c in self._config.configurations]
+
+    def import_configurations(
+        self, data: list[dict[str, Any]] | dict[str, Any], *, replace: bool = False
+    ) -> int:
+        """Import one or more ADBTuner / babsonnexus configuration JSON objects."""
+        items: list[dict[str, Any]]
+        if isinstance(data, dict):
+            items = [data]
+        elif isinstance(data, list):
+            items = data
+        else:
+            raise ChannelValidationError("Configurations must be an object or array")
+
+        with self._lock:
+            imported: list[TuneConfiguration] = []
+            for index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    raise ChannelValidationError(
+                        f"Configuration at index {index} must be an object"
+                    )
+                label = item.get("name") or item.get("uuid") or f"index {index}"
+                if not item.get("uuid"):
+                    raise ChannelValidationError(
+                        f"Invalid configuration '{label}': missing uuid"
+                    )
+                try:
+                    imported.append(TuneConfiguration.model_validate(item))
+                except ValidationError as exc:
+                    msgs = "; ".join(
+                        error.get("msg", "invalid") for error in exc.errors()[:3]
+                    )
+                    raise ChannelValidationError(
+                        f"Invalid configuration '{label}': {msgs}"
+                    ) from exc
+
+            if replace:
+                self._config.configurations = imported
+            else:
+                merged = {c.uuid: c for c in self._config.configurations}
+                for cfg in imported:
+                    merged[cfg.uuid] = cfg
+                self._config.configurations = list(merged.values())
             self.save()
             return len(imported)

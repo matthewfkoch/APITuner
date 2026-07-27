@@ -96,7 +96,7 @@ object SettingsNavigator {
             context,
             candidates,
             help = if (fireManufacturer) {
-                "Fire TV: Settings → Accessibility → APITuner Agent"
+                "Fire TV: use APITuner dashboard → Grant permissions (ADB)"
             } else {
                 "Settings → System → Accessibility → APITuner Agent"
             },

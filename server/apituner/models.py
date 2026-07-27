@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-BackendType = Literal["androidtv_remote", "http_agent"]
+BackendType = Literal["androidtv_remote", "http_agent", "firetv_rest", "adb"]
 
 # Recommended backend for Google TV / YouTube TV: package-pinned deep links via the Agent.
 DEFAULT_BACKEND: BackendType = "http_agent"
@@ -17,6 +17,9 @@ DEFAULT_BACKEND: BackendType = "http_agent"
 DEFAULT_AGENT_PORT = 9092
 DEFAULT_REMOTE_API_PORT = 6466
 DEFAULT_REMOTE_PAIR_PORT = 6467
+DEFAULT_FIRETV_REST_PORT = 8080
+DEFAULT_FIRETV_WAKE_PORT = 8009
+DEFAULT_ADB_PORT = 5555
 
 
 def _new_id() -> str:
@@ -34,10 +37,11 @@ class ControlConfig(BaseModel):
     type: BackendType = DEFAULT_BACKEND
     host: str
     # Agent: HTTP port (default 9092). Remote: API command port (default 6466).
+    # Fire TV REST: HTTPS control port (default 8080). ADB: network debug port (5555).
     port: Optional[int] = None
     # Remote pairing port (default 6467); only used by the androidtv_remote backend.
     pair_port: Optional[int] = None
-    # Optional bearer token for the http_agent backend.
+    # Optional bearer token for http_agent, or Fire TV REST X-Client-Token after pairing.
     token: Optional[str] = None
 
 
@@ -73,6 +77,36 @@ class Channel(BaseModel):
     compatibility_mode: bool = False
     # Gracenote / TVG station id, included in the generated M3U when present.
     tvc_guide_stationid: Optional[str] = None
+    # ADBTuner / babsonnexus App Play configuration UUID (D-pad navigation scripts).
+    configuration_uuid: Optional[str] = None
+
+
+class TuneConfigurationOptions(BaseModel):
+    """Per-configuration tune timing options (ADBTuner global_options)."""
+
+    wait_for_video_playback_detection: bool = True
+    use_fixed_delay: bool = False
+    fixed_delay_seconds: float = 0.0
+    check_for_and_clear_whos_watching_prompts: bool = True
+    wait_after_post_playback_start_commands_seconds: float = 0.0
+
+
+class TuneConfiguration(BaseModel):
+    """ADBTuner-compatible tune configuration (babsonnexus App Play scripts)."""
+
+    uuid: str
+    name: str = ""
+    author: Optional[str] = None
+    version: Optional[str] = None
+    description: Optional[str] = None
+    global_options: TuneConfigurationOptions = Field(
+        default_factory=TuneConfigurationOptions
+    )
+    # Command entries are strings or {"ADB_LOOP": {"iterations": N|str, "commands": [...]}}.
+    pre_tune_commands: list[Any] = Field(default_factory=list)
+    tune_commands: list[Any] = Field(default_factory=list)
+    post_playback_start_commands: list[Any] = Field(default_factory=list)
+    post_tune_commands: list[Any] = Field(default_factory=list)
 
 
 class GlobalOptions(BaseModel):
@@ -126,4 +160,5 @@ class AppConfig(BaseModel):
 
     tuners: list[Tuner] = Field(default_factory=list)
     channels: list[Channel] = Field(default_factory=list)
+    configurations: list[TuneConfiguration] = Field(default_factory=list)
     options: GlobalOptions = Field(default_factory=GlobalOptions)

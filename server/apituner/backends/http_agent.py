@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class HttpAgentBackend(ControlBackend):
     capabilities = Capabilities(
         keys=True,  # partial: Accessibility global BACK/HOME/RECENTS only
+        dpad=False,  # Agent cannot inject D-pad; use androidtv_remote / firetv_rest for App Play
         current_app=True,
         playback_state=True,
         power=False,

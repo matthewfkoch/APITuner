@@ -43,7 +43,7 @@ class GrantResult:
             "notification": self.notification,
             "accessibility": self.accessibility,
             "messages": self.messages,
-            # Accessibility often needs an on-device consent toggle on Fire OS.
+            # Accessibility is granted via the same ADB path (may reboot to bind).
             "success": self.overlay and self.usage and self.notification,
         }
 
@@ -207,6 +207,36 @@ async def grant_agent_permissions(host: str, *, adb_port: int = 5555) -> GrantRe
     notif_ok = notif_ok and AGENT_PACKAGE in (notif_verify or "")
     a11y_ok = a11y_ok and AGENT_PACKAGE in (a11y_verify or "")
 
+    # Fire OS often writes enabled_accessibility_services but does not bind the
+    # service until after a reboot. Detect via dumpsys and reboot once if needed.
+    if a11y_ok and not await _accessibility_bound(shell):
+        messages.append(
+            "Accessibility listed in settings but not bound; rebooting device once"
+        )
+        await shell("reboot")
+        if await _wait_for_boot(adb, serial, messages):
+            a11y_list = merge_colon_list(None, ACCESSIBILITY_SERVICE)
+            # Re-read peers after reboot in case OEM restored others.
+            _, cur_a11y = await shell(
+                "settings", "get", "secure", "enabled_accessibility_services"
+            )
+            a11y_list = merge_colon_list(cur_a11y, ACCESSIBILITY_SERVICE)
+            await shell(
+                "settings",
+                "put",
+                "secure",
+                "enabled_accessibility_services",
+                a11y_list,
+            )
+            await shell("settings", "put", "secure", "accessibility_enabled", "1")
+            await asyncio.sleep(2.0)
+            a11y_ok = await _accessibility_bound(shell)
+            if not a11y_ok:
+                _, a11y_verify = await shell(
+                    "settings", "get", "secure", "enabled_accessibility_services"
+                )
+                a11y_ok = AGENT_PACKAGE in (a11y_verify or "")
+
     # Do NOT am force-stop the Agent after granting. On Fire OS, force-stop
     # clears enabled_accessibility_services (and can unbind the notification
     # listener), which is exactly what Grant permissions just set. Bring the
@@ -229,3 +259,28 @@ async def grant_agent_permissions(host: str, *, adb_port: int = 5555) -> GrantRe
         a11y_ok,
     )
     return result
+
+
+async def _accessibility_bound(shell) -> bool:
+    """True if dumpsys accessibility shows the Agent service is active."""
+    _, out = await shell("dumpsys", "accessibility")
+    text = out or ""
+    return "KeyAccessibilityService" in text or "APITuner Agent" in text
+
+
+async def _wait_for_boot(
+    adb: str, serial: str, messages: list[str], *, timeout: float = 120.0
+) -> bool:
+    """Wait for adb device to come back after reboot."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    await asyncio.sleep(8.0)
+    while asyncio.get_event_loop().time() < deadline:
+        code, out = await _run(adb, "connect", serial, timeout=15.0)
+        messages.append(out or f"adb connect {serial} (exit {code})")
+        code, out = await _run(adb, "-s", serial, "shell", "getprop", "sys.boot_completed")
+        if (out or "").strip() == "1":
+            messages.append("device boot_completed=1")
+            return True
+        await asyncio.sleep(3.0)
+    messages.append("timed out waiting for device reboot")
+    return False

@@ -9,9 +9,10 @@ WORKDIR /app
 
 # curl: diagnose Agent reachability from inside the container.
 # adb: one-time Fire TV Agent permission grant (see README — day-to-day tuning is ADB-free).
+# ffmpeg + tesseract: encoder frame OCR for Max / who's-watching prompts (config flag only).
 COPY requirements.txt .
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl adb \
+    && apt-get install -y --no-install-recommends curl adb ffmpeg tesseract-ocr tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 

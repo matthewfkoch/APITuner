@@ -41,7 +41,18 @@ Channels DVR ──HDHomeRun /auto/v…──▶ APITuner ──control──▶
 
 **Use `http_agent` for production deep-link tuning** (especially YouTube TV). The Agent sends intents with an explicit package, like ADBTuner's `am start`, so channels open directly instead of stalling on an "Open with" dialog.
 
-Use `androidtv_remote`, `firetv_rest`, or `adb` when running babsonnexus **App Play** configurations (D-pad navigation). Prefer ADB-free backends when they work; use **`adb` on Fire** when `:8080` Fire TV REST is missing.
+Use `androidtv_remote`, `firetv_rest`, or `adb` when running babsonnexus **App Play** configurations (D-pad navigation), **or** as a hybrid **`keys_control`** plane alongside `http_agent` (recommended for Max profile prompts + YTTV deep links on the same device). Prefer ADB-free backends when they work; use **`adb` on Fire** when `:8080` Fire TV REST is missing.
+
+### Hybrid control (`keys_control`)
+
+Keep **`control: http_agent`** for package-pinned launches and playback probes. Add optional **`keys_control`** on the same tuner for D-pad:
+
+| Device | Primary `control` | `keys_control` |
+| --- | --- | --- |
+| Google TV / onn / Chromecast | `http_agent` `:9092` | `androidtv_remote` `:6466` / pair `:6467` |
+| Fire Stick | `http_agent` `:9092` | `firetv_rest` `:8080` or `adb` `:5555` |
+
+Pair the keys backend from the dashboard (Pair button). Without `keys_control`, Max `key_macro` / who’s-watching / App Play cannot send `DPAD_CENTER` (Agent Accessibility only supports BACK/HOME/RECENTS).
 
 ### Agent setup (per device)
 
@@ -127,10 +138,10 @@ Config and pairing certs are stored under `APITUNER_DATA_DIR` (default `./data` 
 
 1. **Add a tuner** in the dashboard (or click **Discover**).
 2. **Recommended for deep links (YouTube TV / HBO) — `http_agent`:** install the Agent APK (see above), grant permissions, enter the device IP (port `9092`).
-3. **App Play (babsonnexus native-app navigation) — pick a D-pad backend:**
-   - **`androidtv_remote`** (Google TV / Android TV): enter the device IP, click **Pair**, enter the PIN shown on the TV. Pairing certs are stored under `data/certs/`.
-   - **`firetv_rest`** (Fire Stick / Fire TV with `:8080` Remote API): uses the Fire TV Remote HTTP API — no ADB. Click **Pair**, enter the on-screen PIN. Default port `8080`.
-   - **`adb`** (Fire App Play **fallback**): network ADB on port `5555`. Use when `firetv_rest` is unavailable (common on older Fire OS 7 sticks). Enable ADB debugging, accept the RSA prompt once. Real `am force-stop` / `input keyevent` like ADBTuner. Google TV day-to-day tuning should still use Agent / Remote — reserve `adb` for Fire App Play.
+3. **App Play / Max prompts — D-pad backend or hybrid `keys_control`:**
+   - Prefer **Agent + keys**: primary `http_agent`, then set Keys / D-pad backend to `androidtv_remote` (Google TV) or `firetv_rest` / `adb` (Fire). Pair the keys plane from the dashboard.
+   - Or use a single **`androidtv_remote`**, **`firetv_rest`**, or **`adb`** tuner for App Play-only devices.
+   - **`adb`** (Fire App Play **fallback**): network ADB on port `5555` when `firetv_rest` is unavailable (common on older Fire OS 7 sticks).
 4. Enter the **encoder stream URL** — the HDMI encoder's MPEG-TS endpoint, e.g. `http://192.0.2.20/4.ts`.
 See `config.example.json` for a sample configuration.
 
@@ -144,22 +155,28 @@ Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is
 - `configuration_uuid` — optional; set for [babsonnexus HDMI Encoder Native Apps](https://github.com/babsonnexus/hdmi-encoder-native-apps) App Play stations
 - `action` (default `android.intent.action.VIEW`)
 - `component` — explicit activity (used by the Agent backend; Android 12+)
-- `key_macro` — keys sent after launch to dismiss prompts (remote backend only)
+- `key_macro` — keys sent after launch to dismiss prompts (comma or semicolon; needs D-pad via primary remote/adb **or** hybrid `keys_control`)
 - `compatibility_mode`, `tvc_guide_stationid`
+
+Dynamic / lane URLs (FruitDeepLinks, OliveTin, ADBTuner-style resolvers) are fetched at tune time when the URL looks like a resolver (`/lanes/`, `/whatson/`, `dynamic_url_json_key=…`, or `format=json|text` on a deeplink API). The stored URL stays the resolver; only the resolved deeplink is launched.
 
 ADBTuner exports sometimes have `"number": null`. APITuner fills that from `sort_order` when present; otherwise import returns a clear 400 error naming the channel instead of an internal server error.
 
 ### App Play configurations (babsonnexus)
 
-Native apps without reliable deep links (ESPN, CBS, Fox, NBC, …) use ADBTuner **configurations**: D-pad scripts with `adbtuner_open_app`, `input keyevent`, `sleep`, and `ADB_LOOP`. APITuner runs those **without ADB** on backends that expose full D-pad:
+Native apps without reliable deep links (ESPN, CBS, Fox, NBC, …) use ADBTuner **configurations**: D-pad scripts with `adbtuner_open_app`, `input keyevent`, `sleep`, and `ADB_LOOP`. APITuner runs those on backends that expose full D-pad (including hybrid `keys_control`):
 
 1. In the dashboard **Configurations** tab, import JSON from `adbtuner_native/configurations/*.json`.
 2. On **Channels**, import the matching station list (keeps `configuration_uuid`).
-3. Use an **`androidtv_remote`**, **`firetv_rest`**, or **`adb`** tuner for those channels (`http_agent` cannot inject D-pad). On older Fire sticks without `:8080`, use **`adb`**.
+3. Use a D-pad backend **or** Agent + `keys_control` on the tuner (`http_agent` alone cannot inject D-pad). On older Fire sticks without `:8080`, use **`adb`** as `keys_control` or primary.
 
-Deep-link stations (e.g. HBO Max with `https://…` URLs) still use the normal launch path even if a `configuration_uuid` is present. `am force-stop` is real on the `adb` backend; on Remote/FireTV REST it maps to best-effort HOME/stop.
+Deep-link stations with a `configuration_uuid` (e.g. Max + ADBTuner Compatibility Mode) use the normal Agent launch path **and** apply that config as an overlay: `pre_tune_commands`, who’s-watching clears when `check_for_and_clear_whos_watching_prompts` is true, `key_macro`, and `post_playback_start_commands`. Redundant `am start` lines are skipped when the Agent already launched the deeplink.
 
-Fire TV REST notes: reverse-engineered Amazon protocol; TLS verification is disabled; may need a wake on port `8009`; can break on Fire OS updates. If `:8080` never opens after wake (common on Fire OS 7 / older sticks), switch the tuner to **`adb`**.## Connect to Channels DVR
+**Who’s-watching:** when the config flag is on, APITuner briefly samples the HDMI encoder with ffmpeg + tesseract OCR (≈3.5s budget, fast exit if no prompt). Needs `keys_control` / D-pad for Select. YTTV and configs with the flag off pay zero OCR cost. `am force-stop` is real on the `adb` keys plane; on Remote/FireTV REST it maps to best-effort HOME/stop.
+
+Fire TV REST notes: reverse-engineered Amazon protocol; TLS verification is disabled; may need a wake on port `8009`; can break on Fire OS updates. If `:8080` never opens after wake (common on Fire OS 7 / older sticks), switch the tuner to **`adb`**.
+
+## Connect to Channels DVR
 
 ### Recommended: HDHomeRun tuner (multi-TV sync)
 

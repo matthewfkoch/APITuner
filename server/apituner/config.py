@@ -66,6 +66,12 @@ def normalize_adbtuner_channel(item: dict[str, Any]) -> dict[str, Any]:
     else:
         out["configuration_uuid"] = str(cuuid)
 
+    if "key_macro" in out and out["key_macro"] is not None:
+        from .keys import normalize_key_macro
+
+        km = normalize_key_macro(out["key_macro"])
+        out["key_macro"] = km or None
+
     return out
 
 

@@ -56,19 +56,16 @@ def url_looks_like_deeplink(url: str) -> bool:
     return False
 
 
-def resolve_app_play_config(
+def resolve_tune_configuration(
     channel: Channel,
     configurations: list[TuneConfiguration],
 ) -> Optional[TuneConfiguration]:
-    """Return the App Play config for a channel, or None for deep-link / default path.
+    """Return the imported configuration for a channel UUID, if any.
 
-    Raises ConfigInterpreterError if configuration_uuid is set (and url is not a
-    deep link) but no matching configuration is imported.
+    Raises ConfigInterpreterError if configuration_uuid is set but not imported.
     """
     uuid = (channel.configuration_uuid or "").strip()
     if not uuid:
-        return None
-    if url_looks_like_deeplink(channel.url):
         return None
     for cfg in configurations:
         if cfg.uuid == uuid:
@@ -78,6 +75,28 @@ def resolve_app_play_config(
         f"configuration_uuid {uuid!r}, but that configuration is not imported. "
         "Import it under Configurations first."
     )
+
+
+def is_app_play_channel(channel: Channel) -> bool:
+    """True when the channel uses App Play navigation (non-deeplink identifier URL)."""
+    uuid = (channel.configuration_uuid or "").strip()
+    if not uuid:
+        return False
+    return not url_looks_like_deeplink(channel.url)
+
+
+def resolve_app_play_config(
+    channel: Channel,
+    configurations: list[TuneConfiguration],
+) -> Optional[TuneConfiguration]:
+    """Return the App Play config for a channel, or None for deep-link / default path.
+
+    Deep-link channels may still have a configuration_uuid for overlays (who's-watching,
+    pre/post commands); those are resolved via ``resolve_tune_configuration`` instead.
+    """
+    if not is_app_play_channel(channel):
+        return None
+    return resolve_tune_configuration(channel, configurations)
 
 
 def _substitute(text: str, *, package: str, identifier: str) -> str:
@@ -106,10 +125,17 @@ async def run_commands(
     *,
     package: str,
     identifier: str,
+    skip_am_start: bool = False,
 ) -> None:
     """Execute a list of ADBTuner configuration commands against a backend."""
     for entry in commands:
-        await _run_one(backend, entry, package=package, identifier=identifier)
+        await _run_one(
+            backend,
+            entry,
+            package=package,
+            identifier=identifier,
+            skip_am_start=skip_am_start,
+        )
 
 
 async def _run_one(
@@ -118,6 +144,7 @@ async def _run_one(
     *,
     package: str,
     identifier: str,
+    skip_am_start: bool = False,
 ) -> None:
     if isinstance(entry, dict) and "ADB_LOOP" in entry:
         loop_spec = entry["ADB_LOOP"]
@@ -145,7 +172,11 @@ async def _run_one(
         for _ in range(max(0, iterations)):
             for nested in body:
                 await _run_one(
-                    backend, nested, package=package, identifier=identifier
+                    backend,
+                    nested,
+                    package=package,
+                    identifier=identifier,
+                    skip_am_start=skip_am_start,
                 )
         return
 
@@ -189,6 +220,9 @@ async def _run_one(
 
     # Shell backends: pass through input/am/monkey for ADBTuner fidelity.
     if _has_shell(backend) and _SHELLISH_RE.match(cmd):
+        if skip_am_start and _AM_START_RE.match(cmd):
+            logger.info("Skipping redundant am start (already launched): %s", cmd[:80])
+            return
         await backend.run_shell(cmd)  # type: ignore[attr-defined]
         return
 
@@ -197,7 +231,11 @@ async def _run_one(
         await backend.send_key(_normalize_key(m.group(1)))
         return
 
-    if _AM_START_RE.match(cmd):
+    m = _AM_START_RE.match(cmd)
+    if m:
+        if skip_am_start:
+            logger.info("Skipping redundant am start (already launched): %s", cmd[:80])
+            return
         raise ConfigInterpreterError(
             f"Unsupported am start without a shell backend "
             f"(use adb backend or adbtuner_open_app): {cmd}"

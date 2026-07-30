@@ -10,6 +10,13 @@
         "pair_port": null,
         "token": null
       },
+      "keys_control": {
+        "type": "androidtv_remote",
+        "host": "192.0.2.10",
+        "port": 6466,
+        "pair_port": 6467,
+        "token": null
+      },
       "stream_endpoint": "http://192.0.2.20/0.ts",
       "enabled": true
     },

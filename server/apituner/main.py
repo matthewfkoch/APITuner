@@ -281,7 +281,7 @@ async def pair_status(tuner_id: str, request: Request) -> dict:
     tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
     if tuner is None:
         raise HTTPException(status_code=404, detail="Tuner not found")
-    backend = manager.get_backend(tuner)
+    backend = manager.get_pairing_backend(tuner)
     if not backend.requires_pairing:
         return {"requires_pairing": False, "paired": True}
     try:
@@ -297,7 +297,7 @@ async def pair_start(tuner_id: str, request: Request) -> dict:
     tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
     if tuner is None:
         raise HTTPException(status_code=404, detail="Tuner not found")
-    backend = manager.get_backend(tuner)
+    backend = manager.get_pairing_backend(tuner)
     if not backend.requires_pairing:
         raise HTTPException(status_code=400, detail="Backend does not require pairing")
     try:
@@ -318,16 +318,20 @@ async def pair_finish(tuner_id: str, request: Request) -> dict:
     pin = str(body.get("pin", "")).strip()
     if not pin:
         raise HTTPException(status_code=400, detail="Missing pin")
-    backend = manager.get_backend(tuner)
+    backend = manager.get_pairing_backend(tuner)
     try:
         await backend.finish_pairing(pin)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Pairing failed: {exc}") from exc
-    # Persist Fire TV REST client token onto the tuner config when present.
+    # Persist Fire TV REST client token onto the keys or primary control config.
     token = getattr(backend, "client_token", None)
-    if token and tuner.control.type == "firetv_rest":
-        tuner.control.token = token
-        store.save()
+    if token:
+        if tuner.keys_control and tuner.keys_control.type == "firetv_rest":
+            tuner.keys_control.token = token
+            store.save()
+        elif tuner.control.type == "firetv_rest":
+            tuner.control.token = token
+            store.save()
     await manager.refresh_info(tuner_id)
     return {"success": True, "message": "Paired successfully"}
 

@@ -6,9 +6,11 @@ import secrets
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 BackendType = Literal["androidtv_remote", "http_agent", "firetv_rest", "adb"]
+# D-pad / key injection plane (used with http_agent primary for hybrid control).
+KeysBackendType = Literal["androidtv_remote", "firetv_rest", "adb"]
 
 # Recommended backend for Google TV / YouTube TV: package-pinned deep links via the Agent.
 DEFAULT_BACKEND: BackendType = "http_agent"
@@ -51,9 +53,31 @@ class Tuner(BaseModel):
     id: str = Field(default_factory=_new_id)
     name: str
     control: ControlConfig
+    # Optional D-pad / key plane (same device). Primary stays http_agent for launches;
+    # keys_control handles key_macro, App Play D-pad, and who's-watching Select.
+    keys_control: Optional[ControlConfig] = None
     # URL to the HDMI encoder's MPEG-TS HTTP stream (e.g. http://192.0.2.20:8090/stream0).
     stream_endpoint: str
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def _normalize_keys_control(self) -> "Tuner":
+        kc = self.keys_control
+        if kc is None:
+            return self
+        if kc.type == "http_agent":
+            raise ValueError(
+                "keys_control.type cannot be http_agent "
+                "(use androidtv_remote, firetv_rest, or adb)"
+            )
+        if kc.type not in ("androidtv_remote", "firetv_rest", "adb"):
+            raise ValueError(f"Unsupported keys_control.type: {kc.type!r}")
+        host = (kc.host or "").strip() or (self.control.host or "").strip()
+        if not host:
+            raise ValueError("keys_control.host is required (or set control.host)")
+        if (kc.host or "").strip() != host:
+            self.keys_control = kc.model_copy(update={"host": host})
+        return self
 
 
 class Channel(BaseModel):
@@ -71,7 +95,7 @@ class Channel(BaseModel):
     action: str = "android.intent.action.VIEW"
     # Comma-separated key:value intent extras (http_agent backend).
     extra_string: Optional[str] = None
-    # Key names sent after launch to clear prompts (androidtv_remote backend only).
+    # Key names sent after launch to clear prompts (D-pad / keys backend).
     key_macro: Optional[list[str]] = None
     # More aggressive stop/relaunch behavior for finicky apps.
     compatibility_mode: bool = False
@@ -79,6 +103,16 @@ class Channel(BaseModel):
     tvc_guide_stationid: Optional[str] = None
     # ADBTuner / babsonnexus App Play configuration UUID (D-pad navigation scripts).
     configuration_uuid: Optional[str] = None
+
+    @field_validator("key_macro", mode="before")
+    @classmethod
+    def _normalize_key_macro_field(cls, value: object) -> object:
+        from .keys import normalize_key_macro
+
+        if value is None or value == "":
+            return None
+        normalized = normalize_key_macro(value)
+        return normalized or None
 
 
 class TuneConfigurationOptions(BaseModel):

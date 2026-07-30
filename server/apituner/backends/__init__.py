@@ -9,7 +9,8 @@ from .base import (
     DeviceInfo,
     PlaybackState,
 )
-from .factory import build_backend
+from .factory import build_backend, build_keys_backend
+from .hybrid import SplitControlBackend
 
 __all__ = [
     "BackendError",
@@ -19,5 +20,7 @@ __all__ = [
     "ControlBackend",
     "DeviceInfo",
     "PlaybackState",
+    "SplitControlBackend",
     "build_backend",
+    "build_keys_backend",
 ]

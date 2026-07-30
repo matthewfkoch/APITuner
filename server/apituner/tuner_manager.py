@@ -6,18 +6,29 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
-from .backends import ControlBackend, DeviceInfo, PlaybackState, build_backend
-from .backends import Capabilities
+from .backends import (
+    Capabilities,
+    ControlBackend,
+    DeviceInfo,
+    PlaybackState,
+    SplitControlBackend,
+    build_backend,
+    build_keys_backend,
+)
 from .config import ConfigStore
 from .config_interpreter import (
     ConfigInterpreterError,
     resolve_app_play_config,
+    resolve_tune_configuration,
     run_commands,
 )
+from .dynamic_url import DynamicUrlError, looks_like_dynamic_url, resolve_dynamic_url
+from .keys import key_requires_dpad, normalize_key_macro
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
+from .whos_watching import clear_whos_watching_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +70,15 @@ class Lease:
     tune_id: str
     channel: Channel
     tune_configuration: Optional[TuneConfiguration] = None
+    # Backend used for post_tune key/shell commands (keys plane when hybrid).
+    command_backend: Optional[ControlBackend] = None
+
 
 class TunerManager:
     def __init__(self, store: ConfigStore) -> None:
         self._store = store
         self._backends: dict[str, ControlBackend] = {}
+        self._keys_backends: dict[str, ControlBackend] = {}
         self._info: dict[str, DeviceInfo] = {}
         self._states: dict[str, TunerState] = {}
         self._alloc_lock = asyncio.Lock()
@@ -94,6 +109,34 @@ class TunerManager:
             self._backends[tuner.id] = backend
         return backend
 
+    def get_keys_backend(self, tuner: Tuner) -> Optional[ControlBackend]:
+        if tuner.keys_control is None:
+            return None
+        backend = self._keys_backends.get(tuner.id)
+        if backend is None:
+            backend = build_keys_backend(
+                tuner, self._store.certs_dir, request_timeout=self._options.request_timeout
+            )
+            if backend is not None:
+                self._keys_backends[tuner.id] = backend
+        return backend
+
+    def get_pairing_backend(self, tuner: Tuner) -> ControlBackend:
+        """Backend that owns Pair (keys plane when hybrid Agent + remote/Fire)."""
+        keys = self.get_keys_backend(tuner)
+        if keys is not None and keys.requires_pairing:
+            return keys
+        return self.get_backend(tuner)
+
+    def _command_backend(
+        self, tuner: Tuner, primary: ControlBackend
+    ) -> ControlBackend:
+        """Backend for keyevents / App Play scripts (prefer keys plane)."""
+        keys = self.get_keys_backend(tuner)
+        if keys is None:
+            return primary
+        return SplitControlBackend(primary, keys)
+
     def _state(self, tuner_id: str) -> TunerState:
         st = self._states.get(tuner_id)
         if st is None:
@@ -104,13 +147,15 @@ class TunerManager:
     async def invalidate(self, tuner_id: str) -> None:
         """Drop cached backend/info for a tuner (after edit/removal)."""
         backend = self._backends.pop(tuner_id, None)
+        keys = self._keys_backends.pop(tuner_id, None)
         self._info.pop(tuner_id, None)
         self._states.pop(tuner_id, None)
-        if backend is not None:
-            try:
-                await backend.close()
-            except Exception:  # noqa: BLE001
-                pass
+        for be in (backend, keys):
+            if be is not None:
+                try:
+                    await be.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     # -- Info / health --
 
@@ -232,19 +277,7 @@ class TunerManager:
             backend = self.get_backend(tuner)
             tune_id = _new_tune_id()
             try:
-                app_play = resolve_app_play_config(
-                    channel, self._store.config.configurations
-                )
-                await self._do_tune(
-                    tuner, backend, channel, tune_id, options, app_play=app_play
-                )
-                return Lease(
-                    tuner=tuner,
-                    backend=backend,
-                    tune_id=tune_id,
-                    channel=channel,
-                    tune_configuration=app_play,
-                )
+                return await self._lease_on(tuner, backend, channel, tune_id, options)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Tune %s failed on %s: %s", tune_id, tuner.name, exc)
                 st = self._state(tuner.id)
@@ -266,19 +299,7 @@ class TunerManager:
             backend = self.get_backend(tuner)
             tune_id = _new_tune_id()
             try:
-                app_play = resolve_app_play_config(
-                    channel, self._store.config.configurations
-                )
-                await self._do_tune(
-                    tuner, backend, channel, tune_id, options, app_play=app_play
-                )
-                return Lease(
-                    tuner=tuner,
-                    backend=backend,
-                    tune_id=tune_id,
-                    channel=channel,
-                    tune_configuration=app_play,
-                )
+                return await self._lease_on(tuner, backend, channel, tune_id, options)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Tune %s failed on %s: %s", tune_id, tuner.name, exc)
                 st = self._state(tuner.id)
@@ -287,6 +308,40 @@ class TunerManager:
                 last_err = exc
                 if not options.retry_on_other_tuner:
                     raise
+
+    async def _lease_on(
+        self,
+        tuner: Tuner,
+        backend: ControlBackend,
+        channel: Channel,
+        tune_id: str,
+        options: GlobalOptions,
+    ) -> Lease:
+        configs = self._store.config.configurations
+        try:
+            overlay = resolve_tune_configuration(channel, configs)
+        except ConfigInterpreterError as exc:
+            raise TuneFailed(str(exc)) from exc
+        app_play = resolve_app_play_config(channel, configs)
+        cmd_backend = self._command_backend(tuner, backend)
+        await self._do_tune(
+            tuner,
+            backend,
+            channel,
+            tune_id,
+            options,
+            app_play=app_play,
+            overlay=overlay if app_play is None else None,
+            command_backend=cmd_backend,
+        )
+        return Lease(
+            tuner=tuner,
+            backend=backend,
+            tune_id=tune_id,
+            channel=channel,
+            tune_configuration=app_play or overlay,
+            command_backend=cmd_backend,
+        )
 
     async def _do_tune(
         self,
@@ -297,9 +352,12 @@ class TunerManager:
         options: GlobalOptions,
         *,
         app_play: Optional[TuneConfiguration] = None,
+        overlay: Optional[TuneConfiguration] = None,
+        command_backend: Optional[ControlBackend] = None,
     ) -> None:
         loop = asyncio.get_event_loop()
         t0 = loop.time()
+        cmd_be = command_backend or backend
 
         if channel.compatibility_mode:
             try:
@@ -312,45 +370,18 @@ class TunerManager:
 
         if app_play is not None:
             await self._do_app_play_tune(
-                tuner, backend, channel, chosen_pkg, options, app_play
+                tuner, backend, cmd_be, channel, chosen_pkg, options, app_play
             )
         else:
-            prior_app: Optional[str] = None
-            if backend.capabilities.current_app:
-                try:
-                    prior_app = await backend.current_app()
-                except Exception:  # noqa: BLE001
-                    pass
-
-            await backend.launch(
-                package=chosen_pkg,
-                deeplink=channel.url or None,
-                component=channel.component,
-                action=channel.action,
-                extras=channel.extra_string,
-            )
-            launch_at = loop.time()
-
-            deadline = launch_at + options.tune_timeout_seconds
-            ready = await self._wait_ready(
+            await self._do_deeplink_tune(
+                tuner,
                 backend,
+                cmd_be,
                 channel,
                 chosen_pkg,
                 options,
-                deadline,
-                prior_app=prior_app,
-                launch_at=launch_at,
+                overlay=overlay,
             )
-            if not ready:
-                raise TuneFailed(f"channel {channel.number} not ready within timeout")
-
-            if channel.key_macro and backend.capabilities.keys:
-                for key in channel.key_macro:
-                    try:
-                        await backend.send_key(key)
-                    except Exception:  # noqa: BLE001
-                        pass
-                    await asyncio.sleep(0.5)
 
         elapsed = loop.time() - t0
         st = self._state(tuner.id)
@@ -368,21 +399,129 @@ class TunerManager:
             tuner.name,
         )
 
+    async def _resolve_launch_url(self, channel: Channel) -> str:
+        url = channel.url if channel.url is not None else ""
+        if not looks_like_dynamic_url(url):
+            return url
+        try:
+            return await resolve_dynamic_url(
+                url, timeout=self._options.request_timeout
+            )
+        except DynamicUrlError as exc:
+            raise TuneFailed(str(exc)) from exc
+
+    async def _do_deeplink_tune(
+        self,
+        tuner: Tuner,
+        backend: ControlBackend,
+        cmd_backend: ControlBackend,
+        channel: Channel,
+        chosen_pkg: str,
+        options: GlobalOptions,
+        *,
+        overlay: Optional[TuneConfiguration],
+    ) -> None:
+        launch_url = await self._resolve_launch_url(channel)
+
+        if overlay is not None and overlay.pre_tune_commands:
+            try:
+                await run_commands(
+                    cmd_backend,
+                    overlay.pre_tune_commands,
+                    package=chosen_pkg,
+                    identifier=launch_url,
+                    skip_am_start=True,
+                )
+            except ConfigInterpreterError as exc:
+                raise TuneFailed(str(exc)) from exc
+
+        prior_app: Optional[str] = None
+        if backend.capabilities.current_app:
+            try:
+                prior_app = await backend.current_app()
+            except Exception:  # noqa: BLE001
+                pass
+
+        await backend.launch(
+            package=chosen_pkg,
+            deeplink=launch_url or None,
+            component=channel.component,
+            action=channel.action,
+            extras=channel.extra_string,
+        )
+        launch_at = asyncio.get_event_loop().time()
+
+        # Compatibility / FDL tune_commands are usually another am start — skip;
+        # still allow non-start commands if present.
+        if overlay is not None and overlay.tune_commands:
+            try:
+                await run_commands(
+                    cmd_backend,
+                    overlay.tune_commands,
+                    package=chosen_pkg,
+                    identifier=launch_url,
+                    skip_am_start=True,
+                )
+            except ConfigInterpreterError as exc:
+                raise TuneFailed(str(exc)) from exc
+
+        deadline = launch_at + options.tune_timeout_seconds
+        ready = await self._wait_ready(
+            backend,
+            channel,
+            chosen_pkg,
+            options,
+            deadline,
+            prior_app=prior_app,
+            launch_at=launch_at,
+        )
+        if not ready:
+            raise TuneFailed(f"channel {channel.number} not ready within timeout")
+
+        if overlay is not None and overlay.global_options.check_for_and_clear_whos_watching_prompts:
+            await self._clear_whos_watching(tuner, cmd_backend)
+
+        await self._send_key_macro(channel, cmd_backend)
+
+        if overlay is not None and overlay.post_playback_start_commands:
+            try:
+                await run_commands(
+                    cmd_backend,
+                    overlay.post_playback_start_commands,
+                    package=chosen_pkg,
+                    identifier=launch_url,
+                    skip_am_start=True,
+                )
+            except ConfigInterpreterError as exc:
+                raise TuneFailed(str(exc)) from exc
+            wait_after = float(
+                overlay.global_options.wait_after_post_playback_start_commands_seconds
+                or 0
+            )
+            if wait_after > 0:
+                await asyncio.sleep(wait_after)
+
     async def _do_app_play_tune(
         self,
         tuner: Tuner,
         backend: ControlBackend,
+        cmd_backend: ControlBackend,
         channel: Channel,
         chosen_pkg: str,
         options: GlobalOptions,
         app_play: TuneConfiguration,
     ) -> None:
-        caps = await self._effective_capabilities(backend)
+        caps = await self._effective_capabilities(cmd_backend)
         if not caps.dpad:
             raise TuneFailed(
                 f"App Play channel {channel.number} ({channel.name}) requires a "
                 "D-pad backend (androidtv_remote, firetv_rest, or adb); "
                 f"tuner {tuner.name!r} uses {tuner.control.type}"
+                + (
+                    f" (keys_control={tuner.keys_control.type})"
+                    if tuner.keys_control
+                    else " — set keys_control for hybrid Agent+Remote"
+                )
             )
 
         cfg_opts = app_play.global_options
@@ -390,20 +529,20 @@ class TunerManager:
 
         try:
             await run_commands(
-                backend,
+                cmd_backend,
                 app_play.pre_tune_commands,
                 package=chosen_pkg,
                 identifier=identifier,
             )
             await run_commands(
-                backend,
+                cmd_backend,
                 app_play.tune_commands,
                 package=chosen_pkg,
                 identifier=identifier,
             )
             if app_play.post_playback_start_commands:
                 await run_commands(
-                    backend,
+                    cmd_backend,
                     app_play.post_playback_start_commands,
                     package=chosen_pkg,
                     identifier=identifier,
@@ -416,9 +555,15 @@ class TunerManager:
         except ConfigInterpreterError as exc:
             raise TuneFailed(str(exc)) from exc
 
+        if cfg_opts.check_for_and_clear_whos_watching_prompts:
+            await self._clear_whos_watching(tuner, cmd_backend)
+
+        await self._send_key_macro(channel, cmd_backend)
+
         # Babsonnexus App Play configs typically use fixed delay (no playback probe).
+        primary_caps = await self._effective_capabilities(backend)
         if cfg_opts.use_fixed_delay or not (
-            options.wait_for_playback and caps.playback_state
+            options.wait_for_playback and primary_caps.playback_state
         ):
             delay = float(cfg_opts.fixed_delay_seconds or 0)
             if delay <= 0:
@@ -426,7 +571,6 @@ class TunerManager:
             await asyncio.sleep(delay)
             return
 
-        # Optional playback wait when the backend can report it.
         loop = asyncio.get_event_loop()
         deadline = loop.time() + options.tune_timeout_seconds
         ready = await self._wait_ready(
@@ -442,6 +586,53 @@ class TunerManager:
             raise TuneFailed(
                 f"App Play channel {channel.number} not ready within timeout"
             )
+
+    async def _clear_whos_watching(
+        self, tuner: Tuner, cmd_backend: ControlBackend
+    ) -> None:
+        caps = await self._effective_capabilities(cmd_backend)
+
+        async def _send(key: str) -> None:
+            await cmd_backend.send_key(key)
+
+        status = await clear_whos_watching_prompt(
+            stream_url=tuner.stream_endpoint,
+            send_key=_send,
+            has_dpad=bool(caps.dpad),
+        )
+        logger.info(
+            "Who's-watching on %s: %s",
+            tuner.name,
+            status,
+        )
+
+    async def _send_key_macro(
+        self, channel: Channel, cmd_backend: ControlBackend
+    ) -> None:
+        keys = normalize_key_macro(channel.key_macro)
+        if not keys:
+            return
+        caps = await self._effective_capabilities(cmd_backend)
+        needs_dpad = any(key_requires_dpad(k) for k in keys)
+        if needs_dpad and not caps.dpad:
+            raise TuneFailed(
+                f"Channel {channel.number} ({channel.name}) key_macro {keys} "
+                "requires a D-pad keys backend; set keys_control to "
+                "androidtv_remote, firetv_rest, or adb"
+            )
+        if not caps.keys and not caps.dpad:
+            raise TuneFailed(
+                f"Channel {channel.number} ({channel.name}) key_macro requires "
+                "a keys-capable backend"
+            )
+        for key in keys:
+            try:
+                await cmd_backend.send_key(key)
+            except Exception as exc:  # noqa: BLE001
+                raise TuneFailed(
+                    f"key_macro failed sending {key!r}: {exc}"
+                ) from exc
+            await asyncio.sleep(0.5)
 
     async def _wait_ready(
         self,
@@ -523,7 +714,7 @@ class TunerManager:
         return False
 
     async def _effective_capabilities(self, backend: ControlBackend) -> Capabilities:
-        """Prefer live Agent permission flags when available."""
+        """Prefer live Agent permission flags when available; merge hybrid keys."""
         caps = backend.capabilities
         getter = getattr(backend, "get_live_capabilities", None)
         if getter is None:
@@ -558,18 +749,20 @@ class TunerManager:
         options = self._options
         self._unlock(lease.tuner.id)
         app_play = lease.tune_configuration
+        cmd_be = lease.command_backend or lease.backend
         if app_play is not None and app_play.post_tune_commands:
             chosen_pkg = self._choose_package(lease.tuner.id, lease.channel)
             identifier = lease.channel.url if lease.channel.url is not None else ""
             try:
                 await run_commands(
-                    lease.backend,
+                    cmd_be,
                     app_play.post_tune_commands,
                     package=chosen_pkg,
                     identifier=identifier,
+                    skip_am_start=True,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.debug("App Play post_tune_commands failed: %s", exc)
+                logger.debug("post_tune_commands failed: %s", exc)
         elif (
             options.stop_on_release
             or not options.keep_apps_running
@@ -580,6 +773,7 @@ class TunerManager:
             except Exception:  # noqa: BLE001
                 pass
         logger.info("Released tuner %s (tune %s)", lease.tuner.name, lease.tune_id)
+
     # -- Status + reaper --
 
     def status(self) -> list[dict]:
@@ -593,6 +787,9 @@ class TunerManager:
                     "id": tuner.id,
                     "name": tuner.name,
                     "backend": tuner.control.type,
+                    "keys_backend": (
+                        tuner.keys_control.type if tuner.keys_control else None
+                    ),
                     "enabled": tuner.enabled,
                     "locked": st.locked,
                     "tune_id": st.tune_id,
@@ -620,11 +817,13 @@ class TunerManager:
             except asyncio.CancelledError:
                 pass
             self._reaper_task = None
-        for backend in list(self._backends.values()):
+        for backend in list(self._backends.values()) + list(self._keys_backends.values()):
             try:
                 await backend.close()
             except Exception:  # noqa: BLE001
                 pass
+        self._backends.clear()
+        self._keys_backends.clear()
 
     async def _reaper_loop(self) -> None:
         while True:

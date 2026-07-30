@@ -105,7 +105,9 @@ async def test_app_play_runs_commands_on_dpad_backend(tmp_path):
         uuid="0AppPlay-espn",
         name="ESPN",
         global_options=TuneConfigurationOptions(
-            use_fixed_delay=True, fixed_delay_seconds=0.01
+            use_fixed_delay=True,
+            fixed_delay_seconds=0.01,
+            check_for_and_clear_whos_watching_prompts=False,
         ),
         pre_tune_commands=[],
         tune_commands=[

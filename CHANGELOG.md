@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-07-29
+
+### Added
+- **Hybrid `keys_control`**: keep `http_agent` for launches; optional `androidtv_remote` / `firetv_rest` / `adb` plane for D-pad (`key_macro`, App Play, who’s-watching)
+- **Deep-link configuration overlays**: Compatibility / FDL configs with deeplink URLs apply pre/post commands and who’s-watching (App Play remains non-deeplink only)
+- **Encoder who’s-watching OCR**: ffmpeg + tesseract when `check_for_and_clear_whos_watching_prompts` is true (~3.5s budget; timed DPAD fallback)
+- **Dynamic / lane URL resolution**: ADBTuner-compatible fetch for FruitDeepLinks `/lanes/…` and `dynamic_url_json_key`
+
+### Fixed
+- `key_macro` entries like `DPAD_CENTER;DPAD_CENTER` now split into two Selects; DPAD macros fail clearly without a D-pad backend instead of a silent Agent no-op
+
 ## [0.1.11] - 2026-07-27
 
 ### Added
@@ -125,7 +136,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.12
 [0.1.11]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.11
 [0.1.10]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.10
 [0.1.9]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.9

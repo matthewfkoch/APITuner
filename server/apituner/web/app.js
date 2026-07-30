@@ -176,8 +176,16 @@ async function loadTuners() {
       : t.control.type === "firetv_rest" ? "Fire TV REST"
       : t.control.type === "adb" ? "Network ADB"
       : "TV Remote";
+    const keysType = t.keys_control && t.keys_control.type;
+    const keysLabel =
+      keysType === "androidtv_remote" ? "Remote keys"
+      : keysType === "firetv_rest" ? "Fire REST keys"
+      : keysType === "adb" ? "ADB keys"
+      : null;
     const isAgent = t.control.type === "http_agent";
-    const needsPair = t.control.type === "androidtv_remote" || t.control.type === "firetv_rest";
+    const needsPair =
+      t.control.type === "androidtv_remote" || t.control.type === "firetv_rest"
+      || keysType === "androidtv_remote" || keysType === "firetv_rest";
     const card = el(`<article class="card"></article>`);
     card.innerHTML = `
       <div class="card-head">
@@ -185,6 +193,7 @@ async function loadTuners() {
           <div class="card-title">${escapeHtml(t.name)}</div>
           <div class="card-sub">
             <span class="backend-pill">${backendLabel}</span>
+            ${keysLabel ? `&nbsp;<span class="backend-pill">${keysLabel}</span>` : ""}
             &nbsp;·&nbsp; ${escapeHtml(t.control.host)}${t.control.port ? ":" + t.control.port : ""}
           </div>
         </div>
@@ -210,7 +219,7 @@ async function loadTuners() {
         <button class="btn btn-sm btn-danger" data-act="delete">Delete</button>
       </div>`;
     const badges = card.querySelector("[data-badges]");
-    renderCapabilityBadges(badges, t.control.type);
+    renderCapabilityBadges(badges, t.control.type, keysType);
     const healthBtn = card.querySelector('[data-act="health"]');
     const healthBadge = card.querySelector("[data-health]");
     const versionBadge = card.querySelector("[data-agent-version]");
@@ -341,9 +350,18 @@ async function loadTuners() {
   }
 }
 
-function renderCapabilityBadges(container, backendType) {
+function renderCapabilityBadges(container, backendType, keysType) {
   container.innerHTML = "";
-  (CAP_DEFS[backendType] || []).forEach((def) => {
+  const defs = [...(CAP_DEFS[backendType] || [])];
+  if (keysType && keysType !== backendType) {
+    const keyDefs = CAP_DEFS[keysType] || [];
+    keyDefs.forEach((def) => {
+      if (def.label.includes("D-pad") || def.label === "Force-stop") {
+        defs.push({ ...def, label: def.label + " (keys)", hint: def.hint + " Via keys_control." });
+      }
+    });
+  }
+  defs.forEach((def) => {
     const badge = el(`<span class="badge cap-badge accent" title="${escapeAttr(def.hint)}">${escapeHtml(def.label)}</span>`);
     if (def.cap) badge.dataset.cap = def.cap;
     if (def.always) badge.dataset.always = "1";
@@ -392,7 +410,14 @@ async function refreshPairStatus(tuner, badge) {
 }
 
 function tunerForm(existing) {
-  const t = existing || { name: "", control: { type: "http_agent", host: "", port: 9092, pair_port: null, token: "" }, stream_endpoint: "", enabled: true };
+  const t = existing || {
+    name: "",
+    control: { type: "http_agent", host: "", port: 9092, pair_port: null, token: "" },
+    keys_control: null,
+    stream_endpoint: "",
+    enabled: true,
+  };
+  const kc = t.keys_control || { type: "", host: "", port: null, pair_port: null, token: "" };
   const form = el(`<form class="form-grid"></form>`);
   form.innerHTML = `
     <div class="field full"><label>Name</label><input name="name" value="${escapeAttr(t.name)}" required /></div>
@@ -408,11 +433,26 @@ function tunerForm(existing) {
     <div class="field"><label>Port <span class="hint">(blank = default)</span></label><input name="port" type="number" value="${t.control.port ?? ""}" /></div>
     <div class="field" data-remote><label>Pair port <span class="hint">(Google TV remote, default 6467)</span></label><input name="pair_port" type="number" value="${t.control.pair_port ?? ""}" /></div>
     <div class="field" data-token><label>Token <span class="hint" data-token-hint>(agent auth or Fire TV client token)</span></label><input name="token" value="${escapeAttr(t.control.token || "")}" /></div>
+    <div class="field full" data-keys-section>
+      <label>Keys / D-pad backend <span class="hint">(optional hybrid — keep Agent for YTTV launches; add Remote or ADB for Max profile / App Play)</span></label>
+      <select name="keys_type">
+        <option value="">None</option>
+        <option value="androidtv_remote">androidtv_remote (Google TV)</option>
+        <option value="firetv_rest">firetv_rest (Fire)</option>
+        <option value="adb">adb (network ADB)</option>
+      </select>
+    </div>
+    <div class="field" data-keys-host><label>Keys host <span class="hint">(blank = same as primary)</span></label><input name="keys_host" value="${escapeAttr(kc.host || "")}" /></div>
+    <div class="field" data-keys-port><label>Keys port</label><input name="keys_port" type="number" value="${kc.port ?? ""}" placeholder="6466 / 8080 / 5555" /></div>
+    <div class="field" data-keys-pair><label>Keys pair port</label><input name="keys_pair_port" type="number" value="${kc.pair_port ?? ""}" placeholder="6467" /></div>
+    <div class="field" data-keys-token><label>Keys token <span class="hint">(Fire REST)</span></label><input name="keys_token" value="${escapeAttr(kc.token || "")}" /></div>
     <div class="field full"><label>Encoder stream URL <span class="hint">(HDMI encoder MPEG-TS)</span></label><input name="stream_endpoint" value="${escapeAttr(t.stream_endpoint)}" placeholder="http://192.0.2.20:8090/stream0" required /></div>
     <div class="field checkbox full"><input type="checkbox" name="enabled" ${t.enabled ? "checked" : ""} /><label>Enabled</label></div>
     <div class="form-actions full"><button type="button" class="btn btn-ghost" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>`;
   const typeSel = form.querySelector('[name="type"]');
   typeSel.value = t.control.type;
+  const keysTypeSel = form.querySelector('[name="keys_type"]');
+  keysTypeSel.value = kc.type || "";
   const syncType = () => {
     const type = typeSel.value;
     form.querySelector("[data-remote]").style.display = type === "androidtv_remote" ? "" : "none";
@@ -430,12 +470,37 @@ function tunerForm(existing) {
       else if (type === "firetv_rest") portInput.placeholder = "8080";
       else if (type === "adb") portInput.placeholder = "5555";
     }
+    // Hybrid keys section is most useful when primary is Agent.
+    const showKeys = type === "http_agent" || keysTypeSel.value;
+    form.querySelector("[data-keys-section]").style.display = showKeys || type === "http_agent" ? "" : "none";
+    syncKeys();
   };
-  typeSel.addEventListener("change", syncType); syncType();
+  const syncKeys = () => {
+    const kt = keysTypeSel.value;
+    const show = !!kt;
+    form.querySelector("[data-keys-host]").style.display = show ? "" : "none";
+    form.querySelector("[data-keys-port]").style.display = show ? "" : "none";
+    form.querySelector("[data-keys-pair]").style.display = kt === "androidtv_remote" ? "" : "none";
+    form.querySelector("[data-keys-token]").style.display = kt === "firetv_rest" ? "" : "none";
+  };
+  typeSel.addEventListener("change", syncType);
+  keysTypeSel.addEventListener("change", syncKeys);
+  syncType();
   form.querySelector("[data-cancel]").addEventListener("click", closeModal);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
+    const keysType = (fd.get("keys_type") || "").toString();
+    let keys_control = null;
+    if (keysType) {
+      keys_control = {
+        type: keysType,
+        host: (fd.get("keys_host") || "").toString().trim() || (fd.get("host") || "").toString(),
+        port: fd.get("keys_port") ? Number(fd.get("keys_port")) : null,
+        pair_port: fd.get("keys_pair_port") ? Number(fd.get("keys_pair_port")) : null,
+        token: fd.get("keys_token") || null,
+      };
+    }
     const payload = {
       name: fd.get("name"),
       stream_endpoint: fd.get("stream_endpoint"),
@@ -447,6 +512,7 @@ function tunerForm(existing) {
         pair_port: fd.get("pair_port") ? Number(fd.get("pair_port")) : null,
         token: fd.get("token") || null,
       },
+      keys_control,
     };
     try {
       // Discover-prefilled forms pass a seed object without an id — always create those.
@@ -460,9 +526,12 @@ function tunerForm(existing) {
 document.getElementById("add-tuner-btn").addEventListener("click", () => tunerForm(null));
 
 async function pairFlow(t) {
-  const isFire = t.control.type === "firetv_rest";
+  const pairType = (t.keys_control && (t.keys_control.type === "androidtv_remote" || t.keys_control.type === "firetv_rest"))
+    ? t.keys_control.type
+    : t.control.type;
+  const isFire = pairType === "firetv_rest";
   const node = el(`<div>
-    <p class="muted">Starting pairing with <b>${escapeHtml(t.name)}</b>. A PIN will appear on the TV screen.${isFire ? " Uses the Fire TV Remote HTTP API (no ADB)." : ""}</p>
+    <p class="muted">Starting pairing with <b>${escapeHtml(t.name)}</b>. A PIN will appear on the TV screen.${isFire ? " Uses the Fire TV Remote HTTP API (no ADB)." : ""}${t.keys_control ? " (keys / D-pad backend)" : ""}</p>
     <div class="field full"><label>PIN from TV</label><input id="pair-pin" placeholder="${isFire ? "e.g. 1234" : "e.g. A1B2C3"}" /></div>
     <div class="form-actions"><button class="btn btn-ghost" data-cancel>Cancel</button><button class="btn btn-primary" data-finish>Complete pairing</button></div>
     <p id="pair-msg" class="muted"></p>
@@ -582,7 +651,7 @@ function channelForm(existing) {
     <div class="field"><label>Action</label><input name="action" value="${escapeAttr(c.action || "android.intent.action.VIEW")}" /></div>
     <div class="field"><label>Component <span class="hint">(agent; Android 12+)</span></label><input name="component" value="${escapeAttr(c.component || "")}" /></div>
     <div class="field full"><label>Intent extras <span class="hint">(agent; key:value,key:value)</span></label><input name="extra_string" value="${escapeAttr(c.extra_string || "")}" /></div>
-    <div class="field full"><label>Key macro <span class="hint">(remote; comma-separated keys sent after launch, e.g. DPAD_CENTER,DPAD_DOWN)</span></label><input name="key_macro" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
+    <div class="field full"><label>Key macro <span class="hint">(after launch; comma or semicolon, e.g. DPAD_CENTER;DPAD_CENTER — needs keys_control / D-pad backend)</span></label><input name="key_macro" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
     <div class="field checkbox full"><input type="checkbox" name="compatibility_mode" ${c.compatibility_mode ? "checked" : ""} /><label>Compatibility mode (stop app before launch)</label></div>
     <div class="field full"><label>Fill package from a tuner's installed apps</label>
       <select id="app-picker-tuner"><option value="">Select a tuner…</option></select>
@@ -610,7 +679,7 @@ function channelForm(existing) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    const km = (fd.get("key_macro") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const km = (fd.get("key_macro") || "").toString().split(/[,;]/).map((s) => s.trim()).filter(Boolean);
     const payload = {
       number: Number(fd.get("number")),
       name: fd.get("name"),

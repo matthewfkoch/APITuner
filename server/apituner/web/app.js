@@ -141,7 +141,84 @@ document.getElementById("copy-xmltv").addEventListener("click", () => {
 
 // ============================ TUNERS ============================
 let cachedChannels = [];
+let cachedConfigs = [];
 let cachedAgentLatest = null;
+/** True when imported channels need D-pad (App Play, Max who’s-watching, key_macro). */
+let catalogNeedsDpadKeys = false;
+
+const AGENT_ONLY_KEYS = new Set(["BACK", "HOME", "RECENTS", "APP_SWITCH"]);
+
+function urlLooksLikeDeeplink(url) {
+  const u = String(url || "").trim();
+  if (!u) return false;
+  return u.includes("://") || u.startsWith("http:") || u.startsWith("https:");
+}
+
+function expandKeyMacroTokens(value) {
+  if (value == null) return [];
+  const parts = Array.isArray(value) ? value : [value];
+  const tokens = [];
+  for (const part of parts) {
+    if (part == null) continue;
+    for (const piece of String(part).replace(/;/g, ",").split(",")) {
+      let key = piece.trim();
+      if (!key) continue;
+      if (key.toUpperCase().startsWith("KEYCODE_")) key = key.slice(8);
+      tokens.push(key.toUpperCase());
+    }
+  }
+  return tokens;
+}
+
+function channelNeedsDpad(ch, configByUuid) {
+  const uuid = String(ch.configuration_uuid || "").trim();
+  // App Play: configuration + non-deeplink identifier (loop index).
+  if (uuid && !urlLooksLikeDeeplink(ch.url)) return true;
+  const keys = expandKeyMacroTokens(ch.key_macro);
+  if (keys.some((k) => !AGENT_ONLY_KEYS.has(k))) return true;
+  if (uuid && configByUuid[uuid]) {
+    const opts = configByUuid[uuid].global_options || {};
+    // Server default is true when the flag is present on Max / Compatibility configs.
+    if (opts.check_for_and_clear_whos_watching_prompts) return true;
+  }
+  return false;
+}
+
+function computeCatalogNeedsDpad(channels, configs) {
+  const byUuid = {};
+  for (const cfg of configs || []) {
+    if (cfg && cfg.uuid) byUuid[cfg.uuid] = cfg;
+  }
+  return (channels || []).some((ch) => channelNeedsDpad(ch, byUuid));
+}
+
+function renderKeysControlWarning(tuners, needsDpad) {
+  const banner = document.getElementById("keys-control-warning");
+  if (!banner) return;
+  const missing = (tuners || []).filter(
+    (t) =>
+      t.enabled !== false
+      && t.control
+      && t.control.type === "http_agent"
+      && !(t.keys_control && t.keys_control.type)
+  );
+  if (!needsDpad || !missing.length) {
+    banner.classList.add("hidden");
+    banner.innerHTML = "";
+    return;
+  }
+  const names = missing.map((t) => t.name).join(", ");
+  banner.classList.remove("hidden");
+  banner.innerHTML = `
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+    <div>
+      <strong>Keys / D-pad backend missing</strong> on ${escapeHtml(names)}.
+      Max profile prompts, App Play (ESPN, etc.), and DPAD key macros need
+      <code>androidtv_remote</code> (Google TV / onn), <code>firetv_rest</code>, or <code>adb</code> (Fire).
+      Edit each Agent tuner → set <b>Keys / D-pad backend</b> → <b>Pair</b>.
+      Without it, those tunes fail instead of opening a stuck profile or home screen.
+    </div>`;
+}
 
 async function fetchAgentLatest() {
   try {
@@ -155,8 +232,22 @@ async function fetchAgentLatest() {
 async function loadTuners() {
   const list = document.getElementById("tuner-list");
   let tuners = [];
-  try { tuners = await api.get("/api/tuners"); } catch (e) { toast(e.message, true); return; }
+  try {
+    const [t, channels, configs] = await Promise.all([
+      api.get("/api/tuners"),
+      api.get("/api/channels").catch(() => cachedChannels || []),
+      api.get("/api/configurations").catch(() => cachedConfigs || []),
+    ]);
+    tuners = t;
+    cachedChannels = channels;
+    cachedConfigs = configs;
+    catalogNeedsDpadKeys = computeCatalogNeedsDpad(channels, configs);
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
   const latestPromise = fetchAgentLatest();
+  renderKeysControlWarning(tuners, catalogNeedsDpadKeys);
   if (!tuners.length) {
     list.innerHTML = `
       <div class="empty-state">
@@ -183,6 +274,7 @@ async function loadTuners() {
       : keysType === "adb" ? "ADB keys"
       : null;
     const isAgent = t.control.type === "http_agent";
+    const needsKeysWarn = isAgent && !keysType && catalogNeedsDpadKeys;
     const needsPair =
       t.control.type === "androidtv_remote" || t.control.type === "firetv_rest"
       || keysType === "androidtv_remote" || keysType === "firetv_rest";
@@ -201,8 +293,10 @@ async function loadTuners() {
           <span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "Enabled" : "Disabled"}</span>
           <span class="badge muted" data-health title="Checking whether the device is reachable…">Checking…</span>
           ${isAgent ? `<span class="badge muted" data-agent-version title="Installed Agent APK version">Agent …</span>` : ""}
+          ${needsKeysWarn ? `<span class="badge warn" title="Edit this tuner and set Keys / D-pad backend, then Pair">No D-pad keys</span>` : ""}
         </div>
       </div>
+      ${needsKeysWarn ? `<div class="card-callout-warn">Max / App Play / DPAD macros need a Keys / D-pad backend on this Agent tuner. Edit → set <b>androidtv_remote</b> (or Fire <b>firetv_rest</b> / <b>adb</b>) → Pair.</div>` : ""}
       <div class="card-meta">
         <div class="card-row"><span class="label">Encoder</span><span class="value mono">${escapeHtml(t.stream_endpoint)}</span></div>
       </div>
@@ -441,6 +535,9 @@ function tunerForm(existing) {
         <option value="firetv_rest">firetv_rest (Fire)</option>
         <option value="adb">adb (network ADB)</option>
       </select>
+      <p class="field-warn ${catalogNeedsDpadKeys && !(kc.type) ? "" : "hidden"}" data-keys-warn>
+        Your channel list includes Max / App Play / DPAD macros. Set a Keys / D-pad backend here, save, then use <b>Pair</b> on the tuner card — otherwise those tunes will fail.
+      </p>
     </div>
     <div class="field" data-keys-host><label>Keys host <span class="hint">(blank = same as primary)</span></label><input name="keys_host" value="${escapeAttr(kc.host || "")}" /></div>
     <div class="field" data-keys-port><label>Keys port</label><input name="keys_port" type="number" value="${kc.port ?? ""}" placeholder="6466 / 8080 / 5555" /></div>
@@ -482,6 +579,11 @@ function tunerForm(existing) {
     form.querySelector("[data-keys-port]").style.display = show ? "" : "none";
     form.querySelector("[data-keys-pair]").style.display = kt === "androidtv_remote" ? "" : "none";
     form.querySelector("[data-keys-token]").style.display = kt === "firetv_rest" ? "" : "none";
+    const warn = form.querySelector("[data-keys-warn]");
+    if (warn) {
+      const showWarn = catalogNeedsDpadKeys && typeSel.value === "http_agent" && !kt;
+      warn.classList.toggle("hidden", !showWarn);
+    }
   };
   typeSel.addEventListener("change", syncType);
   keysTypeSel.addEventListener("change", syncKeys);
@@ -627,7 +729,13 @@ function renderChannels(channels) {
 }
 
 async function loadChannels() {
-  try { cachedChannels = await api.get("/api/channels"); } catch (e) { toast(e.message, true); return; }
+  try {
+    cachedChannels = await api.get("/api/channels");
+    catalogNeedsDpadKeys = computeCatalogNeedsDpad(cachedChannels, cachedConfigs);
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
   cachedChannels.sort((a, b) => a.number - b.number);
   renderChannels(cachedChannels);
 }
@@ -746,10 +854,15 @@ document.getElementById("import-btn").addEventListener("click", () => {
 });
 
 // ============================ CONFIGURATIONS ============================
-let cachedConfigs = [];
 
 async function loadConfigurations() {
-  try { cachedConfigs = await api.get("/api/configurations"); } catch (e) { toast(e.message, true); return; }
+  try {
+    cachedConfigs = await api.get("/api/configurations");
+    catalogNeedsDpadKeys = computeCatalogNeedsDpad(cachedChannels, cachedConfigs);
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
   const tbody = document.querySelector("#config-table tbody");
   if (!tbody) return;
   if (!cachedConfigs.length) {

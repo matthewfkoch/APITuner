@@ -59,8 +59,10 @@ class HttpAgentBackend(ControlBackend):
             raise BackendUnavailable(
                 f"Agent auth failed ({resp.status_code}) on {path}; check the tuner token"
             )
-        if resp.status_code >= 500:
-            raise BackendUnavailable(f"Agent error {resp.status_code} on {path}")
+        if resp.status_code >= 400:
+            raise BackendUnavailable(
+                f"Agent error {resp.status_code} on {path}"
+            )
 
     async def _post(self, path: str, json: Optional[dict] = None) -> dict[str, Any]:
         try:
@@ -142,7 +144,12 @@ class HttpAgentBackend(ControlBackend):
             payload["component"] = component
         if extras:
             payload["extra_string"] = extras
-        await self._post("/api/launch-intent", payload)
+        data = await self._post("/api/launch-intent", payload)
+        # Agent returns HTTP 200 with success:false when the intent cannot start.
+        if data.get("success") is False:
+            raise BackendUnavailable(
+                data.get("message") or f"Agent launch failed for {package}"
+            )
 
     async def send_key(self, key: str) -> None:
         await self._post("/api/key", {"key": key})

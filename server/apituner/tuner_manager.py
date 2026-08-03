@@ -605,6 +605,11 @@ class TunerManager:
             tuner.name,
             status,
         )
+        if status == "skipped_no_dpad":
+            raise TuneFailed(
+                f"Who's-watching clear on {tuner.name} requires a D-pad keys "
+                "backend; set keys_control to androidtv_remote, firetv_rest, or adb"
+            )
 
     async def _send_key_macro(
         self, channel: Channel, cmd_backend: ControlBackend

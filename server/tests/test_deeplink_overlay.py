@@ -191,6 +191,47 @@ async def test_key_macro_fails_without_dpad(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_whos_watching_skipped_no_dpad_fails_tune(tmp_path, monkeypatch):
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.configurations = [_compat_cfg()]
+    store.save()
+    manager = TunerManager(store)
+    agent = RecordingBackend(dpad=False)
+
+    async def skipped(**kwargs):
+        return "skipped_no_dpad"
+
+    monkeypatch.setattr(
+        "apituner.tuner_manager.clear_whos_watching_prompt", skipped
+    )
+
+    tuner = Tuner(
+        id="t1",
+        name="onn",
+        control=ControlConfig(type="http_agent", host="192.0.2.1"),
+        stream_endpoint="http://192.0.2.2/s",
+    )
+    channel = Channel(
+        number=3101,
+        name="HBO",
+        package_name="com.wbd.stream",
+        url="https://play.hbomax.com/channel/watch/abc",
+        configuration_uuid=COMPAT_UUID,
+    )
+    with pytest.raises(TuneFailed, match="Who's-watching.*keys_control"):
+        await manager._do_tune(
+            tuner,
+            agent,
+            channel,
+            "tune1",
+            GlobalOptions(wait_for_playback=True, ready_settle_seconds=0),
+            app_play=None,
+            overlay=store.config.configurations[0],
+            command_backend=agent,
+        )
+
+
+@pytest.mark.asyncio
 async def test_hybrid_split_capabilities():
     agent = RecordingBackend(dpad=False)
     remote = RecordingBackend(dpad=True)

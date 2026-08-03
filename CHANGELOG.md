@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-08-03
+
+### Fixed
+- Agent `launch-intent` HTTP 4xx or `success: false` now fails the tune instead of reporting ready with a blank/wrong screen (ESPN App Play / bad package)
+- Who’s-watching with `check_for_and_clear_whos_watching_prompts` fails the tune when no D-pad `keys_control` is configured (`skipped_no_dpad`) instead of opening the Max profile picker as “ready”
+
+### Added
+- Dashboard warning when Agent tuners lack a Keys / D-pad backend but channels need Max profile, App Play, or DPAD macros
+
 ## [0.1.12] - 2026-07-29
 
 ### Added
@@ -136,7 +145,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.13
 [0.1.12]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.12
 [0.1.11]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.11
 [0.1.10]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.10

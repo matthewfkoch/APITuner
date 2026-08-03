@@ -213,6 +213,51 @@ code {
 
 .security-banner svg { flex-shrink: 0; opacity: 0.9; }
 
+.callout-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  background: var(--amber-dim);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: #fcd34d;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.callout-warn.hidden { display: none; }
+
+.callout-warn svg { flex-shrink: 0; margin-top: 1px; opacity: 0.9; }
+
+.callout-warn strong { color: #fde68a; font-weight: 600; }
+
+.card-callout-warn {
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-dim);
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  color: #fcd34d;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.field-warn {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-dim);
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  color: #fcd34d;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.field-warn.hidden { display: none; }
+
 .content {
   flex: 1;
   padding: 28px 32px 48px;

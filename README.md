@@ -172,7 +172,7 @@ Native apps without reliable deep links (ESPN, CBS, Fox, NBC, …) use ADBTuner 
 
 Deep-link stations with a `configuration_uuid` (e.g. Max + ADBTuner Compatibility Mode) use the normal Agent launch path **and** apply that config as an overlay: `pre_tune_commands`, who’s-watching clears when `check_for_and_clear_whos_watching_prompts` is true, `key_macro`, and `post_playback_start_commands`. Redundant `am start` lines are skipped when the Agent already launched the deeplink.
 
-**Who’s-watching:** when the config flag is on, APITuner briefly samples the HDMI encoder with ffmpeg + tesseract OCR (≈3.5s budget, fast exit if no prompt). Needs `keys_control` / D-pad for Select. YTTV and configs with the flag off pay zero OCR cost. `am force-stop` is real on the `adb` keys plane; on Remote/FireTV REST it maps to best-effort HOME/stop.
+**Who’s-watching:** when the config flag is on, APITuner briefly samples the HDMI encoder with ffmpeg + tesseract OCR (≈3.5s budget, fast exit if no prompt). Needs `keys_control` / D-pad for Select — without it the tune **fails** (`skipped_no_dpad`) instead of opening the profile screen as ready. YTTV and configs with the flag off pay zero OCR cost. `am force-stop` is real on the `adb` keys plane; on Remote/FireTV REST it maps to best-effort HOME/stop. Agent launches that return HTTP 4xx or `success: false` also fail the tune.
 
 Fire TV REST notes: reverse-engineered Amazon protocol; TLS verification is disabled; may need a wake on port `8009`; can break on Fire OS updates. If `:8080` never opens after wake (common on Fire OS 7 / older sticks), switch the tuner to **`adb`**.
 

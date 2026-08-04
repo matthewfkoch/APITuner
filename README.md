@@ -54,6 +54,13 @@ Keep **`control: http_agent`** for package-pinned launches and playback probes. 
 
 Pair the keys backend from the dashboard (Pair button). Without `keys_control`, Max `key_macro` / who’s-watching / App Play cannot send `DPAD_CENTER` (Agent Accessibility only supports BACK/HOME/RECENTS).
 
+### Encoder preview (dashboard)
+
+Each tuner card has **Preview**: a live view of that tuner’s HDMI encoder stream (MJPEG via ffmpeg, with a still-frame fallback) plus on-screen remote buttons (D-pad, Enter, Back, Home, volume, wake/sleep; reboot when the keys plane is `adb`).
+
+- Needs a working `stream_endpoint` and **ffmpeg** in the server environment (included in the Docker image).
+- Arrows / Enter need **Keys / D-pad** configured and paired; with Agent alone, only **Back** and **Home** work.
+
 ### Agent setup (per device)
 
 1. Install the APK from [GitHub Releases](https://github.com/matthewfkoch/APITuner-releases/releases) (or build from `agent/`).
@@ -261,6 +268,7 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Grant reports success but Agent badges stay red | Agent still restarting, or capability refresh raced | Wait a few seconds → **Recheck connection**; confirm overlay/usage with the Agent UI |
 | Grant succeeds but Accessibility / Send keys goes red again | Older builds `am force-stop`’d the Agent after grant; Fire OS clears `enabled_accessibility_services` on force-stop; or Accessibility listed in settings but not bound until reboot | Update APITuner and re-run **Grant permissions (ADB)** (grant may reboot once to bind). There is no on-device Settings grant path on Fire for sideloaded apps |
 | Accessibility / keys lost after APK reinstall | Fire OS may clear the accessibility binding | Re-run **Grant permissions (ADB)** (no on-device Settings toggle) |
+| Preview arrows / Enter do nothing or toast “needs a D-pad backend” | Tuner is Agent-only (`keys_control` unset / unpaired) | Edit tuner → set **Keys / D-pad** to `androidtv_remote` / `firetv_rest` / `adb`, Pair, retry. Back/Home work without that |
 | Agent crashes on open (Fire OS 7 / Android 9) | Older Agent used an API 29 AppOps call | Update to Agent **0.1.6+**. After reinstall, re-grant permissions if needed |
 | HDHomeRun not auto-detected | SSDP/UDP 65001 blocked on Docker bridge | Host networking, or add source URL `http://<host>:6592` manually |
 | HDHomeRun guide empty | XMLTV not configured | Set Channels DVR URL + XMLTV source device; use Custom URL `…/xmltv.xml` |

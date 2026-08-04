@@ -26,7 +26,9 @@ from .hdhr.lineup import resolve_base_url
 from .hdhr.routes import router as hdhr_router
 from .log_buffer import install_log_buffer
 from .models import Channel, GlobalOptions, Tuner
+from .keys import key_requires_dpad
 from .playlist import build_m3u, filter_channels_by_provider
+from .preview import grab_preview_jpeg, have_ffmpeg, jpeg_response, mjpeg_response
 from .stream import open_stream
 from .tuner_manager import NoTunerAvailable, TuneFailed, TunerManager
 
@@ -270,6 +272,109 @@ async def tuner_apps(tuner_id: str, request: Request) -> list[dict]:
     if info is None:
         return []
     return [{"name": p, "packageName": p} for p in info.packages]
+
+
+@app.get("/api/tuners/{tuner_id}/preview.jpg", include_in_schema=False)
+async def tuner_preview_jpeg(tuner_id: str, request: Request) -> Response:
+    """Single-frame JPEG of the tuner's HDMI encoder stream."""
+    tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    if not have_ffmpeg():
+        raise HTTPException(
+            status_code=503,
+            detail="ffmpeg not available (install ffmpeg or use the Docker image)",
+        )
+    data = await grab_preview_jpeg(tuner.stream_endpoint)
+    if not data:
+        raise HTTPException(
+            status_code=504,
+            detail="Could not grab a frame from the encoder stream",
+        )
+    return jpeg_response(data)
+
+
+@app.get("/api/tuners/{tuner_id}/preview.mjpg", include_in_schema=False)
+@app.get("/api/tuners/{tuner_id}/preview", include_in_schema=False)
+async def tuner_preview_mjpeg(tuner_id: str, request: Request) -> Response:
+    """Live MJPEG (multipart) preview of the HDMI encoder — dashboard use."""
+    tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    if not (tuner.stream_endpoint or "").strip():
+        raise HTTPException(status_code=400, detail="Tuner has no stream_endpoint")
+    if not have_ffmpeg():
+        raise HTTPException(
+            status_code=503,
+            detail="ffmpeg not available (install ffmpeg or use the Docker image)",
+        )
+    return mjpeg_response(tuner.stream_endpoint, request)
+
+
+@app.post("/api/tuners/{tuner_id}/key")
+async def tuner_send_key(tuner_id: str, request: Request) -> dict:
+    """Send a remote key / power action for dashboard preview controls."""
+    tuner = next((t for t in _store(request).config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    key = str((body or {}).get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+
+    manager = _manager(request)
+    backend = manager.get_command_backend(tuner)
+    name = key.upper().replace("KEYCODE_", "")
+
+    # Fail fast with a setup hint when D-pad is requested without a keys plane.
+    caps = backend.capabilities
+    if key_requires_dpad(name) and not caps.dpad:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Key {name} needs a D-pad backend. Edit this tuner → set "
+                "Keys / D-pad to androidtv_remote (Google TV / onn), firetv_rest, "
+                "or adb, then Pair. Agent alone only supports Back / Home."
+            ),
+        )
+
+    try:
+        if name == "REBOOT":
+            if getattr(backend.capabilities, "shell", False) and hasattr(
+                backend, "run_shell"
+            ):
+                await backend.run_shell("reboot")  # type: ignore[attr-defined]
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Reboot needs an adb keys backend on this tuner",
+                )
+        elif name in ("WAKE", "POWER_ON"):
+            # Prefer explicit wake helper (Fire REST); else POWER keyevent.
+            wake = getattr(backend, "wake", None)
+            if callable(wake):
+                await wake()
+            else:
+                await backend.send_key("POWER")
+        elif name in ("SLEEP", "POWER_OFF", "POWER"):
+            await backend.send_key("SLEEP" if name == "SLEEP" else "POWER")
+        else:
+            await backend.send_key(name)
+    except HTTPException:
+        raise
+    except BackendNotPaired as exp:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{exp}. Pair the Keys / D-pad backend for this tuner first.",
+        ) from exp
+    except BackendUnavailable as exp:
+        raise HTTPException(status_code=502, detail=str(exp)) from exp
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Key failed: {exc}") from exc
+    return {"success": True, "key": name}
 
 
 # ---- Pairing (androidtv_remote / firetv_rest backends) ----

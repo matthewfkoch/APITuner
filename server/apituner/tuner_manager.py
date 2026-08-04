@@ -128,6 +128,11 @@ class TunerManager:
             return keys
         return self.get_backend(tuner)
 
+    def get_command_backend(self, tuner: Tuner) -> ControlBackend:
+        """Keys / D-pad / App Play plane (hybrid keys_control when set)."""
+        primary = self.get_backend(tuner)
+        return self._command_backend(tuner, primary)
+
     def _command_backend(
         self, tuner: Tuner, primary: ControlBackend
     ) -> ControlBackend:

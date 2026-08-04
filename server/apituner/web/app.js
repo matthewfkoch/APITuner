@@ -75,7 +75,12 @@ function openModal(title, node) {
   body.innerHTML = ""; body.appendChild(node);
   document.getElementById("modal").classList.remove("hidden");
 }
-function closeModal() { document.getElementById("modal").classList.add("hidden"); }
+function closeModal() {
+  stopAllPreviews();
+  const modalCard = document.querySelector("#modal .modal-card");
+  if (modalCard) modalCard.classList.remove("modal-card-preview");
+  document.getElementById("modal").classList.add("hidden");
+}
 
 // ---- Navigation ----
 document.querySelectorAll(".nav-item").forEach((tab) => {
@@ -88,8 +93,13 @@ document.querySelectorAll(".nav-item").forEach((tab) => {
     if (tab.dataset.tab === "channels") loadChannels();
     if (tab.dataset.tab === "configurations") loadConfigurations();
     if (tab.dataset.tab === "tuners") loadTuners();
+    else stopAllPreviews();
     if (tab.dataset.tab === "options") loadOptions();
   });
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopAllPreviews();
 });
 
 // ---- M3U + HDHomeRun URLs ----
@@ -231,6 +241,7 @@ async function fetchAgentLatest() {
 
 async function loadTuners() {
   const list = document.getElementById("tuner-list");
+  stopAllPreviews();
   let tuners = [];
   try {
     const [t, channels, configs] = await Promise.all([
@@ -305,6 +316,7 @@ async function loadTuners() {
         <div class="badges" data-badges></div>
       </div>
       <div class="card-actions">
+        <button class="btn btn-sm btn-primary" data-act="preview" title="Open encoder stream preview with remote controls">Preview</button>
         <button class="btn btn-sm btn-secondary" data-act="health" title="Ping the device to verify the Agent APK or TV remote is reachable on the network">Recheck connection</button>
         ${isAgent ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="Fire TV one-time setup: grant overlay/usage/notification via network ADB. Day-to-day tuning stays on the Agent HTTP API.">Grant permissions (ADB)</button>` : ""}
         ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Download the latest Agent APK and open the Install dialog on the TV">Update Agent</button>` : ""}
@@ -439,9 +451,144 @@ async function loadTuners() {
       try { await api.del(`/api/tuners/${t.id}`); toast("Tuner deleted"); loadTuners(); }
       catch (err) { toast(err.message, true); }
     });
+    card.querySelector('[data-act="preview"]')?.addEventListener("click", () => openTunerPreview(t));
     list.appendChild(card);
     runHealthCheck();
   }
+}
+
+/** Cleanup for the open preview modal stream. */
+let _previewModalStop = null;
+
+function stopAllPreviews() {
+  if (typeof _previewModalStop === "function") {
+    try { _previewModalStop(); } catch (_) { /* ignore */ }
+    _previewModalStop = null;
+  }
+}
+
+function openTunerPreview(tuner) {
+  stopAllPreviews();
+  if (!(tuner.stream_endpoint || "").trim()) {
+    toast("This tuner has no encoder stream URL", true);
+    return;
+  }
+
+  const node = el(`<div class="preview-modal"></div>`);
+  node.innerHTML = `
+    <div class="preview-stage">
+      <img class="preview-stream" alt="Encoder preview" decoding="async" />
+      <div class="preview-overlay">Connecting to encoder…</div>
+    </div>
+    <div class="preview-remote" role="group" aria-label="Remote controls">
+      <div class="preview-remote-row">
+        <button type="button" class="preview-key" data-key="DPAD_UP" title="Up">↑</button>
+        <button type="button" class="preview-key" data-key="DPAD_DOWN" title="Down">↓</button>
+        <button type="button" class="preview-key" data-key="DPAD_LEFT" title="Left">←</button>
+        <button type="button" class="preview-key" data-key="DPAD_RIGHT" title="Right">→</button>
+        <button type="button" class="preview-key preview-key-wide" data-key="DPAD_CENTER" title="Select / Enter">Enter</button>
+        <button type="button" class="preview-key preview-key-wide" data-key="BACK" title="Back">Back</button>
+        <button type="button" class="preview-key preview-key-wide" data-key="HOME" title="Home">Home</button>
+      </div>
+      <div class="preview-remote-row">
+        <button type="button" class="preview-key preview-key-wide" data-key="VOLUME_UP" title="Volume up">Vol. Up</button>
+        <button type="button" class="preview-key preview-key-wide" data-key="VOLUME_DOWN" title="Volume down">Vol. Down</button>
+        <button type="button" class="preview-key preview-key-wide" data-key="WAKE" title="Wake device">Wake</button>
+        <button type="button" class="preview-key preview-key-wide" data-key="SLEEP" title="Sleep / standby">Sleep</button>
+        <button type="button" class="preview-key preview-key-wide" data-key="REBOOT" title="Reboot (ADB only)">Reboot</button>
+      </div>
+      <p class="preview-remote-hint muted">Arrows / Enter need <b>Keys / D-pad</b> set on the tuner (androidtv_remote, firetv_rest, or adb) and Pair. Agent alone: Back / Home only.</p>
+    </div>`;
+
+  const img = node.querySelector(".preview-stream");
+  const overlay = node.querySelector(".preview-overlay");
+  let pollTimer = null;
+  let alive = true;
+
+  const stop = () => {
+    alive = false;
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    if (img) {
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute("src");
+    }
+  };
+  _previewModalStop = stop;
+
+  const markLive = (label) => {
+    if (!alive) return;
+    if (overlay) {
+      overlay.textContent = label || "";
+      overlay.classList.add("hidden");
+    }
+  };
+  const markStatus = (text, isErr) => {
+    if (!overlay) return;
+    overlay.classList.remove("hidden");
+    overlay.textContent = text;
+    overlay.classList.toggle("is-error", !!isErr);
+  };
+
+  const startJpegPoll = () => {
+    if (!alive) return;
+    markStatus("Snapshot preview…");
+    const tick = () => {
+      if (!alive || document.hidden) return;
+      img.src = `/api/tuners/${encodeURIComponent(tuner.id)}/preview.jpg?t=${Date.now()}`;
+    };
+    img.onload = () => markLive("Live");
+    img.onerror = () => markStatus("Preview unavailable — check encoder URL / ffmpeg", true);
+    tick();
+    pollTimer = setInterval(tick, 1500);
+  };
+
+  const startMjpeg = () => {
+    markStatus("Connecting…");
+    let settled = false;
+    const failTimer = setTimeout(() => {
+      if (settled || !alive) return;
+      img.removeAttribute("src");
+      startJpegPoll();
+    }, 6000);
+    img.onload = () => {
+      if (!alive) return;
+      settled = true;
+      clearTimeout(failTimer);
+      markLive();
+    };
+    img.onerror = () => {
+      if (!alive) return;
+      settled = true;
+      clearTimeout(failTimer);
+      img.removeAttribute("src");
+      startJpegPoll();
+    };
+    img.src = `/api/tuners/${encodeURIComponent(tuner.id)}/preview.mjpg?t=${Date.now()}`;
+  };
+
+  node.querySelectorAll("[data-key]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const key = btn.getAttribute("data-key");
+      if (!key) return;
+      btn.disabled = true;
+      try {
+        await api.post(`/api/tuners/${encodeURIComponent(tuner.id)}/key`, { key });
+      } catch (e) {
+        toast(e.message, true);
+      }
+      btn.disabled = false;
+    });
+  });
+
+  // Widen modal for video + pad.
+  const modalCard = document.querySelector("#modal .modal-card");
+  if (modalCard) modalCard.classList.add("modal-card-preview");
+  openModal(tuner.name, node);
+  startMjpeg();
 }
 
 function renderCapabilityBadges(container, backendType, keysType) {

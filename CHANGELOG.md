@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-08-04
+
+### Fixed
+- Hybrid App Play `adbtuner_open_app` now opens the package on the **keys** plane (Remote / ADB monkey) instead of Agent `launch-intent` VIEW, which left the home launcher and caused random Selects / failed ESPN tunes
+- Package-only Agent opens use `/api/launch` (launcher activity) instead of `/api/launch-intent`; Agent 4xx errors include the response message
+- Preview D-pad / volume keys fail with a clear setup message when no Keys / D-pad backend is configured (Agent alone still supports Back / Home only)
+- `firetv_rest` maps volume up/down for dashboard remote controls
+
+### Added
+- **Tuner encoder preview** (ADBTuner-style): Preview on each tuner card opens a modal with live HDMI encoder MJPEG (JPEG snapshot fallback) and remote controls (D-pad, Enter, Back, Home, volume, wake/sleep, reboot via ADB)
+
 ## [0.1.13] - 2026-08-03
 
 ### Fixed
@@ -145,7 +156,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.14
 [0.1.13]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.13
 [0.1.12]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.12
 [0.1.11]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.11

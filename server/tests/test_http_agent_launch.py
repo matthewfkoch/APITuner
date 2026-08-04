@@ -26,14 +26,48 @@ def _backend_with_transport(handler) -> HttpAgentBackend:
 
 
 @pytest.mark.asyncio
+async def test_launch_package_only_uses_api_launch():
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"success": True, "message": "launched"})
+
+    backend = _backend_with_transport(handler)
+    await backend.launch(package="com.espn.score_center")
+    assert paths == ["/api/launch"]
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_launch_deeplink_uses_launch_intent():
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"success": True, "message": "launched"})
+
+    backend = _backend_with_transport(handler)
+    await backend.launch(
+        package="com.wbd.stream",
+        deeplink="https://play.hbomax.com/x",
+        action="android.intent.action.VIEW",
+    )
+    assert paths == ["/api/launch-intent"]
+    await backend.close()
+
+
+@pytest.mark.asyncio
 async def test_launch_rejects_http_400():
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/launch-intent"
         return httpx.Response(400, json={"success": False, "message": "bad request"})
 
     backend = _backend_with_transport(handler)
-    with pytest.raises(BackendUnavailable, match="400"):
-        await backend.launch(package="com.espn.score_center")
+    with pytest.raises(BackendUnavailable, match="bad request"):
+        await backend.launch(
+            package="com.wbd.stream",
+            deeplink="https://play.hbomax.com/x",
+        )
     await backend.close()
 
 
@@ -43,7 +77,7 @@ async def test_launch_rejects_success_false():
         return httpx.Response(200, json={"success": False, "message": "failed"})
 
     backend = _backend_with_transport(handler)
-    with pytest.raises(BackendUnavailable, match="failed"):
+    with pytest.raises(BackendUnavailable, match="could not open app|failed"):
         await backend.launch(package="com.espn.score_center")
     await backend.close()
 

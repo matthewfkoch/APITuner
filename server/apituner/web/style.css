@@ -245,6 +245,115 @@ code {
   line-height: 1.4;
 }
 
+/* ---- Tuner encoder preview (modal) ---- */
+.modal-card-preview {
+  width: min(920px, 96vw);
+  max-width: min(920px, 96vw);
+}
+
+.modal-card-preview .modal-body {
+  padding: 0 0 16px;
+}
+
+.preview-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.preview-stage {
+  position: relative;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  max-height: min(56vh, 520px);
+  width: 100%;
+  overflow: hidden;
+}
+
+.preview-stream {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  background: rgba(5, 7, 11, 0.72);
+  pointer-events: none;
+}
+
+.preview-overlay.hidden { display: none; }
+.preview-overlay.is-error { color: var(--red); }
+
+.preview-remote {
+  padding: 14px 16px 4px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.preview-remote-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  justify-content: center;
+}
+
+.preview-key {
+  min-width: 48px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: #2a3140;
+  color: #f0f4f8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.preview-key:hover {
+  background: #363e50;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.preview-key:active {
+  background: #1e2533;
+}
+
+.preview-key:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.preview-key-wide {
+  min-width: 72px;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.preview-remote-hint {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 0 8px 4px;
+}
+
+/* legacy card preview scraps removed */
+
 .field-warn {
   margin: 8px 0 0;
   padding: 8px 10px;

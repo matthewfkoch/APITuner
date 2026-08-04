@@ -60,8 +60,10 @@ class HttpAgentBackend(ControlBackend):
                 f"Agent auth failed ({resp.status_code}) on {path}; check the tuner token"
             )
         if resp.status_code >= 400:
+            detail = _agent_error_detail(resp)
             raise BackendUnavailable(
                 f"Agent error {resp.status_code} on {path}"
+                + (f": {detail}" if detail else "")
             )
 
     async def _post(self, path: str, json: Optional[dict] = None) -> dict[str, Any]:
@@ -135,6 +137,29 @@ class HttpAgentBackend(ControlBackend):
         action: Optional[str] = None,
         extras: Optional[str] = None,
     ) -> None:
+        # Package-only open (App Play adbtuner_open_app): use launcher intent, not VIEW.
+        needs_intent = bool(
+            (deeplink and str(deeplink).strip())
+            or (component and str(component).strip())
+            or (extras and str(extras).strip())
+            or (
+                action
+                and action not in (
+                    "android.intent.action.VIEW",
+                    "android.intent.action.MAIN",
+                )
+            )
+        )
+        if not needs_intent and not (deeplink and str(deeplink).strip()):
+            data = await self._post("/api/launch", {"packageName": package})
+            if data.get("success") is False:
+                raise BackendUnavailable(
+                    data.get("message")
+                    or f"Agent could not open app {package} "
+                    "(is it installed on this device?)"
+                )
+            return
+
         payload: dict[str, Any] = {"packageName": package}
         if action:
             payload["action"] = action
@@ -152,7 +177,13 @@ class HttpAgentBackend(ControlBackend):
             )
 
     async def send_key(self, key: str) -> None:
-        await self._post("/api/key", {"key": key})
+        data = await self._post("/api/key", {"key": key})
+        if data.get("success") is False:
+            msg = data.get("message") or f"unsupported key {key}"
+            raise BackendUnavailable(
+                f"{msg}. Agent Accessibility only supports BACK/HOME/RECENTS — "
+                "set Keys / D-pad (androidtv_remote, firetv_rest, or adb) for arrows"
+            )
 
     async def current_app(self) -> Optional[str]:
         try:
@@ -210,3 +241,16 @@ def _as_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _agent_error_detail(resp: httpx.Response) -> str:
+    """Best-effort message from an Agent error JSON body."""
+    try:
+        data = resp.json()
+    except ValueError:
+        text = (resp.text or "").strip()
+        return text[:200] if text else ""
+    if not isinstance(data, dict):
+        return ""
+    msg = data.get("message") or data.get("detail") or data.get("error")
+    return str(msg).strip() if msg else ""

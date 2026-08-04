@@ -42,6 +42,10 @@ _KEY_MAP = {
     "BACK": "back",
     "MENU": "menu",
     "SLEEP": "sleep",
+    "VOLUME_UP": "volume_up",
+    "VOLUME_DOWN": "volume_down",
+    "VOL_UP": "volume_up",
+    "VOL_DOWN": "volume_down",
     "MEDIA_STOP": "home",  # best-effort; no dedicated stop
     "MEDIA_PAUSE": "home",
     "KEYCODE_DPAD_LEFT": "dpad_left",
@@ -53,6 +57,8 @@ _KEY_MAP = {
     "KEYCODE_HOME": "home",
     "KEYCODE_BACK": "back",
     "KEYCODE_MENU": "menu",
+    "KEYCODE_VOLUME_UP": "volume_up",
+    "KEYCODE_VOLUME_DOWN": "volume_down",
     "KEYCODE_MEDIA_STOP": "home",
     "KEYCODE_MEDIA_PAUSE": "home",
 }
@@ -115,6 +121,10 @@ class FireTvRestBackend(ControlBackend):
             await self._client.post(url)
         except httpx.HTTPError as exc:
             logger.debug("Fire TV wake failed for %s: %s", self._host, exc)
+
+    async def wake(self) -> None:
+        """Public wake for dashboard key controls."""
+        await self._wake()
 
     def _auth_headers(self) -> dict[str, str]:
         if not self._token:

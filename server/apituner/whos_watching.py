@@ -6,10 +6,10 @@ import asyncio
 import logging
 import re
 import shutil
-import tempfile
 import time
-from pathlib import Path
 from typing import Awaitable, Callable, Optional
+
+from .preview import grab_preview_jpeg, have_ffmpeg
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def text_looks_like_whos_watching(text: str) -> bool:
 
 
 def _have_ffmpeg() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return have_ffmpeg()
 
 
 def _have_tesseract() -> bool:
@@ -54,49 +54,7 @@ async def grab_encoder_frame(
     timeout: float = GRAB_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     """Capture one JPEG frame from an MPEG-TS HTTP encoder URL via ffmpeg."""
-    if not stream_url or not _have_ffmpeg():
-        return None
-    with tempfile.TemporaryDirectory(prefix="apituner-frame-") as tmp:
-        out = Path(tmp) / "frame.jpg"
-        cmd = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            stream_url,
-            "-frames:v",
-            "1",
-            "-q:v",
-            "3",
-            str(out),
-        ]
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.communicate()
-                logger.debug("ffmpeg frame grab timed out for %s", stream_url)
-                return None
-            if proc.returncode != 0 or not out.is_file():
-                err = (stderr or b"").decode("utf-8", errors="replace")[:200]
-                logger.debug("ffmpeg frame grab failed: %s", err)
-                return None
-            data = out.read_bytes()
-            return data if data else None
-        except FileNotFoundError:
-            return None
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("ffmpeg frame grab error: %s", exc)
-            return None
-
+    return await grab_preview_jpeg(stream_url, timeout=timeout, width=960)
 
 def ocr_image_bytes(jpeg: bytes) -> str:
     """OCR a JPEG/PNG byte blob; returns empty string when tesseract/Pillow unavailable."""

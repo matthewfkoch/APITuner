@@ -37,6 +37,7 @@ pytest
 | `config_interpreter.py` | ADBTuner / babsonnexus App Play command runner (Remote keys or ADB shell) |
 | `dynamic_url.py` | FruitDeepLinks / lane deeplink URL resolution before launch |
 | `whos_watching.py` | Encoder frame OCR + timed DPAD for profile prompts |
+| `preview.py` | Encoder MJPEG/JPEG frame grab for dashboard Preview |
 | `keys.py` | `key_macro` normalization (`;` / `,` / `KEYCODE_`) |
 | `hdhr/` | HDHomeRun discovery, lineup, stream routes, XMLTV |
 | `playlist.py` | M3U / M3U8 generation for Channels DVR |

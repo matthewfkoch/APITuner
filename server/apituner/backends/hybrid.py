@@ -2,13 +2,43 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from .base import Capabilities, ControlBackend, DeviceInfo, PlaybackState
 
+logger = logging.getLogger(__name__)
+
+
+def _is_package_only_launch(
+    *,
+    deeplink: Optional[str],
+    component: Optional[str],
+    action: Optional[str],
+    extras: Optional[str],
+) -> bool:
+    """True for App Play-style open_app (package only, no deep link intent)."""
+    if deeplink and str(deeplink).strip():
+        return False
+    if component and str(component).strip():
+        return False
+    if extras and str(extras).strip():
+        return False
+    if action and action not in (
+        "android.intent.action.VIEW",
+        "android.intent.action.MAIN",
+    ):
+        return False
+    return True
+
 
 class SplitControlBackend(ControlBackend):
-    """Launch/probes on ``launch``; D-pad / shell keys on ``keys`` when present."""
+    """Launch/probes on ``launch``; D-pad / shell keys on ``keys`` when present.
+
+    Package-only opens (``adbtuner_open_app``) prefer the keys plane so ESPN /
+    App Play use Remote/ADB monkey instead of Agent ACTION_VIEW, which often
+    fails or never leaves the launcher.
+    """
 
     def __init__(self, launch: ControlBackend, keys: ControlBackend) -> None:
         self._launch = launch
@@ -60,6 +90,23 @@ class SplitControlBackend(ControlBackend):
         action: Optional[str] = None,
         extras: Optional[str] = None,
     ) -> None:
+        package_only = _is_package_only_launch(
+            deeplink=deeplink, component=component, action=action, extras=extras
+        )
+        if package_only:
+            # Prefer Remote/ADB open_app; fall back to Agent if keys cannot open.
+            try:
+                await self._keys.launch(package=package)
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Hybrid keys open_app failed for %s (%s); trying Agent",
+                    package,
+                    exc,
+                )
+                await self._launch.launch(package=package)
+                return
+
         await self._launch.launch(
             package=package,
             deeplink=deeplink,
@@ -83,6 +130,14 @@ class SplitControlBackend(ControlBackend):
 
     async def stop(self) -> None:
         await self._launch.stop()
+
+    async def wake(self) -> None:
+        for be in (self._keys, self._launch):
+            fn = getattr(be, "wake", None)
+            if callable(fn):
+                await fn()
+                return
+        await self.send_key("POWER")
 
     async def force_stop(self, package: str) -> None:
         for be in (self._keys, self._launch):

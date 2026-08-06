@@ -176,6 +176,7 @@ Native apps without reliable deep links (ESPN, CBS, Fox, NBC, …) use ADBTuner 
 1. In the dashboard **Configurations** tab, import JSON from `adbtuner_native/configurations/*.json`.
 2. On **Channels**, import the matching station list (keeps `configuration_uuid`).
 3. Use a D-pad backend **or** Agent + `keys_control` on the tuner (`http_agent` alone cannot inject D-pad). On older Fire sticks without `:8080`, use **`adb`** as `keys_control` or primary.
+4. **ESPN package:** babsonnexus stations use `com.espn.score_center`. Some Google TV devices use `com.espn.gtv` instead — set `package_name` / `alternate_package_name` to match what’s installed. APITuner tries primary → alternate → ESPN family until one opens, and **Check packages** on the Channels page flags packages missing from Agent devices. Wrong package on Google TV often opens the **Play Store**.
 
 Deep-link stations with a `configuration_uuid` (e.g. Max + ADBTuner Compatibility Mode) use the normal Agent launch path **and** apply that config as an overlay: `pre_tune_commands`, who’s-watching clears when `check_for_and_clear_whos_watching_prompts` is true, `key_macro`, and `post_playback_start_commands`. Redundant `am start` lines are skipped when the Agent already launched the deeplink.
 

@@ -27,6 +27,7 @@ from .hdhr.routes import router as hdhr_router
 from .log_buffer import install_log_buffer
 from .models import Channel, GlobalOptions, Tuner
 from .keys import key_requires_dpad
+from .package_coverage import build_package_coverage
 from .playlist import build_m3u, filter_channels_by_provider
 from .preview import grab_preview_jpeg, have_ffmpeg, jpeg_response, mjpeg_response
 from .stream import open_stream
@@ -272,6 +273,21 @@ async def tuner_apps(tuner_id: str, request: Request) -> list[dict]:
     if info is None:
         return []
     return [{"name": p, "packageName": p} for p in info.packages]
+
+
+@app.get("/api/package-coverage")
+async def package_coverage(request: Request) -> dict:
+    """Installed apps on Agent/ADB tuners vs channel package_name fields.
+
+    Used by the dashboard to warn when a channel package is not installed
+    (e.g. com.espn.gtv on a Fire stick that only has com.espn.score_center).
+    """
+    store = _store(request)
+    return await build_package_coverage(
+        store.config.tuners,
+        store.config.channels,
+        _manager(request),
+    )
 
 
 @app.get("/api/tuners/{tuner_id}/preview.jpg", include_in_schema=False)

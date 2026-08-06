@@ -28,6 +28,7 @@ from .config_interpreter import (
 from .dynamic_url import DynamicUrlError, looks_like_dynamic_url, resolve_dynamic_url
 from .keys import key_requires_dpad, normalize_key_macro
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
+from .packages import package_candidates, package_try_order
 from .whos_watching import clear_whos_watching_prompt
 
 logger = logging.getLogger(__name__)
@@ -205,23 +206,78 @@ class TunerManager:
         info = self._info.get(tuner_id)
         if not info or not info.packages:
             return None  # unknown
-        if channel.package_name in info.packages:
-            return True
-        if channel.alternate_package_name and channel.alternate_package_name in info.packages:
+        candidates = package_candidates(
+            channel.package_name, channel.alternate_package_name
+        )
+        if any(pkg in info.packages for pkg in candidates):
             return True
         return False
 
-    def _choose_package(self, tuner_id: str, channel: Channel) -> str:
+    def _package_try_order(self, tuner_id: str, channel: Channel) -> list[str]:
         info = self._info.get(tuner_id)
-        if info and info.packages:
-            if channel.package_name in info.packages:
-                return channel.package_name
-            if (
-                channel.alternate_package_name
-                and channel.alternate_package_name in info.packages
-            ):
-                return channel.alternate_package_name
-        return channel.package_name
+        installed = list(info.packages) if info and info.packages else None
+        return package_try_order(
+            channel.package_name,
+            channel.alternate_package_name,
+            installed=installed,
+        )
+
+    def _choose_package(self, tuner_id: str, channel: Channel) -> str:
+        order = self._package_try_order(tuner_id, channel)
+        if not order:
+            return channel.package_name
+        chosen = order[0]
+        if chosen != channel.package_name:
+            logger.info(
+                "Using installed package %s on %s (channel lists %s)",
+                chosen,
+                tuner_id,
+                channel.package_name,
+            )
+        return chosen
+
+    async def _launch_with_package_fallbacks(
+        self,
+        backend: ControlBackend,
+        channel: Channel,
+        packages: list[str],
+        *,
+        deeplink: Optional[str] = None,
+        component: Optional[str] = None,
+        action: Optional[str] = None,
+        extras: Optional[str] = None,
+    ) -> str:
+        """Try each package candidate until launch succeeds."""
+        errors: list[str] = []
+        for pkg in packages:
+            try:
+                await backend.launch(
+                    package=pkg,
+                    deeplink=deeplink,
+                    component=component,
+                    action=action,
+                    extras=extras,
+                )
+                if pkg != packages[0]:
+                    logger.info(
+                        "Launch succeeded with fallback package %s "
+                        "(channel lists %s)",
+                        pkg,
+                        channel.package_name,
+                    )
+                return pkg
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Launch failed for %s on channel %s: %s",
+                    pkg,
+                    channel.number,
+                    exc,
+                )
+                errors.append(f"{pkg}: {exc}")
+        raise TuneFailed(
+            f"Could not open any package for channel {channel.number} "
+            f"({channel.name}): " + "; ".join(errors)
+        )
 
     async def _select(self, channel: Channel, exclude: set[str]) -> Optional[Tuner]:
         async with self._alloc_lock:
@@ -371,14 +427,44 @@ class TunerManager:
                 pass
             await asyncio.sleep(1.0)
 
-        chosen_pkg = self._choose_package(tuner.id, channel)
+        # Refresh installed-app list before package pick (Agent Usage Access).
+        try:
+            self._info[tuner.id] = await backend.get_info()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("get_info before tune failed for %s: %s", tuner.name, exc)
+
+        try_order = self._package_try_order(tuner.id, channel)
+        chosen_pkg = try_order[0] if try_order else channel.package_name
+        logger.info(
+            "Tune %s package try-order on %s: %s (channel package=%s)",
+            tune_id,
+            tuner.name,
+            try_order,
+            channel.package_name,
+        )
 
         if app_play is not None:
-            await self._do_app_play_tune(
-                tuner, backend, cmd_be, channel, chosen_pkg, options, app_play
+            info = self._info.get(tuner.id)
+            if info and info.packages:
+                if not any(p in info.packages for p in try_order):
+                    raise TuneFailed(
+                        f"None of {try_order} are installed on {tuner.name}. "
+                        "For ESPN App Play use com.espn.score_center (Fire / most "
+                        "Android TV) or com.espn.gtv (some Google TV ESPN builds); "
+                        "set package_name and alternate_package_name on the channel."
+                    )
+            chosen_pkg = await self._do_app_play_tune(
+                tuner,
+                backend,
+                cmd_be,
+                channel,
+                chosen_pkg,
+                options,
+                app_play,
+                package_fallbacks=try_order,
             )
         else:
-            await self._do_deeplink_tune(
+            chosen_pkg = await self._do_deeplink_tune(
                 tuner,
                 backend,
                 cmd_be,
@@ -386,6 +472,7 @@ class TunerManager:
                 chosen_pkg,
                 options,
                 overlay=overlay,
+                package_fallbacks=try_order,
             )
 
         elapsed = loop.time() - t0
@@ -425,8 +512,10 @@ class TunerManager:
         options: GlobalOptions,
         *,
         overlay: Optional[TuneConfiguration],
-    ) -> None:
+        package_fallbacks: Optional[list[str]] = None,
+    ) -> str:
         launch_url = await self._resolve_launch_url(channel)
+        fallbacks = package_fallbacks or [chosen_pkg]
 
         if overlay is not None and overlay.pre_tune_commands:
             try:
@@ -436,6 +525,7 @@ class TunerManager:
                     package=chosen_pkg,
                     identifier=launch_url,
                     skip_am_start=True,
+                    package_fallbacks=fallbacks,
                 )
             except ConfigInterpreterError as exc:
                 raise TuneFailed(str(exc)) from exc
@@ -447,8 +537,10 @@ class TunerManager:
             except Exception:  # noqa: BLE001
                 pass
 
-        await backend.launch(
-            package=chosen_pkg,
+        chosen_pkg = await self._launch_with_package_fallbacks(
+            backend,
+            channel,
+            fallbacks,
             deeplink=launch_url or None,
             component=channel.component,
             action=channel.action,
@@ -466,6 +558,7 @@ class TunerManager:
                     package=chosen_pkg,
                     identifier=launch_url,
                     skip_am_start=True,
+                    package_fallbacks=fallbacks,
                 )
             except ConfigInterpreterError as exc:
                 raise TuneFailed(str(exc)) from exc
@@ -496,6 +589,7 @@ class TunerManager:
                     package=chosen_pkg,
                     identifier=launch_url,
                     skip_am_start=True,
+                    package_fallbacks=fallbacks,
                 )
             except ConfigInterpreterError as exc:
                 raise TuneFailed(str(exc)) from exc
@@ -505,6 +599,7 @@ class TunerManager:
             )
             if wait_after > 0:
                 await asyncio.sleep(wait_after)
+        return chosen_pkg
 
     async def _do_app_play_tune(
         self,
@@ -515,7 +610,9 @@ class TunerManager:
         chosen_pkg: str,
         options: GlobalOptions,
         app_play: TuneConfiguration,
-    ) -> None:
+        *,
+        package_fallbacks: Optional[list[str]] = None,
+    ) -> str:
         caps = await self._effective_capabilities(cmd_backend)
         if not caps.dpad:
             raise TuneFailed(
@@ -531,6 +628,8 @@ class TunerManager:
 
         cfg_opts = app_play.global_options
         identifier = channel.url if channel.url is not None else ""
+        fallbacks = package_fallbacks or [chosen_pkg]
+        working_pkg = chosen_pkg
 
         try:
             await run_commands(
@@ -538,19 +637,24 @@ class TunerManager:
                 app_play.pre_tune_commands,
                 package=chosen_pkg,
                 identifier=identifier,
+                package_fallbacks=fallbacks,
             )
-            await run_commands(
+            opened = await run_commands(
                 cmd_backend,
                 app_play.tune_commands,
                 package=chosen_pkg,
                 identifier=identifier,
+                package_fallbacks=fallbacks,
             )
+            if opened:
+                working_pkg = opened
             if app_play.post_playback_start_commands:
                 await run_commands(
                     cmd_backend,
                     app_play.post_playback_start_commands,
-                    package=chosen_pkg,
+                    package=working_pkg,
                     identifier=identifier,
+                    package_fallbacks=fallbacks,
                 )
                 wait_after = float(
                     cfg_opts.wait_after_post_playback_start_commands_seconds or 0
@@ -574,14 +678,14 @@ class TunerManager:
             if delay <= 0:
                 delay = max(1.0, float(options.ready_settle_seconds or 1.0))
             await asyncio.sleep(delay)
-            return
+            return working_pkg
 
         loop = asyncio.get_event_loop()
         deadline = loop.time() + options.tune_timeout_seconds
         ready = await self._wait_ready(
             backend,
             channel,
-            chosen_pkg,
+            working_pkg,
             options,
             deadline,
             prior_app=None,
@@ -591,6 +695,7 @@ class TunerManager:
             raise TuneFailed(
                 f"App Play channel {channel.number} not ready within timeout"
             )
+        return working_pkg
 
     async def _clear_whos_watching(
         self, tuner: Tuner, cmd_backend: ControlBackend
@@ -660,6 +765,9 @@ class TunerManager:
         targets = {chosen_pkg, channel.package_name}
         if channel.alternate_package_name:
             targets.add(channel.alternate_package_name)
+        targets.update(
+            package_candidates(channel.package_name, channel.alternate_package_name)
+        )
 
         launch_at = launch_at or loop.time()
         same_app_switch = (

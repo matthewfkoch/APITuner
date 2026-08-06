@@ -35,9 +35,10 @@ def _is_package_only_launch(
 class SplitControlBackend(ControlBackend):
     """Launch/probes on ``launch``; D-pad / shell keys on ``keys`` when present.
 
-    Package-only opens (``adbtuner_open_app``) prefer the keys plane so ESPN /
-    App Play use Remote/ADB monkey instead of Agent ACTION_VIEW, which often
-    fails or never leaves the launcher.
+    Package-only opens (``adbtuner_open_app``) prefer the **launch** plane
+    (Agent ``/api/launch``). Android TV Remote ``send_launch_app_command`` often
+    opens the Play Store when the package is missing, which looks like a
+    successful open and then App Play D-pads the store.
     """
 
     def __init__(self, launch: ControlBackend, keys: ControlBackend) -> None:
@@ -81,6 +82,13 @@ class SplitControlBackend(ControlBackend):
     async def get_info(self) -> DeviceInfo:
         return await self._launch.get_info()
 
+    async def list_apps(self) -> list[dict[str, str]]:
+        fn = getattr(self._launch, "list_apps", None)
+        if callable(fn):
+            return await fn()  # type: ignore[no-any-return]
+        info = await self._launch.get_info()
+        return [{"name": p, "packageName": p} for p in info.packages]
+
     async def launch(
         self,
         *,
@@ -94,17 +102,17 @@ class SplitControlBackend(ControlBackend):
             deeplink=deeplink, component=component, action=action, extras=extras
         )
         if package_only:
-            # Prefer Remote/ADB open_app; fall back to Agent if keys cannot open.
+            # Prefer Agent launcher open; fall back to Remote/ADB if Agent fails.
             try:
-                await self._keys.launch(package=package)
+                await self._launch.launch(package=package)
                 return
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "Hybrid keys open_app failed for %s (%s); trying Agent",
+                    "Hybrid Agent open_app failed for %s (%s); trying keys",
                     package,
                     exc,
                 )
-                await self._launch.launch(package=package)
+                await self._keys.launch(package=package)
                 return
 
         await self._launch.launch(

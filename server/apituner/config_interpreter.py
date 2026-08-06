@@ -126,16 +126,26 @@ async def run_commands(
     package: str,
     identifier: str,
     skip_am_start: bool = False,
-) -> None:
-    """Execute a list of ADBTuner configuration commands against a backend."""
+    package_fallbacks: Optional[list[str]] = None,
+) -> Optional[str]:
+    """Execute a list of ADBTuner configuration commands against a backend.
+
+    Returns the package that successfully opened via ``adbtuner_open_app`` when
+    fallbacks are used; otherwise ``None``.
+    """
+    opened: Optional[str] = None
     for entry in commands:
-        await _run_one(
+        result = await _run_one(
             backend,
             entry,
             package=package,
             identifier=identifier,
             skip_am_start=skip_am_start,
+            package_fallbacks=package_fallbacks,
         )
+        if result:
+            opened = result
+    return opened
 
 
 async def _run_one(
@@ -145,7 +155,8 @@ async def _run_one(
     package: str,
     identifier: str,
     skip_am_start: bool = False,
-) -> None:
+    package_fallbacks: Optional[list[str]] = None,
+) -> Optional[str]:
     if isinstance(entry, dict) and "ADB_LOOP" in entry:
         loop_spec = entry["ADB_LOOP"]
         if not isinstance(loop_spec, dict):
@@ -177,65 +188,109 @@ async def _run_one(
                     package=package,
                     identifier=identifier,
                     skip_am_start=skip_am_start,
+                    package_fallbacks=package_fallbacks,
                 )
-        return
+        return None
 
     if not isinstance(entry, str):
         raise ConfigInterpreterError(f"Unsupported command entry: {entry!r}")
 
     cmd = _substitute(entry.strip(), package=package, identifier=identifier)
     if not cmd:
-        return
+        return None
 
     m = _SLEEP_RE.match(cmd)
     if m:
         await asyncio.sleep(float(m.group(1)))
-        return
+        return None
 
     m = _OPEN_APP_RE.match(cmd)
     if m:
         pkg = m.group(1).strip().strip("'\"")
-        await backend.launch(package=pkg)
-        return
+        # When open_app targets the channel package placeholder result, try
+        # primary → alternate → family. Hardcoded packages stay single-shot.
+        to_try: list[str] = [pkg]
+        if package_fallbacks and pkg == package:
+            to_try = []
+            for p in package_fallbacks:
+                if p and p not in to_try:
+                    to_try.append(p)
+            if pkg not in to_try:
+                to_try.insert(0, pkg)
+        errors: list[str] = []
+        for candidate in to_try:
+            try:
+                await backend.launch(package=candidate)
+                if candidate != pkg:
+                    logger.info(
+                        "adbtuner_open_app succeeded with fallback package %s "
+                        "(wanted %s)",
+                        candidate,
+                        pkg,
+                    )
+                return candidate
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "adbtuner_open_app failed for %s: %s", candidate, exc
+                )
+                errors.append(f"{candidate}: {exc}")
+        raise ConfigInterpreterError(
+            "adbtuner_open_app failed for all package candidates: "
+            + "; ".join(errors)
+        )
 
     m = _FORCE_STOP_RE.match(cmd)
     if m:
         pkg = m.group(1).strip().strip("'\"")
-        force_stop = getattr(backend, "force_stop", None)
-        if callable(force_stop):
-            await force_stop(pkg)
-            return
-        if _has_shell(backend):
-            await backend.run_shell(f"am force-stop {pkg}")  # type: ignore[attr-defined]
-            return
-        logger.info(
-            "am force-stop mapped to best-effort stop/HOME (no shell): %s",
-            pkg,
-        )
-        try:
-            await backend.stop()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("best-effort stop after force-stop failed: %s", exc)
-        return
+        stop_pkgs = [pkg]
+        if package_fallbacks and pkg == package:
+            stop_pkgs = []
+            for p in package_fallbacks:
+                if p and p not in stop_pkgs:
+                    stop_pkgs.append(p)
+        for stop_pkg in stop_pkgs:
+            force_stop = getattr(backend, "force_stop", None)
+            if callable(force_stop):
+                try:
+                    await force_stop(stop_pkg)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("force_stop %s failed: %s", stop_pkg, exc)
+                continue
+            if _has_shell(backend):
+                try:
+                    await backend.run_shell(f"am force-stop {stop_pkg}")  # type: ignore[attr-defined]
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("am force-stop %s failed: %s", stop_pkg, exc)
+                continue
+            logger.info(
+                "am force-stop mapped to best-effort stop/HOME (no shell): %s",
+                stop_pkg,
+            )
+            try:
+                await backend.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("best-effort stop after force-stop failed: %s", exc)
+            break
+        return None
 
     # Shell backends: pass through input/am/monkey for ADBTuner fidelity.
     if _has_shell(backend) and _SHELLISH_RE.match(cmd):
         if skip_am_start and _AM_START_RE.match(cmd):
             logger.info("Skipping redundant am start (already launched): %s", cmd[:80])
-            return
+            return None
         await backend.run_shell(cmd)  # type: ignore[attr-defined]
-        return
+        return None
 
     m = _KEYEVENT_RE.match(cmd)
     if m:
         await backend.send_key(_normalize_key(m.group(1)))
-        return
+        return None
 
     m = _AM_START_RE.match(cmd)
     if m:
         if skip_am_start:
             logger.info("Skipping redundant am start (already launched): %s", cmd[:80])
-            return
+            return None
         raise ConfigInterpreterError(
             f"Unsupported am start without a shell backend "
             f"(use adb backend or adbtuner_open_app): {cmd}"
@@ -244,6 +299,6 @@ async def _run_one(
     # Bare key name fallback (some configs omit "input keyevent").
     if re.fullmatch(r"[A-Za-z0-9_]+", cmd):
         await backend.send_key(_normalize_key(cmd))
-        return
+        return None
 
     raise ConfigInterpreterError(f"Unsupported configuration command: {cmd}")

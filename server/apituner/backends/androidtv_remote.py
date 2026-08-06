@@ -27,6 +27,14 @@ logger = logging.getLogger(__name__)
 
 _CLIENT_NAME = "APITuner"
 
+# Remote launch of a missing package often opens the store listing instead.
+_STORE_OR_INSTALLER_PACKAGES = (
+    "com.android.vending",
+    "com.google.android.packageinstaller",
+    "com.google.android.permissioncontroller",
+    "com.amazon.venezia",
+)
+
 
 class AndroidTvRemoteBackend(ControlBackend):
     capabilities = Capabilities(
@@ -133,6 +141,34 @@ class AndroidTvRemoteBackend(ControlBackend):
         await self.connect()
         target = deeplink if deeplink else package
         self._remote.send_launch_app_command(target)
+        # Package-only: detect Play Store / wrong app (common when package missing).
+        if deeplink and str(deeplink).strip():
+            return
+        await asyncio.sleep(1.25)
+        try:
+            foreground = self._remote.current_app
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("current_app after remote launch unavailable: %s", exc)
+            return
+        if not foreground:
+            return
+        fg = str(foreground).split("/", 1)[0].strip()
+        if fg == package or fg.startswith(package + "."):
+            return
+        if fg in _STORE_OR_INSTALLER_PACKAGES or any(
+            fg.startswith(s + ".") for s in _STORE_OR_INSTALLER_PACKAGES
+        ):
+            raise BackendUnavailable(
+                f"Android TV Remote opened {fg} instead of {package} "
+                "(usually Play Store when the package is not installed). "
+                "Install the app or fix package_name / alternate_package_name "
+                "(ESPN App Play: com.espn.score_center on many devices, "
+                "com.espn.gtv on some Google TV builds)."
+            )
+        # Something else came to foreground — still wrong for App Play open_app.
+        raise BackendUnavailable(
+            f"Android TV Remote foreground is {fg!r} after launching {package}"
+        )
 
     async def send_key(self, key: str) -> None:
         await self.connect()

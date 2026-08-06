@@ -126,6 +126,26 @@ async def test_run_commands_espn_style():
 
 
 @pytest.mark.asyncio
+async def test_open_app_tries_package_fallbacks():
+    class FlakyBackend(RecordingBackend):
+        async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
+            self.launches.append(package)
+            if package == "com.espn.gtv":
+                raise RuntimeError("not installed")
+
+    backend = FlakyBackend()
+    opened = await run_commands(
+        backend,
+        ["adbtuner_open_app '||TARGET_PACKAGE_NAME||'"],
+        package="com.espn.gtv",
+        identifier="0",
+        package_fallbacks=["com.espn.gtv", "com.espn.score_center"],
+    )
+    assert backend.launches == ["com.espn.gtv", "com.espn.score_center"]
+    assert opened == "com.espn.score_center"
+
+
+@pytest.mark.asyncio
 async def test_unknown_command_raises():
     backend = RecordingBackend()
     with pytest.raises(ConfigInterpreterError, match="Unsupported"):

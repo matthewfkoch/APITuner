@@ -232,15 +232,31 @@ async def test_whos_watching_skipped_no_dpad_fails_tune(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_hybrid_package_only_prefers_keys():
+async def test_hybrid_package_only_prefers_agent():
     agent = RecordingBackend(dpad=False)
     remote = RecordingBackend(dpad=True)
     split = SplitControlBackend(agent, remote)
     await split.launch(package="com.espn.score_center")
-    assert remote.launches == [("com.espn.score_center", None)]
-    assert agent.launches == []
+    assert agent.launches == [("com.espn.score_center", None)]
+    assert remote.launches == []
     await split.launch(package="com.wbd.stream", deeplink="https://play.hbomax.com/x")
-    assert agent.launches == [("com.wbd.stream", "https://play.hbomax.com/x")]
+    assert agent.launches == [
+        ("com.espn.score_center", None),
+        ("com.wbd.stream", "https://play.hbomax.com/x"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_package_only_falls_back_to_keys():
+    class FailingAgent(RecordingBackend):
+        async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
+            raise RuntimeError("agent launch failed")
+
+    agent = FailingAgent(dpad=False)
+    remote = RecordingBackend(dpad=True)
+    split = SplitControlBackend(agent, remote)
+    await split.launch(package="com.espn.score_center")
+    assert remote.launches == [("com.espn.score_center", None)]
 
 
 @pytest.mark.asyncio
@@ -288,7 +304,7 @@ async def test_app_play_uses_keys_backend(tmp_path):
         app_play=cfg,
         command_backend=split,
     )
-    # open_app prefers keys plane; DPAD stays on keys.
-    assert remote.launches == [("com.espn.score_center", None)]
-    assert agent.launches == []
+    # open_app prefers Agent; DPAD stays on keys.
+    assert agent.launches == [("com.espn.score_center", None)]
+    assert remote.launches == []
     assert remote.keys == ["DPAD_CENTER"]

@@ -153,6 +153,8 @@ document.getElementById("copy-xmltv").addEventListener("click", () => {
 let cachedChannels = [];
 let cachedConfigs = [];
 let cachedAgentLatest = null;
+/** @type {null | {tuners: any[], channels: any[], summary: any}} */
+let packageCoverage = null;
 /** True when imported channels need D-pad (App Play, Max who’s-watching, key_macro). */
 let catalogNeedsDpadKeys = false;
 
@@ -833,27 +835,51 @@ function channelMatchesQuery(c, q) {
   return hay.includes(q);
 }
 
+function coverageForChannel(c) {
+  if (!packageCoverage || !packageCoverage.channels) return null;
+  return packageCoverage.channels.find((r) => Number(r.number) === Number(c.number)) || null;
+}
+
+function packageWarnTitle(row) {
+  if (!row) return "";
+  if (row.status === "missing") {
+    return `Package not installed on: ${(row.missing_on || []).join(", ") || "Agent tuners"}`;
+  }
+  if (row.status === "partial") {
+    return `Missing on ${(row.missing_on || []).join(", ")}; found on ${(row.found_on || []).join(", ")}`;
+  }
+  return "";
+}
+
 function renderChannels(channels) {
   const tbody = document.querySelector("#channel-table tbody");
   const q = (document.getElementById("channel-search")?.value || "").trim().toLowerCase();
   const filtered = channels.filter((c) => channelMatchesQuery(c, q));
   const countEl = document.getElementById("channel-count");
-  if (countEl) {
-    countEl.textContent = q
-      ? `Showing ${filtered.length} of ${channels.length}`
-      : `${channels.length} channel${channels.length === 1 ? "" : "s"}`;
+  const sum = packageCoverage && packageCoverage.summary;
+  let countText = q
+    ? `Showing ${filtered.length} of ${channels.length}`
+    : `${channels.length} channel${channels.length === 1 ? "" : "s"}`;
+  if (sum && (sum.channels_missing || sum.channels_partial)) {
+    countText += ` · ${sum.channels_missing || 0} missing pkg · ${sum.channels_partial || 0} partial`;
   }
+  if (countEl) countEl.textContent = countText;
   tbody.innerHTML = "";
   if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="6"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import an ADBTuner export or add one manually."}</div></td></tr>`;
     return;
   }
   for (const c of filtered) {
-    const tr = el(`<tr class="row-clickable" title="Click to edit channel">
+    const cov = coverageForChannel(c);
+    const warn = cov && (cov.status === "missing" || cov.status === "partial");
+    const pkgHtml = warn
+      ? `<span class="mono">${escapeHtml(c.package_name)}</span> <span class="pkg-warn" title="${escapeAttr(packageWarnTitle(cov))}">⚠ ${cov.status === "missing" ? "not installed" : "partial"}</span>`
+      : `<span class="mono">${escapeHtml(c.package_name)}</span>`;
+    const tr = el(`<tr class="row-clickable${warn ? " row-pkg-warn" : ""}" title="Click to edit channel">
       <td><span class="ch-num">${c.number}</span></td>
       <td><strong>${escapeHtml(c.name)}</strong></td>
       <td class="muted">${escapeHtml(c.provider_name || "—")}</td>
-      <td class="mono">${escapeHtml(c.package_name)}</td>
+      <td>${pkgHtml}</td>
       <td class="mono col-url" title="${escapeAttr(c.url || "")}">${escapeHtml((c.url || "—").slice(0, 48))}${(c.url || "").length > 48 ? "…" : ""}</td>
       <td class="col-actions"><button class="btn btn-sm btn-secondary" data-edit>Edit</button> <button class="btn btn-sm btn-danger" data-del>Delete</button></td>
     </tr>`);
@@ -869,9 +895,32 @@ function renderChannels(channels) {
       e.stopPropagation();
       if (!confirm(`Delete channel ${c.number}?`)) return;
       try { await api.del(`/api/channels/${c.number}`); toast("Channel deleted"); loadChannels(); }
-      catch (e) { toast(e.message, true); }
+      catch (err) { toast(err.message, true); }
     });
     tbody.appendChild(tr);
+  }
+}
+
+async function refreshPackageCoverage(quiet) {
+  try {
+    packageCoverage = await api.get("/api/package-coverage");
+    if (!quiet) {
+      const s = packageCoverage.summary || {};
+      if (!s.listable_tuners) {
+        toast("No Agent/ADB tuners available to list apps", true);
+      } else if (s.channels_missing || s.channels_partial) {
+        toast(
+          `Packages: ${s.channels_missing || 0} missing on all listable tuners, ${s.channels_partial || 0} partial`,
+          true,
+          8000
+        );
+      } else {
+        toast(`All channel packages found on reachable Agent/ADB tuners (${s.reachable_tuners || 0})`);
+      }
+    }
+  } catch (e) {
+    packageCoverage = null;
+    if (!quiet) toast(e.message, true);
   }
 }
 
@@ -885,11 +934,65 @@ async function loadChannels() {
   }
   cachedChannels.sort((a, b) => a.number - b.number);
   renderChannels(cachedChannels);
+  // Background package check (Agent app lists) — don't block the table.
+  refreshPackageCoverage(true).then(() => renderChannels(cachedChannels));
 }
 
 document.getElementById("channel-search")?.addEventListener("input", () => {
   renderChannels(cachedChannels);
 });
+
+document.getElementById("check-packages-btn")?.addEventListener("click", async () => {
+  toast("Checking installed apps on Agent tuners…");
+  await refreshPackageCoverage(false);
+  renderChannels(cachedChannels);
+});
+
+function updatePackageFieldWarnings(form) {
+  const status = form.querySelector("[data-pkg-status]");
+  if (!status) return;
+  const primary = (form.querySelector('[name="package_name"]').value || "").trim();
+  const alternate = (form.querySelector('[name="alternate_package_name"]').value || "").trim();
+  if (!packageCoverage || !(packageCoverage.tuners || []).length) {
+    status.className = "pkg-status muted";
+    status.textContent = "Select a tuner below to browse installed apps, or click Check packages on the Channels page.";
+    return;
+  }
+  const tuners = packageCoverage.tuners.filter((t) => (t.packages || []).length);
+  if (!tuners.length) {
+    status.className = "pkg-status warn";
+    status.textContent = "Could not read installed apps (is the Agent reachable? Usage Access helps package lists).";
+    return;
+  }
+  if (!primary) {
+    status.className = "pkg-status muted";
+    status.textContent = "";
+    return;
+  }
+  const candidates = new Set([primary]);
+  if (alternate) candidates.add(alternate);
+  // ESPN family swap (matches server).
+  if (primary === "com.espn.gtv" || alternate === "com.espn.gtv") candidates.add("com.espn.score_center");
+  if (primary === "com.espn.score_center" || alternate === "com.espn.score_center") candidates.add("com.espn.gtv");
+
+  const found = [];
+  const missing = [];
+  for (const t of tuners) {
+    const have = new Set(t.packages || []);
+    if ([...candidates].some((p) => have.has(p))) found.push(t.name);
+    else missing.push(t.name);
+  }
+  if (missing.length && !found.length) {
+    status.className = "pkg-status warn";
+    status.innerHTML = `<b>Not installed</b> on ${escapeHtml(missing.join(", "))}. Pick an app from the list below, or set alternate_package_name (ESPN: score_center ↔ gtv).`;
+  } else if (missing.length) {
+    status.className = "pkg-status warn";
+    status.textContent = `Installed on ${found.join(", ")}; missing on ${missing.join(", ")}.`;
+  } else {
+    status.className = "pkg-status ok";
+    status.textContent = `Package found on: ${found.join(", ")}.`;
+  }
+}
 
 function channelForm(existing) {
   const c = existing || { number: "", name: "", provider_name: "", package_name: "", alternate_package_name: "", component: "", url: "", action: "android.intent.action.VIEW", extra_string: "", key_macro: [], compatibility_mode: false, tvc_guide_stationid: "", configuration_uuid: "" };
@@ -899,8 +1002,9 @@ function channelForm(existing) {
     <div class="field"><label>Name</label><input name="name" value="${escapeAttr(c.name)}" required /></div>
     <div class="field"><label>Provider</label><input name="provider_name" value="${escapeAttr(c.provider_name || "")}" /></div>
     <div class="field"><label>Gracenote station id</label><input name="tvc_guide_stationid" value="${escapeAttr(c.tvc_guide_stationid || "")}" /></div>
-    <div class="field"><label>Package name</label><input name="package_name" value="${escapeAttr(c.package_name)}" required /></div>
-    <div class="field"><label>Alternate package</label><input name="alternate_package_name" value="${escapeAttr(c.alternate_package_name || "")}" /></div>
+    <div class="field"><label>Package name</label><input name="package_name" value="${escapeAttr(c.package_name)}" required autocomplete="off" /></div>
+    <div class="field"><label>Alternate package</label><input name="alternate_package_name" value="${escapeAttr(c.alternate_package_name || "")}" autocomplete="off" /></div>
+    <div class="field full"><div class="pkg-status muted" data-pkg-status></div></div>
     <div class="field full"><label>Deep link URL / App Play index <span class="hint">(intent data, or loop index for App Play)</span></label><input name="url" value="${escapeAttr(c.url || "")}" placeholder="https://... or 0, 1, 2…" /></div>
     <div class="field full"><label>Configuration UUID <span class="hint">(babsonnexus App Play; leave blank for deep links)</span></label><input name="configuration_uuid" value="${escapeAttr(c.configuration_uuid || "")}" placeholder="0AppPlay-1500-0000-0000-ESPN00000000" /></div>
     <div class="field"><label>Action</label><input name="action" value="${escapeAttr(c.action || "android.intent.action.VIEW")}" /></div>
@@ -908,29 +1012,73 @@ function channelForm(existing) {
     <div class="field full"><label>Intent extras <span class="hint">(agent; key:value,key:value)</span></label><input name="extra_string" value="${escapeAttr(c.extra_string || "")}" /></div>
     <div class="field full"><label>Key macro <span class="hint">(after launch; comma or semicolon, e.g. DPAD_CENTER;DPAD_CENTER — needs keys_control / D-pad backend)</span></label><input name="key_macro" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
     <div class="field checkbox full"><input type="checkbox" name="compatibility_mode" ${c.compatibility_mode ? "checked" : ""} /><label>Compatibility mode (stop app before launch)</label></div>
-    <div class="field full"><label>Fill package from a tuner's installed apps</label>
+    <div class="field full"><label>Installed apps on a tuner <span class="hint">(search, then set as package or alternate)</span></label>
       <select id="app-picker-tuner"><option value="">Select a tuner…</option></select>
+      <input id="app-picker-filter" class="app-picker-filter hidden" type="search" placeholder="Filter by name or package…" />
       <div id="app-picker" class="app-picker hidden"></div>
     </div>
     <div class="form-actions full"><button type="button" class="btn btn-ghost" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>`;
   form.querySelector("[data-cancel]").addEventListener("click", closeModal);
-  // App picker
+  form.querySelector('[name="package_name"]').addEventListener("input", () => updatePackageFieldWarnings(form));
+  form.querySelector('[name="alternate_package_name"]').addEventListener("input", () => updatePackageFieldWarnings(form));
+
+  let loadedApps = [];
+  const renderAppPicker = () => {
+    const picker = form.querySelector("#app-picker");
+    const q = (form.querySelector("#app-picker-filter").value || "").trim().toLowerCase();
+    const apps = !q ? loadedApps : loadedApps.filter((a) => {
+      const hay = `${a.name || ""} ${a.packageName || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+    if (!apps.length) {
+      picker.innerHTML = `<div class="muted">${loadedApps.length ? "No apps match the filter." : "No apps returned."}</div>`;
+      return;
+    }
+    picker.innerHTML = "";
+    apps.slice(0, 200).forEach((a) => {
+      const row = el(`<div class="app-picker-row">
+        <div class="app-picker-meta"><b>${escapeHtml(a.name || a.packageName)}</b> <span class="mono">${escapeHtml(a.packageName)}</span></div>
+        <div class="app-picker-actions">
+          <button type="button" class="btn btn-sm btn-secondary" data-as="primary">Package</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-as="alt">Alternate</button>
+        </div>
+      </div>`);
+      row.querySelector('[data-as="primary"]').addEventListener("click", () => {
+        form.querySelector('[name="package_name"]').value = a.packageName;
+        updatePackageFieldWarnings(form);
+      });
+      row.querySelector('[data-as="alt"]').addEventListener("click", () => {
+        form.querySelector('[name="alternate_package_name"]').value = a.packageName;
+        updatePackageFieldWarnings(form);
+      });
+      picker.appendChild(row);
+    });
+  };
+
   populateTunerSelect(form.querySelector("#app-picker-tuner"));
+  form.querySelector("#app-picker-filter").addEventListener("input", renderAppPicker);
   form.querySelector("#app-picker-tuner").addEventListener("change", async (e) => {
     const picker = form.querySelector("#app-picker");
-    if (!e.target.value) { picker.classList.add("hidden"); return; }
-    picker.classList.remove("hidden"); picker.innerHTML = `<div class="muted">Loading apps…</div>`;
+    const filter = form.querySelector("#app-picker-filter");
+    if (!e.target.value) {
+      picker.classList.add("hidden");
+      filter.classList.add("hidden");
+      return;
+    }
+    picker.classList.remove("hidden");
+    filter.classList.remove("hidden");
+    picker.innerHTML = `<div class="muted">Loading apps…</div>`;
     try {
-      const apps = await api.get(`/api/tuners/${e.target.value}/apps`);
-      if (!apps.length) { picker.innerHTML = `<div class="muted">No app list available for this backend.</div>`; return; }
-      picker.innerHTML = "";
-      apps.forEach((a) => {
-        const row = el(`<div><b>${escapeHtml(a.name || a.packageName)}</b> <span class="mono">${escapeHtml(a.packageName)}</span></div>`);
-        row.addEventListener("click", () => { form.querySelector('[name="package_name"]').value = a.packageName; });
-        picker.appendChild(row);
-      });
-    } catch (err) { picker.innerHTML = `<div class="muted">Could not load apps: ${escapeHtml(err.message)}</div>`; }
+      loadedApps = await api.get(`/api/tuners/${e.target.value}/apps`);
+      if (!Array.isArray(loadedApps)) loadedApps = [];
+      loadedApps.sort((a, b) => String(a.name || a.packageName).localeCompare(String(b.name || b.packageName)));
+      renderAppPicker();
+    } catch (err) {
+      loadedApps = [];
+      picker.innerHTML = `<div class="muted">Could not load apps: ${escapeHtml(err.message)}</div>`;
+    }
   });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
@@ -950,6 +1098,11 @@ function channelForm(existing) {
       tvc_guide_stationid: fd.get("tvc_guide_stationid") || null,
       configuration_uuid: fd.get("configuration_uuid") || null,
     };
+    updatePackageFieldWarnings(form);
+    const status = form.querySelector("[data-pkg-status]");
+    if (status && status.classList.contains("warn")) {
+      if (!confirm("This package looks missing on one or more Agent tuners. Save anyway?")) return;
+    }
     try {
       if (existing) await api.put(`/api/channels/${existing.number}`, payload);
       else await api.post("/api/channels", payload);
@@ -957,6 +1110,8 @@ function channelForm(existing) {
     } catch (err) { toast(err.message, true); }
   });
   openModal(existing ? `Edit channel ${existing.number}` : "Add channel", form);
+  if (!packageCoverage) refreshPackageCoverage(true).then(() => updatePackageFieldWarnings(form));
+  else updatePackageFieldWarnings(form);
 }
 document.getElementById("add-channel-btn").addEventListener("click", () => channelForm(null));
 

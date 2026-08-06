@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-08-05
+
+### Fixed
+- Hybrid App Play `adbtuner_open_app` prefers **Agent** `/api/launch` again (Remote `send_launch_app_command` was opening the **Play Store** when `com.espn.gtv` was not installed, then D-pad ran on the store)
+- Android TV Remote package launches fail if the foreground app is Play Store / an installer instead of the target package
+- ESPN package family: auto-pick installed `com.espn.score_center` ↔ `com.espn.gtv`; App Play fails clearly when neither is installed
+- **Full package fallback:** launch / `adbtuner_open_app` retries primary → `alternate_package_name` → ESPN family until one opens (even when the Agent package list is empty or stale); force-stop clears all candidates
+
+### Added
+- **Package coverage** dashboard: Channels → **Check packages** compares channel `package_name` to Agent/ADB installed apps; missing packages warn in the table and channel editor (searchable app list with Package / Alternate buttons)
+
 ## [0.1.14] - 2026-08-04
 
 ### Fixed
@@ -156,7 +167,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.15
 [0.1.14]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.14
 [0.1.13]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.13
 [0.1.12]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.12

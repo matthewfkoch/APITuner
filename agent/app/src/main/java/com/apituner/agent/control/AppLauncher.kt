@@ -8,7 +8,6 @@ package com.apituner.agent.control
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
@@ -18,14 +17,18 @@ import java.io.File
 
 data class AppInfo(val name: String, val packageName: String)
 
+data class LaunchResult(val success: Boolean, val message: String)
+
 class AppLauncher(val context: Context) {
 
     private val tag = "AppLauncher"
 
     fun getInstalledApps(): List<AppInfo> {
         val pm = context.packageManager
+        // Include launchable system / preloaded apps (e.g. store-updated ESPN with
+        // FLAG_SYSTEM). Filtering only FLAG_SYSTEM==0 hid those from Check packages
+        // and the channel app picker while /api/info still listed the package.
         return pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
             .mapNotNull { info ->
                 try {
                     AppInfo(pm.getApplicationLabel(info).toString(), info.packageName)
@@ -46,18 +49,50 @@ class AppLauncher(val context: Context) {
             emptyList()
         }
 
-    fun launchApp(packageName: String): Boolean = try {
-        val intent = context.packageManager.getLaunchIntentForPackage(packageName)
-        if (intent != null) {
+    fun launchApp(packageName: String): LaunchResult {
+        val pm = context.packageManager
+        if (!isPackageInstalled(packageName)) {
+            return LaunchResult(false, "package not installed: $packageName")
+        }
+        return try {
+            // Many Android TV / Fire apps (e.g. ESPN) expose only LEANBACK_LAUNCHER.
+            // Prefer Leanback on TV devices; otherwise try phone LAUNCHER first.
+            val leanbackFirst = pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+            val intent = if (leanbackFirst) {
+                leanbackLaunchIntent(packageName)
+                    ?: pm.getLaunchIntentForPackage(packageName)
+            } else {
+                pm.getLaunchIntentForPackage(packageName)
+                    ?: leanbackLaunchIntent(packageName)
+            }
+            if (intent == null) {
+                Log.w(tag, "No LAUNCHER/LEANBACK_LAUNCHER activity for $packageName")
+                return LaunchResult(
+                    false,
+                    "no LAUNCHER/LEANBACK_LAUNCHER activity for $packageName",
+                )
+            }
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
-            true
-        } else {
-            false
+            LaunchResult(true, "launched")
+        } catch (e: Exception) {
+            Log.e(tag, "launchApp failed: ${e.message}", e)
+            LaunchResult(false, e.message ?: "launch failed")
         }
-    } catch (e: Exception) {
-        Log.e(tag, "launchApp failed: ${e.message}", e)
-        false
+    }
+
+    /** Resolve TV / Leanback launcher activity when the phone LAUNCHER is absent. */
+    private fun leanbackLaunchIntent(packageName: String): Intent? {
+        val probe = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+            setPackage(packageName)
+        }
+        val resolve = context.packageManager.resolveActivity(probe, 0) ?: return null
+        val info = resolve.activityInfo ?: return null
+        return Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+            component = ComponentName(info.packageName, info.name)
+        }
     }
 
     fun launchAppWithIntent(
@@ -66,7 +101,7 @@ class AppLauncher(val context: Context) {
         data: String?,
         component: String?,
         extras: Map<String, String>?,
-    ): Boolean {
+    ): LaunchResult {
         return try {
             val intent = Intent(action ?: Intent.ACTION_VIEW)
             if (!data.isNullOrEmpty()) {
@@ -85,10 +120,10 @@ class AppLauncher(val context: Context) {
                 return launchApp(packageName)
             }
             context.startActivity(intent)
-            true
+            LaunchResult(true, "launched")
         } catch (e: Exception) {
             Log.e(tag, "launchAppWithIntent failed: ${e.message}", e)
-            false
+            LaunchResult(false, e.message ?: "launch failed")
         }
     }
 
@@ -126,6 +161,13 @@ class AppLauncher(val context: Context) {
         true
     } catch (e: Exception) {
         try { apkFile.delete() } catch (_: Exception) {}
+        false
+    }
+
+    private fun isPackageInstalled(packageName: String): Boolean = try {
+        context.packageManager.getPackageInfo(packageName, 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
         false
     }
 

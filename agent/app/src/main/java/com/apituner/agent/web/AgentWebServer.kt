@@ -164,8 +164,8 @@ class AgentWebServer(
     private fun launch(session: IHTTPSession): Response {
         val pkg = body(session).get("packageName")?.asString
         if (pkg.isNullOrEmpty()) return json(mapOf("success" to false, "message" to "packageName required"))
-        val ok = appLauncher.launchApp(pkg)
-        return json(mapOf("success" to ok, "message" to if (ok) "launched" else "failed"))
+        val result = appLauncher.launchApp(pkg)
+        return json(mapOf("success" to result.success, "message" to result.message))
     }
 
     private fun launchIntent(session: IHTTPSession): Response {
@@ -187,8 +187,8 @@ class AgentWebServer(
             }
         }
 
-        val ok = appLauncher.launchAppWithIntent(pkg, action, data, component, extras)
-        return json(mapOf("success" to ok, "message" to if (ok) "launched" else "failed"))
+        val result = appLauncher.launchAppWithIntent(pkg, action, data, component, extras)
+        return json(mapOf("success" to result.success, "message" to result.message))
     }
 
     private fun handleStop(): Response {

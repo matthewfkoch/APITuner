@@ -162,8 +162,8 @@ class AndroidTvRemoteBackend(ControlBackend):
                 f"Android TV Remote opened {fg} instead of {package} "
                 "(usually Play Store when the package is not installed). "
                 "Install the app or fix package_name / alternate_package_name "
-                "(ESPN App Play: com.espn.score_center on many devices, "
-                "com.espn.gtv on some Google TV builds)."
+                "(ESPN App Play: com.espn.gtv on Fire / Amazon, "
+                "com.espn.score_center on many Google / Android TV builds)."
             )
         # Something else came to foreground — still wrong for App Play open_app.
         raise BackendUnavailable(

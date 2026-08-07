@@ -52,7 +52,7 @@ Keep **`control: http_agent`** for package-pinned launches and playback probes. 
 | Google TV / onn / Chromecast | `http_agent` `:9092` | `androidtv_remote` `:6466` / pair `:6467` |
 | Fire Stick | `http_agent` `:9092` | `firetv_rest` `:8080` or `adb` `:5555` |
 
-Pair the keys backend from the dashboard (Pair button). Without `keys_control`, Max `key_macro` / who’s-watching / App Play cannot send `DPAD_CENTER` (Agent Accessibility only supports BACK/HOME/RECENTS).
+Pair the keys backend from the dashboard (**Pair** / **Auto-pair**). Auto-pair OCRs the PIN from the tuner’s HDMI encoder feed (needs `stream_endpoint` plus ffmpeg/tesseract — both are in the Docker image); manual PIN entry remains available. Without `keys_control`, Max `key_macro` / who’s-watching / App Play cannot send `DPAD_CENTER` (Agent Accessibility only supports BACK/HOME/RECENTS).
 
 ### Encoder preview (dashboard)
 

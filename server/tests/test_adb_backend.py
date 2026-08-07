@@ -64,10 +64,65 @@ async def test_interpreter_passes_input_keyevent_via_shell():
 
 
 @pytest.mark.asyncio
-async def test_launch_open_app_uses_monkey(tmp_path: Path):
+async def test_launch_open_app_tries_leanback_first():
     backend = FakeAdbBackend()
     await backend.launch(package="com.espn.score_center")
-    assert any("monkey -p com.espn.score_center" in c for c in backend.shell_cmds)
+    assert backend.shell_cmds == [
+        "monkey -p com.espn.score_center -c android.intent.category.LEANBACK_LAUNCHER 1"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_launch_open_app_falls_back_to_phone_launcher():
+    class PhoneLauncherFake(FakeAdbBackend):
+        async def run_shell(self, command: str) -> str:
+            self.shell_cmds.append(command)
+            if "LEANBACK_LAUNCHER" in command:
+                return "** No activities found to run, monkey aborted."
+            return "Events injected: 1"
+
+    backend = PhoneLauncherFake()
+    await backend.launch(package="com.example.phoneapp")
+    assert backend.shell_cmds == [
+        "monkey -p com.example.phoneapp -c android.intent.category.LEANBACK_LAUNCHER 1",
+        "monkey -p com.example.phoneapp -c android.intent.category.LAUNCHER 1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_launch_open_app_raises_when_both_categories_abort():
+    from apituner.backends.base import BackendUnavailable
+
+    class BothAbortFake(FakeAdbBackend):
+        async def run_shell(self, command: str) -> str:
+            self.shell_cmds.append(command)
+            return "** No activities found to run, monkey aborted."
+
+    backend = BothAbortFake()
+    with pytest.raises(BackendUnavailable, match="no LAUNCHER or LEANBACK"):
+        await backend.launch(package="com.missing.app")
+    assert len(backend.shell_cmds) == 2
+
+
+
+@pytest.mark.asyncio
+async def test_launch_open_app_continues_after_nonzero_leanback():
+    """Non-zero monkey exit on Leanback should still try phone LAUNCHER."""
+    from apituner.backends.base import BackendUnavailable
+
+    class NonZeroThenOk(FakeAdbBackend):
+        async def run_shell(self, command: str) -> str:
+            self.shell_cmds.append(command)
+            if "LEANBACK_LAUNCHER" in command:
+                raise BackendUnavailable("adb shell failed (255): monkey aborted")
+            return "Events injected: 1"
+
+    backend = NonZeroThenOk()
+    await backend.launch(package="com.example.phoneapp")
+    assert backend.shell_cmds == [
+        "monkey -p com.example.phoneapp -c android.intent.category.LEANBACK_LAUNCHER 1",
+        "monkey -p com.example.phoneapp -c android.intent.category.LAUNCHER 1",
+    ]
 
 
 @pytest.mark.asyncio

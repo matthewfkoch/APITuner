@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .adb_grant import AdbGrantError, grant_agent_permissions
 from .agent_update import AgentUpdateError, download_apk, latest_cache
+from .auto_pair import PairKind, auto_pair
 from .backends import BackendNotPaired, BackendUnavailable
 from .backends.http_agent import HttpAgentBackend
 from .channels import ChannelValidationError, validate_channel_numbers
@@ -444,17 +445,70 @@ async def pair_finish(tuner_id: str, request: Request) -> dict:
         await backend.finish_pairing(pin)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Pairing failed: {exc}") from exc
-    # Persist Fire TV REST client token onto the keys or primary control config.
-    token = getattr(backend, "client_token", None)
-    if token:
-        if tuner.keys_control and tuner.keys_control.type == "firetv_rest":
-            tuner.keys_control.token = token
-            store.save()
-        elif tuner.control.type == "firetv_rest":
-            tuner.control.token = token
-            store.save()
+    _persist_fire_pair_token(store, tuner, backend)
     await manager.refresh_info(tuner_id)
     return {"success": True, "message": "Paired successfully"}
+
+
+def _pairing_kind(tuner: Tuner, backend) -> PairKind | None:
+    """Resolve androidtv_remote vs firetv_rest for PIN OCR shape."""
+    for cfg in (tuner.keys_control, tuner.control):
+        if cfg is None:
+            continue
+        if cfg.type in ("androidtv_remote", "firetv_rest"):
+            return cfg.type  # type: ignore[return-value]
+    name = type(backend).__name__.lower()
+    if "fire" in name:
+        return "firetv_rest"
+    if "android" in name or "remote" in name:
+        return "androidtv_remote"
+    return None
+
+
+def _persist_fire_pair_token(store: ConfigStore, tuner: Tuner, backend) -> None:
+    """Persist Fire TV REST client token onto the keys or primary control config."""
+    token = getattr(backend, "client_token", None)
+    if not token:
+        return
+    if tuner.keys_control and tuner.keys_control.type == "firetv_rest":
+        tuner.keys_control.token = token
+        store.save()
+    elif tuner.control.type == "firetv_rest":
+        tuner.control.token = token
+        store.save()
+
+
+@app.post("/api/tuners/{tuner_id}/pair/auto")
+async def pair_auto(tuner_id: str, request: Request) -> dict:
+    """Start pairing, OCR the PIN from the HDMI encoder, and finish pairing."""
+    manager = _manager(request)
+    store = _store(request)
+    tuner = next((t for t in store.config.tuners if t.id == tuner_id), None)
+    if tuner is None:
+        raise HTTPException(status_code=404, detail="Tuner not found")
+    backend = manager.get_pairing_backend(tuner)
+    if not backend.requires_pairing:
+        raise HTTPException(status_code=400, detail="Backend does not require pairing")
+    kind = _pairing_kind(tuner, backend)
+    if kind is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Auto-pair only supports androidtv_remote and firetv_rest",
+        )
+    stream = (tuner.stream_endpoint or "").strip()
+    if not stream:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Auto-pair needs a stream endpoint (HDMI encoder URL) "
+                "to read the PIN from the TV"
+            ),
+        )
+    result = await auto_pair(backend, stream, kind=kind)
+    if result.success:
+        _persist_fire_pair_token(store, tuner, backend)
+        await manager.refresh_info(tuner_id)
+    return result.as_dict()
 
 
 # ---- Channel management ----
@@ -621,13 +675,24 @@ async def grant_tuner_permissions(tuner_id: str, request: Request) -> dict:
     tuner = next((t for t in store.config.tuners if t.id == tuner_id), None)
     if tuner is None:
         raise HTTPException(status_code=404, detail="Tuner not found")
-    if tuner.control.type != "http_agent":
+    if tuner.control.type not in ("http_agent", "adb"):
         raise HTTPException(
             status_code=400,
-            detail="Permission grant via ADB is only for http_agent tuners",
+            detail=(
+                "Permission grant via ADB is for http_agent or adb tuners "
+                "(needs network ADB to the device)"
+            ),
         )
+    host = (tuner.control.host or "").split(":", 1)[0].strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="Tuner host is empty")
+    # http_agent uses :9092; network ADB grant always targets the ADB port.
+    if tuner.control.type == "adb":
+        adb_port = tuner.control.port or 5555
+    else:
+        adb_port = 5555
     try:
-        result = await grant_agent_permissions(tuner.control.host)
+        result = await grant_agent_permissions(host, adb_port=adb_port)
     except AdbGrantError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     await _manager(request).refresh_info(tuner_id)

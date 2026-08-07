@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-08-07
+
+### Added
+- **Auto-pair** Keys backends (`androidtv_remote` / `firetv_rest`): `POST /api/tuners/{id}/pair/auto` starts pairing, OCRs the PIN from the HDMI encoder feed, and finishes pairing; dashboard **Auto-pair** button with manual PIN fallback
+- **Grant permissions (ADB)** also appears on **Network ADB** Fire tuner cards (not only `http_agent`), so Agent overlay/usage/notification/Accessibility can be granted when the stick is controlled via ADB
+- Tuner form **auto-fills the default port** when switching backend type (e.g. `adb` 5555 ↔ `http_agent` 9092) or Keys type, unless the port was customized; `androidtv_remote` also fills **pair port 6467**
+- Agent `/api/launch` returns specific failure reasons (`package not installed`, `no LAUNCHER/LEANBACK_LAUNCHER activity`, start errors) instead of opaque `failed`
+
+### Fixed
+- Agent `/api/launch` and ADB `open_app` use **LEANBACK_LAUNCHER** (TV-first, then phone `LAUNCHER`) so Leanback-only apps like ESPN open when installed
+- ADB `open_app` now **fails** when monkey reports no activities for both categories (was treating abort as success and continuing the App Play script on the wrong screen); non-zero monkey exit on one category still tries the other
+- Agent `<queries>` includes Leanback/LAUNCHER MAIN so TV package resolve works on Android 11+
+- Agent `/api/apps` no longer drops `FLAG_SYSTEM` apps (preloaded / updated-system ESPN was missing from Check packages / app picker)
+- Manual Pair starts pairing when the modal opens so the PIN appears before Complete (Auto-pair unchanged)
+- ESPN install-error copy: Fire / Amazon → `com.espn.gtv`; Google / Android TV → `com.espn.score_center`
+
 ## [0.1.15] - 2026-08-05
 
 ### Fixed
@@ -167,7 +183,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.15...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.16...HEAD
+[0.1.16]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.16
 [0.1.15]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.15
 [0.1.14]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.14
 [0.1.13]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.13

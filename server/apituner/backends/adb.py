@@ -24,6 +24,11 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
+def _monkey_aborted(output: str) -> bool:
+    lowered = (output or "").lower()
+    return "no activities" in lowered or "monkey aborted" in lowered
+
+
 class AdbBackend(ControlBackend):
     """Drive a device over network ADB (full D-pad + real force-stop)."""
 
@@ -192,8 +197,45 @@ class AdbBackend(ControlBackend):
             return
 
         # Launch launcher activity for the package (App Play open_app).
-        await self.run_shell(
-            f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
+        # Android TV / Fire apps (ESPN, etc.) often expose only LEANBACK_LAUNCHER;
+        # phone apps use LAUNCHER. Try Leanback first (APITuner targets TV), then
+        # phone LAUNCHER. monkey often exits 0 even when it prints
+        # "No activities found … monkey aborted", so inspect stdout and fail hard
+        # if both categories abort (missing / non-launchable package).
+        await self._monkey_open_app(package)
+
+    async def _monkey_open_app(self, package: str) -> None:
+        """Open ``package`` via monkey; raise if no launcher activity exists."""
+        categories = (
+            "android.intent.category.LEANBACK_LAUNCHER",
+            "android.intent.category.LAUNCHER",
+        )
+        last_out = ""
+        for category in categories:
+            try:
+                out = await self.run_shell(f"monkey -p {package} -c {category} 1")
+            except BackendUnavailable as exc:
+                # Some devices return non-zero on abort; keep trying the next category.
+                last_out = str(exc)
+                logger.info(
+                    "ADB monkey %s failed for %s (%s); trying next category",
+                    category,
+                    package,
+                    exc,
+                )
+                continue
+            last_out = out or ""
+            if not _monkey_aborted(last_out):
+                return
+            logger.info(
+                "ADB monkey %s aborted for %s; trying next category",
+                category,
+                package,
+            )
+        raise BackendUnavailable(
+            f"ADB could not open {package} (no LAUNCHER or LEANBACK_LAUNCHER "
+            f"activity). Install the app or fix package_name / "
+            f"alternate_package_name. Last monkey output: {last_out[:200]!r}"
         )
 
     async def send_key(self, key: str) -> None:

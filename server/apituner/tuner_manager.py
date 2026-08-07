@@ -449,8 +449,8 @@ class TunerManager:
                 if not any(p in info.packages for p in try_order):
                     raise TuneFailed(
                         f"None of {try_order} are installed on {tuner.name}. "
-                        "For ESPN App Play use com.espn.score_center (Fire / most "
-                        "Android TV) or com.espn.gtv (some Google TV ESPN builds); "
+                        "For ESPN App Play use com.espn.gtv (Fire / Amazon) or "
+                        "com.espn.score_center (many Google / Android TV builds); "
                         "set package_name and alternate_package_name on the channel."
                     )
             chosen_pkg = await self._do_app_play_tune(

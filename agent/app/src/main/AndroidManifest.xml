@@ -27,6 +27,14 @@
             <action android:name="android.intent.action.MAIN" />
         </intent>
         <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
             <action android:name="android.settings.action.MANAGE_OVERLAY_PERMISSION" />
             <data android:scheme="package" />
         </intent>

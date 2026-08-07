@@ -287,6 +287,9 @@ async function loadTuners() {
       : keysType === "adb" ? "ADB keys"
       : null;
     const isAgent = t.control.type === "http_agent";
+    // Fire setup: grant Agent special-access via network ADB (Agent primary, or
+    // Network ADB tuner that still has the Agent APK installed).
+    const showGrantPerms = isAgent || t.control.type === "adb";
     const needsKeysWarn = isAgent && !keysType && catalogNeedsDpadKeys;
     const needsPair =
       t.control.type === "androidtv_remote" || t.control.type === "firetv_rest"
@@ -320,7 +323,7 @@ async function loadTuners() {
       <div class="card-actions">
         <button class="btn btn-sm btn-primary" data-act="preview" title="Open encoder stream preview with remote controls">Preview</button>
         <button class="btn btn-sm btn-secondary" data-act="health" title="Ping the device to verify the Agent APK or TV remote is reachable on the network">Recheck connection</button>
-        ${isAgent ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="Fire TV one-time setup: grant overlay/usage/notification via network ADB. Day-to-day tuning stays on the Agent HTTP API.">Grant permissions (ADB)</button>` : ""}
+        ${showGrantPerms ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="Fire TV one-time setup: grant overlay/usage/notification via network ADB. Day-to-day tuning stays on the Agent HTTP API when using http_agent.">Grant permissions (ADB)</button>` : ""}
         ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Download the latest Agent APK and open the Install dialog on the TV">Update Agent</button>` : ""}
         ${needsPair ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
         <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
@@ -673,7 +676,7 @@ function tunerForm(existing) {
       </select>
     </div>
     <div class="field"><label>Host / IP</label><input name="host" value="${escapeAttr(t.control.host)}" required /></div>
-    <div class="field"><label>Port <span class="hint">(blank = default)</span></label><input name="port" type="number" value="${t.control.port ?? ""}" /></div>
+    <div class="field"><label>Port <span class="hint">(updates with backend; blank = default)</span></label><input name="port" type="number" value="${t.control.port ?? ""}" /></div>
     <div class="field" data-remote><label>Pair port <span class="hint">(Google TV remote, default 6467)</span></label><input name="pair_port" type="number" value="${t.control.pair_port ?? ""}" /></div>
     <div class="field" data-token><label>Token <span class="hint" data-token-hint>(agent auth or Fire TV client token)</span></label><input name="token" value="${escapeAttr(t.control.token || "")}" /></div>
     <div class="field full" data-keys-section>
@@ -695,10 +698,62 @@ function tunerForm(existing) {
     <div class="field full"><label>Encoder stream URL <span class="hint">(HDMI encoder MPEG-TS)</span></label><input name="stream_endpoint" value="${escapeAttr(t.stream_endpoint)}" placeholder="http://192.0.2.20:8090/stream0" required /></div>
     <div class="field checkbox full"><input type="checkbox" name="enabled" ${t.enabled ? "checked" : ""} /><label>Enabled</label></div>
     <div class="form-actions full"><button type="button" class="btn btn-ghost" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>`;
+  const DEFAULT_PORTS = {
+    http_agent: 9092,
+    androidtv_remote: 6466,
+    firetv_rest: 8080,
+    adb: 5555,
+  };
+  const DEFAULT_KEYS_PORTS = {
+    androidtv_remote: 6466,
+    firetv_rest: 8080,
+    adb: 5555,
+  };
+  const DEFAULT_PAIR_PORT = 6467;
   const typeSel = form.querySelector('[name="type"]');
   typeSel.value = t.control.type;
   const keysTypeSel = form.querySelector('[name="keys_type"]');
   keysTypeSel.value = kc.type || "";
+  let prevType = typeSel.value;
+  let prevKeysType = keysTypeSel.value;
+  const portInput = form.querySelector('[name="port"]');
+  const keysPortInput = form.querySelector('[name="keys_port"]');
+  const pairPortInput = form.querySelector('[name="pair_port"]');
+  const keysPairPortInput = form.querySelector('[name="keys_pair_port"]');
+
+  const applyDefaultPort = (selectEl, inputEl, defaults, prev) => {
+    const next = selectEl.value;
+    const nextDefault = defaults[next];
+    if (nextDefault == null) {
+      // Keys type cleared — leave whatever was typed.
+      return next;
+    }
+    const cur = (inputEl.value || "").trim();
+    const prevDefault = defaults[prev];
+    const curNum = cur === "" ? null : Number(cur);
+    // Blank, or still on the previous backend's default → swap to the new default.
+    // Custom ports are left alone.
+    if (cur === "" || (prevDefault != null && curNum === prevDefault)) {
+      inputEl.value = String(nextDefault);
+    }
+    inputEl.placeholder = String(nextDefault);
+    return next;
+  };
+
+  const applyPairPortDefault = (inputEl, isRemote) => {
+    if (!inputEl) return;
+    const cur = (inputEl.value || "").trim();
+    if (isRemote) {
+      if (cur === "" || Number(cur) === DEFAULT_PAIR_PORT) {
+        inputEl.value = String(DEFAULT_PAIR_PORT);
+      }
+      inputEl.placeholder = String(DEFAULT_PAIR_PORT);
+    } else if (cur === "" || Number(cur) === DEFAULT_PAIR_PORT) {
+      // Leaving remote — clear the stock default so it isn't saved on Agent/ADB.
+      inputEl.value = "";
+    }
+  };
+
   const syncType = () => {
     const type = typeSel.value;
     form.querySelector("[data-remote]").style.display = type === "androidtv_remote" ? "" : "none";
@@ -709,16 +764,11 @@ function tunerForm(existing) {
         ? "(filled automatically after Pair; optional)"
         : "(agent, optional)";
     }
-    const portInput = form.querySelector('[name="port"]');
-    if (!existing && !portInput.value) {
-      if (type === "http_agent") portInput.placeholder = "9092";
-      else if (type === "androidtv_remote") portInput.placeholder = "6466";
-      else if (type === "firetv_rest") portInput.placeholder = "8080";
-      else if (type === "adb") portInput.placeholder = "5555";
-    }
+    prevType = applyDefaultPort(typeSel, portInput, DEFAULT_PORTS, prevType);
+    applyPairPortDefault(pairPortInput, type === "androidtv_remote");
     // Hybrid keys section is most useful when primary is Agent.
-    const showKeys = type === "http_agent" || keysTypeSel.value;
-    form.querySelector("[data-keys-section]").style.display = showKeys || type === "http_agent" ? "" : "none";
+    form.querySelector("[data-keys-section]").style.display =
+      type === "http_agent" || keysTypeSel.value ? "" : "none";
     syncKeys();
   };
   const syncKeys = () => {
@@ -728,6 +778,17 @@ function tunerForm(existing) {
     form.querySelector("[data-keys-port]").style.display = show ? "" : "none";
     form.querySelector("[data-keys-pair]").style.display = kt === "androidtv_remote" ? "" : "none";
     form.querySelector("[data-keys-token]").style.display = kt === "firetv_rest" ? "" : "none";
+    if (show) {
+      prevKeysType = applyDefaultPort(
+        keysTypeSel,
+        keysPortInput,
+        DEFAULT_KEYS_PORTS,
+        prevKeysType,
+      );
+    } else {
+      prevKeysType = "";
+    }
+    applyPairPortDefault(keysPairPortInput, kt === "androidtv_remote");
     const warn = form.querySelector("[data-keys-warn]");
     if (warn) {
       const showWarn = catalogNeedsDpadKeys && typeSel.value === "http_agent" && !kt;
@@ -736,7 +797,50 @@ function tunerForm(existing) {
   };
   typeSel.addEventListener("change", syncType);
   keysTypeSel.addEventListener("change", syncKeys);
-  syncType();
+  // Initial sync: show/hide fields only — do not overwrite saved ports on edit.
+  const type = typeSel.value;
+  form.querySelector("[data-remote]").style.display = type === "androidtv_remote" ? "" : "none";
+  form.querySelector("[data-token]").style.display = (type === "http_agent" || type === "firetv_rest") ? "" : "none";
+  const hint = form.querySelector("[data-token-hint]");
+  if (hint) {
+    hint.textContent = type === "firetv_rest"
+      ? "(filled automatically after Pair; optional)"
+      : "(agent, optional)";
+  }
+  portInput.placeholder = String(DEFAULT_PORTS[type] || "");
+  if (type === "androidtv_remote" && !(pairPortInput.value || "").trim()) {
+    pairPortInput.placeholder = String(DEFAULT_PAIR_PORT);
+  }
+  form.querySelector("[data-keys-section]").style.display =
+    type === "http_agent" || keysTypeSel.value ? "" : "none";
+  {
+    const kt = keysTypeSel.value;
+    const show = !!kt;
+    form.querySelector("[data-keys-host]").style.display = show ? "" : "none";
+    form.querySelector("[data-keys-port]").style.display = show ? "" : "none";
+    form.querySelector("[data-keys-pair]").style.display = kt === "androidtv_remote" ? "" : "none";
+    form.querySelector("[data-keys-token]").style.display = kt === "firetv_rest" ? "" : "none";
+    if (show && DEFAULT_KEYS_PORTS[kt] != null) {
+      keysPortInput.placeholder = String(DEFAULT_KEYS_PORTS[kt]);
+    }
+    if (kt === "androidtv_remote" && !(keysPairPortInput.value || "").trim()) {
+      keysPairPortInput.placeholder = String(DEFAULT_PAIR_PORT);
+    }
+    const warn = form.querySelector("[data-keys-warn]");
+    if (warn) {
+      const showWarn = catalogNeedsDpadKeys && type === "http_agent" && !kt;
+      warn.classList.toggle("hidden", !showWarn);
+    }
+  }
+  // New tuner with empty port: seed defaults once.
+  if (!existing || !existing.id) {
+    if (!(portInput.value || "").trim() && DEFAULT_PORTS[type] != null) {
+      portInput.value = String(DEFAULT_PORTS[type]);
+    }
+    if (type === "androidtv_remote" && !(pairPortInput.value || "").trim()) {
+      pairPortInput.value = String(DEFAULT_PAIR_PORT);
+    }
+  }
   form.querySelector("[data-cancel]").addEventListener("click", closeModal);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -781,22 +885,79 @@ async function pairFlow(t) {
     ? t.keys_control.type
     : t.control.type;
   const isFire = pairType === "firetv_rest";
+  const hasStream = !!(t.stream_endpoint && String(t.stream_endpoint).trim());
   const node = el(`<div>
-    <p class="muted">Starting pairing with <b>${escapeHtml(t.name)}</b>. A PIN will appear on the TV screen.${isFire ? " Uses the Fire TV Remote HTTP API (no ADB)." : ""}${t.keys_control ? " (keys / D-pad backend)" : ""}</p>
+    <p class="muted">Pair <b>${escapeHtml(t.name)}</b>. A PIN will appear on the TV screen.${isFire ? " Uses the Fire TV Remote HTTP API (no ADB)." : ""}${t.keys_control ? " (keys / D-pad backend)" : ""}</p>
+    <p class="muted">Auto-pair reads the PIN from the HDMI encoder feed via OCR.${hasStream ? "" : " <b>Add a stream endpoint first</b> to enable Auto-pair."}</p>
     <div class="field full"><label>PIN from TV</label><input id="pair-pin" placeholder="${isFire ? "e.g. 1234" : "e.g. A1B2C3"}" /></div>
-    <div class="form-actions"><button class="btn btn-ghost" data-cancel>Cancel</button><button class="btn btn-primary" data-finish>Complete pairing</button></div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" data-cancel>Cancel</button>
+      <button class="btn btn-secondary" data-auto ${hasStream ? "" : "disabled"} title="${hasStream ? "Start pairing and OCR the PIN from the encoder" : "Requires stream endpoint"}">Auto-pair</button>
+      <button class="btn btn-primary" data-finish>Complete pairing</button>
+    </div>
     <p id="pair-msg" class="muted"></p>
   </div>`);
   node.querySelector("[data-cancel]").addEventListener("click", closeModal);
   const msg = node.querySelector("#pair-msg");
+  const pinInput = node.querySelector("#pair-pin");
+  let pairingStarted = false;
   openModal(isFire ? "Pair Fire TV" : "Pair Android TV", node);
-  try { await api.post(`/api/tuners/${t.id}/pair/start`); msg.textContent = "Enter the PIN shown on the TV, then click Complete pairing."; }
-  catch (e) { msg.textContent = "Failed to start pairing: " + e.message; }
+  // Show the PIN on the TV immediately so manual entry works without Auto-pair.
+  (async () => {
+    try {
+      await api.post(`/api/tuners/${t.id}/pair/start`);
+      pairingStarted = true;
+      msg.textContent = hasStream
+        ? "PIN should be on the TV — Auto-pair, or type it and Complete pairing."
+        : "PIN should be on the TV — enter it below and Complete pairing.";
+    } catch (e) {
+      msg.textContent = "Failed to start pairing: " + e.message;
+    }
+  })();
+
+  node.querySelector("[data-auto]").addEventListener("click", async () => {
+    const btn = node.querySelector("[data-auto]");
+    btn.disabled = true;
+    msg.textContent = pairingStarted
+      ? "Reading PIN from encoder (pairing already started)…"
+      : "Starting pairing and reading PIN from encoder…";
+    try {
+      // Auto-pair always start+finish; if we already started manually, finish
+      // path inside auto_pair will start again — for OCR success that's fine.
+      // If pairing was started, prefer OCR-only by calling auto which re-starts;
+      // androidtv may need a fresh start. Keep calling pair/auto as designed.
+      const r = await api.post(`/api/tuners/${t.id}/pair/auto`, {});
+      if (r.pairing_started) pairingStarted = true;
+      if (r.success) {
+        toast("Paired successfully");
+        closeModal();
+        loadTuners();
+        return;
+      }
+      if (r.pin) pinInput.value = r.pin;
+      msg.textContent = r.hint || "Couldn't read the PIN — enter it manually, then Complete pairing.";
+    } catch (e) {
+      msg.textContent = "Auto-pair failed: " + e.message + " Enter the PIN shown on the TV, then Complete pairing.";
+    } finally {
+      btn.disabled = !hasStream;
+    }
+  });
+
   node.querySelector("[data-finish]").addEventListener("click", async () => {
-    const pin = node.querySelector("#pair-pin").value.trim();
+    const pin = pinInput.value.trim();
     if (!pin) { msg.textContent = "Please enter the PIN."; return; }
-    try { await api.post(`/api/tuners/${t.id}/pair/finish`, { pin }); toast("Paired successfully"); closeModal(); loadTuners(); }
-    catch (e) { msg.textContent = "Pairing failed: " + e.message; }
+    try {
+      if (!pairingStarted) {
+        await api.post(`/api/tuners/${t.id}/pair/start`);
+        pairingStarted = true;
+      }
+      await api.post(`/api/tuners/${t.id}/pair/finish`, { pin });
+      toast("Paired successfully");
+      closeModal();
+      loadTuners();
+    } catch (e) {
+      msg.textContent = "Pairing failed: " + e.message;
+    }
   });
 }
 
@@ -984,7 +1145,7 @@ function updatePackageFieldWarnings(form) {
   }
   if (missing.length && !found.length) {
     status.className = "pkg-status warn";
-    status.innerHTML = `<b>Not installed</b> on ${escapeHtml(missing.join(", "))}. Pick an app from the list below, or set alternate_package_name (ESPN: score_center ↔ gtv).`;
+    status.innerHTML = `<b>Not installed</b> on ${escapeHtml(missing.join(", "))}. Pick an app from the list below, or set alternate_package_name (ESPN: gtv on Fire ↔ score_center on Google TV).`;
   } else if (missing.length) {
     status.className = "pkg-status warn";
     status.textContent = `Installed on ${found.join(", ")}; missing on ${missing.join(", ")}.`;

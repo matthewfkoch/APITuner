@@ -141,4 +141,6 @@ async def test_app_play_runs_commands_on_dpad_backend(tmp_path):
         app_play=cfg,
     )
     assert backend.launches == ["com.espn.score_center"]
-    assert backend.keys == ["DPAD_CENTER"]
+    # Wake + HOME precede the config script (dismiss screensaver / ambient).
+    assert backend.keys[:2] == ["WAKEUP", "HOME"]
+    assert backend.keys[-1] == "DPAD_CENTER"

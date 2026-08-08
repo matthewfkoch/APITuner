@@ -73,6 +73,8 @@ class Lease:
     tune_configuration: Optional[TuneConfiguration] = None
     # Backend used for post_tune key/shell commands (keys plane when hybrid).
     command_backend: Optional[ControlBackend] = None
+    # Background App Play / tune when stream_during_tune is enabled.
+    tune_task: Optional[asyncio.Task] = None
 
 
 class TunerManager:
@@ -279,7 +281,47 @@ class TunerManager:
             f"({channel.name}): " + "; ".join(errors)
         )
 
+    def _tuner_supports_dpad(self, tuner: Tuner) -> bool:
+        """True if primary or keys_control can inject D-pad (App Play / macros)."""
+        keys = tuner.keys_control.type if tuner.keys_control else None
+        kind = keys or tuner.control.type
+        return kind in ("androidtv_remote", "firetv_rest", "adb")
+
+    def _app_play_backend_rank(self, tuner: Tuner) -> int:
+        """Lower is better. Order comes from ``options.app_play_prefer``."""
+        prefer = self._options.app_play_prefer
+        if prefer == "any":
+            return 0
+        keys = tuner.keys_control.type if tuner.keys_control else None
+        kind = keys or tuner.control.type
+        if prefer == "fire":
+            order = ("adb", "firetv_rest", "androidtv_remote")
+        else:  # google_tv
+            order = ("androidtv_remote", "adb", "firetv_rest")
+        try:
+            return order.index(kind)
+        except ValueError:
+            return len(order)
+
+    def _channel_needs_dpad(self, channel: Channel) -> bool:
+        configs = self._store.config.configurations
+        if resolve_app_play_config(channel, configs) is not None:
+            return True
+        if channel.key_macro:
+            return any(key_requires_dpad(k) for k in channel.key_macro)
+        try:
+            overlay = resolve_tune_configuration(channel, configs)
+        except ConfigInterpreterError:
+            overlay = None
+        if overlay is not None and overlay.global_options.check_for_and_clear_whos_watching_prompts:
+            return True
+        return False
+
     async def _select(self, channel: Channel, exclude: set[str]) -> Optional[Tuner]:
+        needs_dpad = self._channel_needs_dpad(channel)
+        app_play = needs_dpad and resolve_app_play_config(
+            channel, self._store.config.configurations
+        ) is not None
         async with self._alloc_lock:
             candidates: list[Tuner] = []
             for tuner in self._tuners():
@@ -289,9 +331,18 @@ class TunerManager:
                     continue
                 if self._has_app(tuner.id, channel) is False:
                     continue
+                if needs_dpad and not self._tuner_supports_dpad(tuner):
+                    continue
                 candidates.append(tuner)
-            # Prefer tuners known to have the app installed.
-            candidates.sort(key=lambda t: 0 if self._has_app(t.id, channel) else 1)
+            # Prefer known-installed app, then Fire/ADB App Play paths, then
+            # other D-pad backends (Chromecast Remote last for App Play).
+            candidates.sort(
+                key=lambda t: (
+                    0 if self._has_app(t.id, channel) else 1,
+                    self._app_play_backend_rank(t) if app_play else 0,
+                    0 if self._tuner_supports_dpad(t) else 1,
+                )
+            )
             if not candidates:
                 return None
             chosen = candidates[0]
@@ -385,6 +436,65 @@ class TunerManager:
             raise TuneFailed(str(exc)) from exc
         app_play = resolve_app_play_config(channel, configs)
         cmd_backend = self._command_backend(tuner, backend)
+        tune_configuration = app_play or overlay
+
+        # Mark the lock as this channel immediately so status/reaper see activity
+        # while App Play navigates (stream_during_tune).
+        st = self._state(tuner.id)
+        st.tune_id = tune_id
+        st.channel_number = channel.number
+        st.channel_name = channel.name
+        st.last_seen = time.time()
+        st.bytes_transferred = 0
+        st.last_error = None
+
+        # Long App Play scripts exceed Channels' ~30s HDHR connect timeout unless
+        # the encoder stream starts before navigation finishes.
+        if options.stream_during_tune and app_play is not None:
+            # Fail *before* returning a lease so retry_on_other_tuner can pick a
+            # D-pad tuner. Streaming first then failing looks like an instant
+            # Channels disconnect.
+            caps = await self._effective_capabilities(cmd_backend)
+            if not caps.dpad:
+                raise TuneFailed(
+                    f"App Play channel {channel.number} ({channel.name}) requires a "
+                    "D-pad backend (androidtv_remote, firetv_rest, or adb); "
+                    f"tuner {tuner.name!r} uses {tuner.control.type}"
+                    + (
+                        f" (keys_control={tuner.keys_control.type})"
+                        if tuner.keys_control
+                        else " — set keys_control for hybrid Agent+Remote"
+                    )
+                )
+            logger.info(
+                "Tune %s streaming during App Play on %s (%s)",
+                tune_id,
+                tuner.name,
+                channel.name,
+            )
+            task = asyncio.create_task(
+                self._do_tune_background(
+                    tuner,
+                    backend,
+                    channel,
+                    tune_id,
+                    options,
+                    app_play=app_play,
+                    overlay=None,
+                    command_backend=cmd_backend,
+                ),
+                name=f"tune-{tune_id}",
+            )
+            return Lease(
+                tuner=tuner,
+                backend=backend,
+                tune_id=tune_id,
+                channel=channel,
+                tune_configuration=tune_configuration,
+                command_backend=cmd_backend,
+                tune_task=task,
+            )
+
         await self._do_tune(
             tuner,
             backend,
@@ -400,9 +510,44 @@ class TunerManager:
             backend=backend,
             tune_id=tune_id,
             channel=channel,
-            tune_configuration=app_play or overlay,
+            tune_configuration=tune_configuration,
             command_backend=cmd_backend,
         )
+
+    async def _do_tune_background(
+        self,
+        tuner: Tuner,
+        backend: ControlBackend,
+        channel: Channel,
+        tune_id: str,
+        options: GlobalOptions,
+        *,
+        app_play: Optional[TuneConfiguration] = None,
+        overlay: Optional[TuneConfiguration] = None,
+        command_backend: Optional[ControlBackend] = None,
+    ) -> None:
+        """Run ``_do_tune`` for stream_during_tune; record failures on tuner state."""
+        try:
+            await self._do_tune(
+                tuner,
+                backend,
+                channel,
+                tune_id,
+                options,
+                app_play=app_play,
+                overlay=overlay,
+                command_backend=command_backend,
+            )
+        except asyncio.CancelledError:
+            logger.info("Tune %s cancelled on %s", tune_id, tuner.name)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Tune %s failed during stream on %s: %s", tune_id, tuner.name, exc
+            )
+            st = self._state(tuner.id)
+            st.last_error = str(exc)
+            raise
 
     async def _do_tune(
         self,
@@ -601,6 +746,31 @@ class TunerManager:
                 await asyncio.sleep(wait_after)
         return chosen_pkg
 
+    async def _prepare_device_for_app_play(self, backend: ControlBackend) -> None:
+        """Wake the stick and return to HOME before App Play D-pad scripts.
+
+        Google TV ambient / screensaver eats directional keys (often lands in
+        screensaver settings). Fire is usually fine but HOME is still cheap.
+        """
+        try:
+            wake = getattr(backend, "wake", None)
+            if callable(wake):
+                await wake()
+            elif hasattr(backend, "run_shell"):
+                await backend.run_shell("input keyevent KEYCODE_WAKEUP")  # type: ignore[attr-defined]
+            else:
+                try:
+                    await backend.send_key("WAKEUP")
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("App Play wake skipped: %s", exc)
+        try:
+            await backend.send_key("HOME")
+            await asyncio.sleep(1.0)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("App Play HOME skipped: %s", exc)
+
     async def _do_app_play_tune(
         self,
         tuner: Tuner,
@@ -630,6 +800,11 @@ class TunerManager:
         identifier = channel.url if channel.url is not None else ""
         fallbacks = package_fallbacks or [chosen_pkg]
         working_pkg = chosen_pkg
+
+        # Screensaver / ambient on Google TV intercepts D-pad (looks like
+        # "changing screensaver settings"). Wake + HOME so App Play starts from
+        # the launcher, then the config's force-stop / open_app.
+        await self._prepare_device_for_app_play(cmd_backend)
 
         try:
             await run_commands(
@@ -865,6 +1040,14 @@ class TunerManager:
 
     async def release(self, lease: Lease) -> None:
         options = self._options
+        task = lease.tune_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            lease.tune_task = None
         self._unlock(lease.tuner.id)
         app_play = lease.tune_configuration
         cmd_be = lease.command_backend or lease.backend

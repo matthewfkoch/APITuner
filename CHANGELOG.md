@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-08-08
+
+### Fixed
+- Long App Play tunes (e.g. ESPN) no longer trip Channels’ ~30s “Tuner Unreachable” timeout — the encoder stream starts while D-pad navigation runs
+- App Play no longer picks Agent-only tuners (no D-pad) or the wrong stick on mixed Fire + Chromecast fleets; Options can prefer Fire or Google TV first
+- App Play wakes the device and returns Home first so Google TV screensaver/ambient does not steal navigation into Settings
+
 ## [0.1.16] - 2026-08-07
 
 ### Added
@@ -183,7 +190,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.16...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.17
 [0.1.16]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.16
 [0.1.15]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.15
 [0.1.14]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.14

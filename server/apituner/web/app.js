@@ -1392,6 +1392,12 @@ const OPTION_FIELDS = [
   ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number", null, "Reclaim tuners that stop making progress"],
   ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
   ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays MPEG-TS; redirect sends clients to the encoder"],
+  ["stream_during_tune", "Stream during App Play", "bool", null, "Start the HDMI encoder stream while App Play navigates (keeps Channels connected past its ~30s timeout; you’ll briefly see the on-screen automation)"],
+  ["app_play_prefer", "App Play stick preference", "select", [
+    { value: "fire", label: "Fire Stick / ADB first" },
+    { value: "google_tv", label: "Google TV / Chromecast first" },
+    { value: "any", label: "No preference" },
+  ], "When several tuners can run App Play, prefer this D-pad path (Fire-tuned ESPN scripts usually need Fire Stick / ADB)"],
   ["wait_for_playback", "Wait for playback signal", "bool", null, "When on, wait for a playing MediaSession before accepting a tune (falls back to foreground if playback never appears)"],
   ["ready_settle_seconds", "Ready settle (s)", "number", null, "Extra wait after playback is detected before opening the HDMI stream"],
   ["stop_on_release", "Stop app on release", "bool", null, "Send HOME when the stream ends"],
@@ -1420,7 +1426,13 @@ async function loadOptions() {
       form.appendChild(row);
     } else if (type === "select") {
       const f = el(`<div class="field"><label>${label}</label><select name="${key}"></select>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`);
-      choices.forEach((ch) => { const o = el(`<option value="${ch}">${ch}</option>`); if (opts[key] === ch) o.selected = true; f.querySelector("select").appendChild(o); });
+      choices.forEach((ch) => {
+        const value = typeof ch === "object" && ch ? ch.value : ch;
+        const text = typeof ch === "object" && ch ? (ch.label || ch.value) : ch;
+        const o = el(`<option value="${escapeAttr(value)}">${escapeHtml(text)}</option>`);
+        if (opts[key] === value) o.selected = true;
+        f.querySelector("select").appendChild(o);
+      });
       form.appendChild(f);
     } else if (type === "text") {
       const val = opts[key] == null ? "" : opts[key];

@@ -154,6 +154,12 @@ class GlobalOptions(BaseModel):
     retry_on_other_tuner: bool = True
     request_timeout: float = 10.0
     stream_mode: Literal["proxy", "redirect"] = "proxy"
+    # App Play can take > Channels' ~30s connect timeout. When on, start the
+    # encoder MPEG-TS immediately while D-pad navigation runs (show tuning UI).
+    stream_during_tune: bool = True
+    # When App Play channels are free on mixed fleets, prefer this D-pad path.
+    # fire = adb / firetv_rest first; google_tv = androidtv_remote first; any = no preference.
+    app_play_prefer: Literal["fire", "google_tv", "any"] = "fire"
     release_grace_seconds: float = 5.0
     stuck_tuner_timeout_seconds: float = 40.0
     tuner_idle_timeout_seconds: float = 60.0

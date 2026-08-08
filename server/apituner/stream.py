@@ -23,10 +23,39 @@ async def _delayed_release(manager: TunerManager, lease: Lease, grace: float) ->
     await manager.release(lease)
 
 
+async def _redirect_release(manager: TunerManager, lease: Lease, idle: float) -> None:
+    """For redirect mode: finish App Play first, then idle-reclaim."""
+    task = lease.tune_task
+    if task is not None:
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    await asyncio.sleep(max(0.0, idle))
+    await manager.release(lease)
+
+
+def _tune_failed(lease: Lease) -> Optional[BaseException]:
+    """Return the exception if a background tune task finished with failure."""
+    task = getattr(lease, "tune_task", None)
+    if task is None or not task.done():
+        return None
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return None
+    return exc
+
+
 async def _proxy_iter(
     request: Request, manager: TunerManager, lease: Lease
 ) -> AsyncIterator[bytes]:
-    """Relay the encoder's MPEG-TS to the client, tracking bytes for lifecycle."""
+    """Relay the encoder's MPEG-TS to the client, tracking bytes for lifecycle.
+
+    When ``lease.tune_task`` is set (stream_during_tune / App Play), bytes flow
+    immediately so Channels does not hit its ~30s connect timeout while D-pad
+    navigation runs. If the background tune fails, the proxy stops.
+    """
     url = lease.tuner.stream_endpoint
     # follow_redirects: some encoders 301/302 (trailing slash, http→https).
     client = httpx.AsyncClient(
@@ -44,6 +73,14 @@ async def _proxy_iter(
                 )
             resp.raise_for_status()
             async for chunk in resp.aiter_bytes(_CHUNK):
+                failed = _tune_failed(lease)
+                if failed is not None:
+                    logger.warning(
+                        "Stream %s stopping: background tune failed: %s",
+                        lease.tune_id,
+                        failed,
+                    )
+                    break
                 if await request.is_disconnected():
                     break
                 manager.touch(lease.tune_id, len(chunk))
@@ -56,6 +93,7 @@ async def _proxy_iter(
     finally:
         await client.aclose()
         # Release after a short grace, matching ADBTuner's ~5s unlock delay.
+        # Cancels an in-flight App Play tune if the client already left.
         asyncio.create_task(
             _delayed_release(manager, lease, manager.options.release_grace_seconds)
         )
@@ -66,10 +104,10 @@ async def open_stream(request: Request, manager: TunerManager, channel) -> Respo
     lease = await manager.lease(channel)
 
     if manager.options.stream_mode == "redirect":
-        # Video flows encoder -> Channels directly; reclaim the tuner after an
-        # idle window since we can't observe the byte stream.
+        # Video flows encoder -> Channels directly; reclaim after App Play
+        # finishes (if any) plus the idle window.
         asyncio.create_task(
-            _delayed_release(manager, lease, manager.options.tuner_idle_timeout_seconds)
+            _redirect_release(manager, lease, manager.options.tuner_idle_timeout_seconds)
         )
         return RedirectResponse(lease.tuner.stream_endpoint, status_code=302)
 

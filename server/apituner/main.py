@@ -127,10 +127,15 @@ def _manager(request: Request) -> TunerManager:
 async def dashboard() -> Response:
     index = WEB_DIR / "index.html"
     if index.exists():
-        html = index.read_text(encoding="utf-8").replace(
-            "{{AGENT_APK_RELEASES_URL}}", AGENT_APK_RELEASES_URL
+        html = (
+            index.read_text(encoding="utf-8")
+            .replace("{{AGENT_APK_RELEASES_URL}}", AGENT_APK_RELEASES_URL)
+            .replace("{{VERSION}}", __version__)
         )
-        return HTMLResponse(html)
+        return HTMLResponse(
+            html,
+            headers={"Cache-Control": "no-store"},
+        )
     return PlainTextResponse("APITuner is running. Dashboard assets missing.")
 
 
@@ -425,7 +430,14 @@ async def pair_start(tuner_id: str, request: Request) -> dict:
     try:
         await backend.start_pairing()
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Pairing failed: {exc}") from exc
+        detail = str(exc).strip() or type(exc).__name__
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Pairing failed: {detail}. "
+                "Cancel any pairing dialog on the TV, then try again."
+            ),
+        ) from exc
     return {"success": True, "message": "Enter the PIN shown on the TV"}
 
 
@@ -480,7 +492,7 @@ def _persist_fire_pair_token(store: ConfigStore, tuner: Tuner, backend) -> None:
 
 @app.post("/api/tuners/{tuner_id}/pair/auto")
 async def pair_auto(tuner_id: str, request: Request) -> dict:
-    """Start pairing, OCR the PIN from the HDMI encoder, and finish pairing."""
+    """Start pairing (unless already started), OCR the PIN, and finish pairing."""
     manager = _manager(request)
     store = _store(request)
     tuner = next((t for t in store.config.tuners if t.id == tuner_id), None)
@@ -504,7 +516,16 @@ async def pair_auto(tuner_id: str, request: Request) -> dict:
                 "to read the PIN from the TV"
             ),
         )
-    result = await auto_pair(backend, stream, kind=kind)
+    already_started = False
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            already_started = bool(body.get("already_started"))
+    except Exception:  # noqa: BLE001 - empty body is fine
+        pass
+    result = await auto_pair(
+        backend, stream, kind=kind, already_started=already_started
+    )
     if result.success:
         _persist_fire_pair_token(store, tuner, backend)
         await manager.refresh_info(tuner_id)

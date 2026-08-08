@@ -903,30 +903,35 @@ async function pairFlow(t) {
   let pairingStarted = false;
   openModal(isFire ? "Pair Fire TV" : "Pair Android TV", node);
   // Show the PIN on the TV immediately so manual entry works without Auto-pair.
-  (async () => {
+  // Auto-pair must OCR+finish that same session — restarting orphans the PIN.
+  const startPromise = (async () => {
     try {
       await api.post(`/api/tuners/${t.id}/pair/start`);
       pairingStarted = true;
       msg.textContent = hasStream
         ? "PIN should be on the TV — Auto-pair, or type it and Complete pairing."
         : "PIN should be on the TV — enter it below and Complete pairing.";
+      return true;
     } catch (e) {
       msg.textContent = "Failed to start pairing: " + e.message;
+      return false;
     }
   })();
 
   node.querySelector("[data-auto]").addEventListener("click", async () => {
     const btn = node.querySelector("[data-auto]");
     btn.disabled = true;
-    msg.textContent = pairingStarted
-      ? "Reading PIN from encoder (pairing already started)…"
-      : "Starting pairing and reading PIN from encoder…";
+    msg.textContent = "Waiting for pairing to start…";
     try {
-      // Auto-pair always start+finish; if we already started manually, finish
-      // path inside auto_pair will start again — for OCR success that's fine.
-      // If pairing was started, prefer OCR-only by calling auto which re-starts;
-      // androidtv may need a fresh start. Keep calling pair/auto as designed.
-      const r = await api.post(`/api/tuners/${t.id}/pair/auto`, {});
+      await startPromise;
+      msg.textContent = pairingStarted
+        ? "Reading PIN from encoder…"
+        : "Starting pairing and reading PIN from encoder…";
+      // If the modal already started pairing, skip start_pairing so androidtv_remote
+      // keeps the remote session whose PIN is on screen.
+      const r = await api.post(`/api/tuners/${t.id}/pair/auto`, {
+        already_started: pairingStarted,
+      });
       if (r.pairing_started) pairingStarted = true;
       if (r.success) {
         toast("Paired successfully");

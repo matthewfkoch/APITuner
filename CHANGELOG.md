@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-08-08
+
+### Fixed
+- Auto-pair no longer restarts pairing after the Pair modal already showed the PIN (androidtv_remote was rebuilding the remote and finishing against a different session)
+- Android TV Remote pairing now disconnects the prior SSL session before starting a new one, and Auto-pair recovers when the PIN on screen is from a dead/orphaned pairing dialog
+- Auto-pair OCR for Google TV PINs: stop hex-whitelisting the full dialog (it turned “Device pairing…” into garbage), decode common spaced-glyph misreads (e.g. `AQYOATE` → `A90A1E`), and try ranked PIN candidates
+
 ## [0.1.17] - 2026-08-08
 
 ### Fixed
@@ -190,7 +197,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.18
 [0.1.17]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.17
 [0.1.16]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.16
 [0.1.15]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.15

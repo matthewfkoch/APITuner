@@ -143,6 +143,7 @@ def test_pair_auto_success(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     async def fake_auto_pair(backend, stream_url, *, kind, **_kwargs):
         assert kind == "androidtv_remote"
         assert "192.0.2.20" in stream_url
+        assert _kwargs.get("already_started") is False
         return AutoPairResult(
             success=True,
             reason="paired",
@@ -158,6 +159,36 @@ def test_pair_auto_success(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     assert data["success"] is True
     assert data["pin"] == "A1B2C3"
     assert data["reason"] == "paired"
+
+
+def test_pair_auto_already_started(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        "apituner.tuner_manager.TunerManager.get_pairing_backend",
+        lambda self, tuner: _FakePairBackend(),
+    )
+    seen: dict = {}
+
+    async def fake_auto_pair(backend, stream_url, *, kind, already_started=False, **_k):
+        seen["already_started"] = already_started
+        seen["kind"] = kind
+        return AutoPairResult(
+            success=True,
+            reason="paired",
+            pin="A1B2C3",
+            pairing_started=True,
+            hint="Paired successfully",
+        )
+
+    monkeypatch.setattr("apituner.main.auto_pair", fake_auto_pair)
+    r = client.post(
+        "/api/tuners/hybrid_remote/pair/auto",
+        json={"already_started": True},
+    )
+    assert r.status_code == 200
+    assert r.json()["success"] is True
+    assert seen == {"already_started": True, "kind": "androidtv_remote"}
 
 
 def test_pair_auto_ocr_failed_returns_body(

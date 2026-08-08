@@ -168,6 +168,10 @@ class SplitControlBackend(ControlBackend):
     async def is_paired(self) -> bool:
         return await self._keys.is_paired()
 
+    def pairing_in_progress(self) -> bool:
+        check = getattr(self._keys, "pairing_in_progress", None)
+        return bool(check()) if callable(check) else False
+
     async def start_pairing(self) -> None:
         await self._keys.start_pairing()
 

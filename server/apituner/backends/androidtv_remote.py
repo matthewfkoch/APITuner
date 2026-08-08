@@ -207,8 +207,20 @@ class AndroidTvRemoteBackend(ControlBackend):
     def requires_pairing(self) -> bool:
         return True
 
+    def pairing_in_progress(self) -> bool:
+        """True when async_start_pairing left an open pairing socket."""
+        remote = self._remote
+        if remote is None:
+            return False
+        return getattr(remote, "_pairing_message_protocol", None) is not None
+
     async def is_paired(self) -> bool:
         from androidtvremote2 import InvalidAuth
+
+        # Do not poke the API port while a PIN dialog is waiting — connect() is
+        # unrelated SSL to 6466, but skipping avoids racing the pair session.
+        if self.pairing_in_progress():
+            return False
 
         try:
             await self.connect()
@@ -222,15 +234,29 @@ class AndroidTvRemoteBackend(ControlBackend):
 
     async def start_pairing(self) -> None:
         async with self._lock:
-            # Fresh remote for pairing so we aren't mid-reconnect.
             self._connected = False
-            self._remote = self._build_remote()
-            await self._remote.async_generate_cert_if_missing()
-            await self._remote.async_start_pairing()
+            # Tear down any prior remote/pairing socket first. Replacing
+            # ``_remote`` without disconnect() orphans the SSL session: the TV
+            # keeps showing a PIN no client can finish.
+            old = self._remote
+            if old is not None:
+                try:
+                    old.disconnect()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._remote = None
+            new_remote = self._build_remote()
+            await new_remote.async_generate_cert_if_missing()
+            await new_remote.async_start_pairing()
+            self._remote = new_remote
 
     async def finish_pairing(self, pin: str) -> None:
         if self._remote is None:
             raise BackendUnavailable("Pairing was not started")
+        if not self.pairing_in_progress():
+            raise BackendUnavailable(
+                "Pairing session was lost — cancel on the TV and start again"
+            )
         await self._remote.async_finish_pairing(pin.strip())
         await self._remote.async_connect()
         self._remote.keep_reconnecting()

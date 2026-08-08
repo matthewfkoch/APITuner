@@ -30,6 +30,21 @@ def test_extract_androidtv_rejects_code_false_positive():
     assert extract_pairing_pin("Enter code\nA1B2C3\n", kind="androidtv_remote") == "A1B2C3"
 
 
+def test_extract_androidtv_ocr_garbled_spaced_pin():
+    # Real tesseract reads of widely spaced A90A1E on Google TV pairing UI.
+    from apituner.auto_pair import extract_pairing_pins
+
+    assert extract_pairing_pin("AQYOATE", kind="androidtv_remote") == "A90A1E"
+    assert "A90A1E" in extract_pairing_pins("AYQOQOATE", kind="androidtv_remote")
+    dialog = (
+        "Device pairing request\n"
+        "Enter the following code on your APITuner to control this device.\n"
+        "AQYOATE\n"
+        "Cancel\n"
+    )
+    assert extract_pairing_pin(dialog, kind="androidtv_remote") == "A90A1E"
+
+
 def test_extract_fire_pin_clean():
     assert extract_pairing_pin("Your PIN is 4821", kind="firetv_rest") == "4821"
 
@@ -86,7 +101,10 @@ async def test_auto_pair_success(monkeypatch):
     async def frame(url: str, timeout: float = 1.5):
         return b"fake-jpeg"
 
-    monkeypatch.setattr("apituner.auto_pair.grab_encoder_frame", frame)
+    async def preview(url: str, timeout: float = 1.5, width: int = 1280):
+        return b"fake-jpeg"
+
+    monkeypatch.setattr("apituner.auto_pair.grab_preview_jpeg", preview)
     monkeypatch.setattr(
         "apituner.auto_pair.ocr_pairing_frame",
         lambda data, kind: "Pairing code A1B2C3",
@@ -108,6 +126,98 @@ async def test_auto_pair_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_auto_pair_already_started_skips_start(monkeypatch):
+    """Dashboard starts pairing on modal open; Auto-pair must not restart."""
+    be = FakePairBackend()
+    monkeypatch.setattr("apituner.auto_pair.have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.auto_pair._have_tesseract", lambda: True)
+
+    async def frame(url: str, timeout: float = 1.5):
+        return b"fake-jpeg"
+
+    async def preview(url: str, timeout: float = 1.5, width: int = 1280):
+        return b"fake-jpeg"
+
+    monkeypatch.setattr("apituner.auto_pair.grab_preview_jpeg", preview)
+    monkeypatch.setattr(
+        "apituner.auto_pair.ocr_pairing_frame",
+        lambda data, kind: "Pairing code A1B2C3",
+    )
+
+    result = await auto_pair(
+        be,
+        "http://192.0.2.1/s",
+        kind="androidtv_remote",
+        already_started=True,
+        overlay_wait_seconds=0,
+        budget_seconds=2.0,
+        max_attempts=2,
+    )
+    assert result.success is True
+    assert result.pin == "A1B2C3"
+    assert be.started is False  # must not call start_pairing again
+    assert be.finished_with == ["A1B2C3"]
+    assert result.pairing_started is True
+
+
+class FakePairBackendWithSocket(FakePairBackend):
+    """Simulates androidtv_remote pairing socket state."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._socket = False
+
+    def pairing_in_progress(self) -> bool:
+        return self._socket
+
+    async def start_pairing(self) -> None:
+        await super().start_pairing()
+        self._socket = True
+
+    async def finish_pairing(self, pin: str) -> None:
+        if not self._socket:
+            raise RuntimeError("Called async_finish_pairing after disconnect")
+        await super().finish_pairing(pin)
+        self._socket = False
+
+
+@pytest.mark.asyncio
+async def test_auto_pair_restarts_when_socket_missing(monkeypatch):
+    """already_started but dead socket → start fresh before OCR."""
+    be = FakePairBackendWithSocket()
+    # Pretend modal thought pairing started, but socket is gone.
+    be.started = False
+    be._socket = False
+    monkeypatch.setattr("apituner.auto_pair.have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.auto_pair._have_tesseract", lambda: True)
+
+    async def frame(url: str, timeout: float = 1.5):
+        return b"fake-jpeg"
+
+    async def preview(url: str, timeout: float = 1.5, width: int = 1280):
+        return b"fake-jpeg"
+
+    monkeypatch.setattr("apituner.auto_pair.grab_preview_jpeg", preview)
+    monkeypatch.setattr(
+        "apituner.auto_pair.ocr_pairing_frame",
+        lambda data, kind: "Pairing code A1B2C3",
+    )
+
+    result = await auto_pair(
+        be,
+        "http://192.0.2.1/s",
+        kind="androidtv_remote",
+        already_started=True,
+        overlay_wait_seconds=0,
+        budget_seconds=2.0,
+        max_attempts=2,
+    )
+    assert result.success is True
+    assert be.started is True
+    assert be.finished_with == ["A1B2C3"]
+
+
+@pytest.mark.asyncio
 async def test_auto_pair_ocr_failed(monkeypatch):
     be = FakePairBackend()
     monkeypatch.setattr("apituner.auto_pair.have_ffmpeg", lambda: True)
@@ -116,7 +226,10 @@ async def test_auto_pair_ocr_failed(monkeypatch):
     async def frame(url: str, timeout: float = 1.5):
         return b"fake-jpeg"
 
-    monkeypatch.setattr("apituner.auto_pair.grab_encoder_frame", frame)
+    async def preview(url: str, timeout: float = 1.5, width: int = 1280):
+        return b"fake-jpeg"
+
+    monkeypatch.setattr("apituner.auto_pair.grab_preview_jpeg", preview)
     monkeypatch.setattr(
         "apituner.auto_pair.ocr_pairing_frame",
         lambda data, kind: "Home screen Amazon Fire",
@@ -147,7 +260,10 @@ async def test_auto_pair_finish_failed(monkeypatch):
     async def frame(url: str, timeout: float = 1.5):
         return b"fake-jpeg"
 
-    monkeypatch.setattr("apituner.auto_pair.grab_encoder_frame", frame)
+    async def preview(url: str, timeout: float = 1.5, width: int = 1280):
+        return b"fake-jpeg"
+
+    monkeypatch.setattr("apituner.auto_pair.grab_preview_jpeg", preview)
     monkeypatch.setattr(
         "apituner.auto_pair.ocr_pairing_frame",
         lambda data, kind: "4821",

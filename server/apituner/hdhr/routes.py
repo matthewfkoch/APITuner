@@ -160,10 +160,10 @@ async def xmltv_epg(
     duration: int | None = None,
     refresh: int = 0,
 ) -> Response:
-    """XMLTV EPG remapped from Channels DVR via Gracenote StationIDs.
+    """XMLTV EPG from Channels DVR (Gracenote) and/or FruitDeepLinks lanes.
 
     Point Channels DVR's HDHomeRun "Custom URL" guide provider at this endpoint.
-    Requires options.channels_dvr_url (Channels DVR base URL on your LAN).
+    Requires options.channels_dvr_url and/or options.fruitdeeplinks_url.
     """
     _require_hdhr(request)
     store = _store(request)

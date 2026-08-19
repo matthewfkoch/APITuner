@@ -36,6 +36,9 @@ pytest
 | `backends/` | `http_agent`, `androidtv_remote`, `firetv_rest`, `adb`, hybrid `SplitControlBackend` |
 | `config_interpreter.py` | ADBTuner / babsonnexus App Play command runner (Remote keys or ADB shell) |
 | `dynamic_url.py` | FruitDeepLinks / lane deeplink URL resolution before launch |
+| `deeplink_catalog.py` | Provider / scheme → Android package map (Google TV vs Fire) |
+| `m3u_import.py` | FDL / ADB M3U → channel list |
+| `fruitdeeplinks.py` | Live sync from `GET /api/adb/lanes` |
 | `whos_watching.py` | Encoder frame OCR + timed DPAD for profile prompts |
 | `preview.py` | Encoder MJPEG/JPEG frame grab for dashboard Preview |
 | `packages.py` / `package_coverage.py` | Installed-app matching + dashboard package warnings |

@@ -102,7 +102,9 @@ async def resolve_dynamic_url(
 
     body = (resp.text or "").strip()
     if not body:
-        raise DynamicUrlError(f"Dynamic URL {fetch_url!r} returned empty body")
+        raise DynamicUrlError(
+            f"no event on this lane ({fetch_url!r} returned empty body)"
+        )
 
     # Prefer JSON when requested or when the body looks like JSON.
     want_json = bool(json_key) or fmt_l == "json" or body.startswith("{") or body.startswith("[")
@@ -116,6 +118,10 @@ async def resolve_dynamic_url(
                 ) from exc
             data = None
         if data is not None:
+            if isinstance(data, dict) and data.get("ok") is False:
+                raise DynamicUrlError(
+                    f"no event on this lane ({fetch_url!r})"
+                )
             keys_to_try = []
             if json_key:
                 keys_to_try.append(str(json_key))
@@ -129,13 +135,15 @@ async def resolve_dynamic_url(
                     logger.info("Resolved dynamic URL via JSON key %s", key)
                     return text
             raise DynamicUrlError(
-                f"Dynamic URL {fetch_url!r} JSON missing deeplink "
-                f"(tried {keys_to_try})"
+                f"no event on this lane ({fetch_url!r} JSON missing deeplink; "
+                f"tried {keys_to_try})"
             )
 
     # Plain-text deeplink body.
     if body.lower() in ("none", "null"):
-        raise DynamicUrlError(f"Dynamic URL {fetch_url!r} returned no deeplink")
+        raise DynamicUrlError(
+            f"no event on this lane ({fetch_url!r} returned no deeplink)"
+        )
     # Some resolvers return JSON-as-text without content-type; already handled.
     first_line = body.splitlines()[0].strip()
     if not first_line:

@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-08-18
+
+### Added
+- **FruitDeepLinks / Android TV deeplink integration**: provider→package catalog (`GET /api/deeplink-catalog`), M3U or playlist-URL import, live ADB-lane or v2 `/whatson` virtual-lane sync, and FDL XMLTV remapped onto APITuner channel numbers. See [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
 ## [0.1.18] - 2026-08-08
 
 ### Fixed
@@ -197,7 +202,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.19
 [0.1.18]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.18
 [0.1.17]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.17
 [0.1.16]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.16

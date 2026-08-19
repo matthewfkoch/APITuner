@@ -25,6 +25,7 @@ from .config_interpreter import (
     resolve_tune_configuration,
     run_commands,
 )
+from .deeplink_catalog import infer_provider, packages_for
 from .dynamic_url import DynamicUrlError, looks_like_dynamic_url, resolve_dynamic_url
 from .keys import key_requires_dpad, normalize_key_macro
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
@@ -661,6 +662,16 @@ class TunerManager:
     ) -> str:
         launch_url = await self._resolve_launch_url(channel)
         fallbacks = package_fallbacks or [chosen_pkg]
+        inferred = packages_for(
+            infer_provider(launch_url),
+            profile=options.fruitdeeplinks_profile,
+        )
+        if inferred:
+            merged: list[str] = []
+            for pkg in (*inferred, *fallbacks):
+                if pkg and pkg not in merged:
+                    merged.append(pkg)
+            fallbacks = merged
 
         if overlay is not None and overlay.pre_tune_commands:
             try:

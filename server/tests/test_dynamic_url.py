@@ -66,3 +66,28 @@ async def test_dynamic_url_empty_fails():
     async with httpx.AsyncClient(transport=transport) as client:
         with pytest.raises(DynamicUrlError, match="empty"):
             await resolve_dynamic_url(url, client=client)
+
+
+@pytest.mark.asyncio
+async def test_dynamic_url_none_is_no_event():
+    url = "http://192.0.2.10:6656/api/adb/lanes/max/1/deeplink?format=text"
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text="none"))
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(DynamicUrlError, match="no event on this lane"):
+            await resolve_dynamic_url(url, client=client)
+
+
+@pytest.mark.asyncio
+async def test_dynamic_url_json_ok_false():
+    url = (
+        "http://192.0.2.10:6656/api/adb/lanes/sportscenter/1/deeplink"
+        "?format=json&dynamic_url_json_key=deeplink_url"
+    )
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200, json={"ok": False, "error": "ADB not enabled for provider"}
+        )
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(DynamicUrlError, match="no event on this lane"):
+            await resolve_dynamic_url(url, client=client)

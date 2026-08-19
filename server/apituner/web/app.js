@@ -1299,27 +1299,76 @@ document.getElementById("export-btn").addEventListener("click", async () => {
 });
 document.getElementById("import-btn").addEventListener("click", () => {
   const node = el(`<div>
-    <p class="muted">Paste an ADBTuner (or APITuner) channel-list JSON array. Channel numbers must be unique; null numbers are filled from <code>sort_order</code> when present. App Play stations keep <code>configuration_uuid</code> — import matching configurations first.</p>
-    <div class="field full"><textarea id="import-json" rows="10" placeholder="[ { &quot;number&quot;: 9000, ... } ]"></textarea></div>
+    <p class="muted">Paste an ADBTuner / APITuner JSON list, a FruitDeepLinks ADB M3U, or fetch a playlist URL. Lane URLs stay as resolvers; Android packages are filled from the deeplink catalog. Channel numbers must be unique; null JSON numbers are filled from <code>sort_order</code> when present.</p>
+    <div class="field"><label>Format</label>
+      <select id="import-kind">
+        <option value="json">JSON channel list</option>
+        <option value="m3u">M3U playlist</option>
+        <option value="url">Fetch URL</option>
+      </select>
+    </div>
+    <div id="import-json-wrap" class="field full"><textarea id="import-json" rows="10" placeholder="[ { &quot;number&quot;: 9000, ... } ]"></textarea></div>
+    <div id="import-m3u-wrap" class="field full hidden"><textarea id="import-m3u" rows="10" placeholder="#EXTM3U&#10;#EXTINF:-1 tvg-name=&quot;ESPN 1&quot;,ESPN 1&#10;http://192.0.2.40:6655/api/adb/lanes/sportscenter/1/deeplink?format=text"></textarea></div>
+    <div id="import-url-wrap" class="field hidden"><label>Playlist URL</label><input id="import-url" type="text" placeholder="http://192.0.2.40:6655/m3u/adb" /></div>
+    <div class="field"><label>Device profile (M3U / URL)</label>
+      <select id="import-profile">
+        <option value="google_tv">Google TV / Android TV</option>
+        <option value="fire">Fire TV</option>
+      </select>
+    </div>
+    <div class="field"><label>Start number (when M3U has no tvg-chno)</label><input id="import-start" type="number" value="9000" /></div>
     <div class="field checkbox"><input type="checkbox" id="import-replace" /><label>Replace all existing channels</label></div>
     <div class="form-actions"><button class="btn btn-ghost" data-cancel>Cancel</button><button class="btn btn-primary" data-import>Import</button></div>
   </div>`);
+  const kindSel = node.querySelector("#import-kind");
+  const syncKind = () => {
+    const kind = kindSel.value;
+    node.querySelector("#import-json-wrap").classList.toggle("hidden", kind !== "json");
+    node.querySelector("#import-m3u-wrap").classList.toggle("hidden", kind !== "m3u");
+    node.querySelector("#import-url-wrap").classList.toggle("hidden", kind !== "url");
+  };
+  kindSel.addEventListener("change", syncKind);
   node.querySelector("[data-cancel]").addEventListener("click", closeModal);
   node.querySelector("[data-import]").addEventListener("click", async () => {
-    let parsed;
-    try { parsed = JSON.parse(node.querySelector("#import-json").value); }
-    catch { toast("Invalid JSON", true); return; }
-    // Accept a bare array or an object wrapping { channels: [...] }.
-    if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.channels)) {
-      parsed = parsed.channels;
+    const kind = kindSel.value;
+    const replace = node.querySelector("#import-replace").checked;
+    const profile = node.querySelector("#import-profile").value;
+    const startNumber = Number(node.querySelector("#import-start").value) || 9000;
+    let payload;
+    if (kind === "m3u") {
+      payload = { m3u: node.querySelector("#import-m3u").value, replace, profile, start_number: startNumber };
+    } else if (kind === "url") {
+      const url = node.querySelector("#import-url").value.trim();
+      if (!url) { toast("Enter a playlist URL", true); return; }
+      payload = { url, replace, profile, start_number: startNumber };
+    } else {
+      let parsed;
+      try { parsed = JSON.parse(node.querySelector("#import-json").value); }
+      catch { toast("Invalid JSON", true); return; }
+      if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.channels)) {
+        parsed = parsed.channels;
+      }
+      payload = { channels: parsed, replace };
     }
     try {
-      const r = await api.post("/api/import", { channels: parsed, replace: node.querySelector("#import-replace").checked });
-      toast(`Imported ${r.imported} channels`); closeModal(); loadChannels();
+      const r = await api.post("/api/import", payload);
+      const extra = r.skipped && r.skipped.length ? ` (${r.skipped.length} skipped)` : "";
+      toast(`Imported ${r.imported} channels${extra}`); closeModal(); loadChannels();
     } catch (e) { toast(e.message, true); }
   });
   openModal("Import channels", node);
 });
+
+async function syncFruitDeepLinks() {
+  try {
+    const r = await api.post("/api/fruitdeeplinks/sync", {});
+    const extra = r.skipped && r.skipped.length ? ` (${r.skipped.length} providers skipped)` : "";
+    toast(`Synced ${r.imported} FruitDeepLinks lanes${extra}`);
+    loadChannels();
+  } catch (e) { toast(e.message, true); }
+}
+document.getElementById("sync-fdl-btn").addEventListener("click", syncFruitDeepLinks);
+document.getElementById("sync-fdl-options-btn").addEventListener("click", syncFruitDeepLinks);
 
 // ============================ CONFIGURATIONS ============================
 
@@ -1418,6 +1467,14 @@ const OPTION_FIELDS = [
   ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as schedule source (e.g. M3U-YouTubeTV)"],
   ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 259200 = 3 days)"],
   ["xmltv_cache_seconds", "XMLTV cache (s)", "number", null, "How long to reuse a built /xmltv.xml response"],
+  ["fruitdeeplinks_url", "FruitDeepLinks URL", "text", null, "LAN base URL, e.g. http://192.0.2.40:6655. Sync pulls ADB lanes; /xmltv.xml remaps FDL guide onto those channels"],
+  ["fruitdeeplinks_profile", "FruitDeepLinks device profile", "select", [
+    { value: "google_tv", label: "Google TV / Android TV" },
+    { value: "fire", label: "Fire TV" },
+  ], "Chooses primary Android package (ESPN score_center vs gtv). The other package is stored as alternate"],
+  ["fruitdeeplinks_start_number", "FruitDeepLinks start number", "number", null, "First channel number for synced lanes (default 9000). Occupied non-FDL numbers are skipped"],
+  ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /xmltv/adb; falls back to /xmltv/lanes)"],
+  ["fruitdeeplinks_sync_seconds", "FruitDeepLinks auto-sync (s)", "number", null, "0 = manual Sync only. Background refresh interval when a FruitDeepLinks URL is set"],
 ];
 async function loadOptions() {
   const form = document.getElementById("options-form");

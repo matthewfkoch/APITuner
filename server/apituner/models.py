@@ -103,6 +103,8 @@ class Channel(BaseModel):
     tvc_guide_stationid: Optional[str] = None
     # ADBTuner / babsonnexus App Play configuration UUID (D-pad navigation scripts).
     configuration_uuid: Optional[str] = None
+    # Integrator origin (e.g. fruitdeeplinks). Sync replaces only matching rows.
+    source: Optional[str] = None
 
     @field_validator("key_macro", mode="before")
     @classmethod
@@ -179,6 +181,59 @@ class GlobalOptions(BaseModel):
     xmltv_source_device: str = "M3U-YouTubeTV"
     xmltv_duration_seconds: int = 259200  # 3 days
     xmltv_cache_seconds: float = 900.0
+
+    # FruitDeepLinks / Android TV deeplink source (lane resolvers + XMLTV).
+    fruitdeeplinks_url: Optional[str] = None
+    fruitdeeplinks_profile: Literal["google_tv", "fire"] = "google_tv"
+    fruitdeeplinks_start_number: int = 9000
+    fruitdeeplinks_xmltv_path: str = "/xmltv/adb"
+    fruitdeeplinks_sync_seconds: float = 0.0
+
+    @field_validator("fruitdeeplinks_start_number", mode="before")
+    @classmethod
+    def _fdl_start_number(cls, value: object) -> object:
+        if value is None or value == "":
+            return 9000
+        return value
+
+    @field_validator("fruitdeeplinks_sync_seconds", mode="before")
+    @classmethod
+    def _fdl_sync_seconds(cls, value: object) -> object:
+        if value is None or value == "":
+            return 0.0
+        return value
+
+    @field_validator("fruitdeeplinks_url", mode="before")
+    @classmethod
+    def _blank_fdl_url(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("fruitdeeplinks_xmltv_path", mode="before")
+    @classmethod
+    def _fdl_xmltv_path(cls, value: object) -> object:
+        if value is None or value == "":
+            return "/xmltv/adb"
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or "/xmltv/adb"
+        return value
+
+    @field_validator("fruitdeeplinks_profile", mode="before")
+    @classmethod
+    def _fdl_profile(cls, value: object) -> object:
+        if value is None or value == "":
+            return "google_tv"
+        if isinstance(value, str):
+            raw = value.strip().lower().replace("-", "_")
+            if raw in ("fire", "firetv", "fire_tv", "amazon"):
+                return "fire"
+            return "google_tv"
+        return value
 
     @field_validator("hdhr_device_id", mode="before")
     @classmethod

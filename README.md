@@ -167,6 +167,8 @@ Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is
 
 Dynamic / lane URLs (FruitDeepLinks, OliveTin, ADBTuner-style resolvers) are fetched at tune time when the URL looks like a resolver (`/lanes/`, `/whatson/`, `dynamic_url_json_key=…`, or `format=json|text` on a deeplink API). The stored URL stays the resolver; only the resolved deeplink is launched.
 
+**FruitDeepLinks (Android / Google TV sticks):** set the FDL base URL in Options and click **Sync FruitDeepLinks**, or Import an ADB M3U / playlist URL. Packages are filled from the [deeplink catalog](docs/INTEGRATION.md). Use FDL `/m3u/adb` (not Apple `profile=apple`) and the Agent (`http_agent`) backend. See [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
 ADBTuner exports sometimes have `"number": null`. APITuner fills that from `sort_order` when present; otherwise import returns a clear 400 error naming the channel instead of an internal server error.
 
 ### App Play configurations (babsonnexus)
@@ -237,6 +239,12 @@ Configurable in the dashboard:
 | Stuck / idle timeouts | Reclaim tuners that stop making progress |
 | HDHomeRun emulation | Appear as an HDHomeRun tuner (`discover.json` / `lineup.json` / `/auto/v…`) |
 | HDHomeRun discovery | SSDP + UDP 65001 (optional; needs host networking in Docker) |
+| XMLTV cache | How long to reuse a built `/xmltv.xml` |
+| FruitDeepLinks URL | LAN base URL of [FruitDeepLinks](https://github.com/kineticman/FruitDeepLinks) (`http://host:6655`). Sync ADB lanes; remap FDL XMLTV onto those channel numbers |
+| FruitDeepLinks profile | `google_tv` or `fire` — primary Android package (ESPN split); the other is stored as alternate |
+| FruitDeepLinks start number | First number for synced lanes (default 9000) |
+| FruitDeepLinks XMLTV path | Path on the FDL server (default `/xmltv/adb`) |
+| FruitDeepLinks auto-sync | Seconds between background lane refreshes; `0` = Sync button only |
 
 - `proxy` (default) — APITuner relays the encoder stream and releases the tuner on disconnect.
 - `redirect` — Channels connects to the encoder directly (lower server load; tuner reclaimed after idle timeout). **Not used for HDHomeRun streams** (those always proxy so lock lifecycle stays correct).
@@ -251,6 +259,7 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 - `agent/` — the APITuner Agent Android app (`http_agent` backend). CI builds the APK (`.github/workflows/agent-build.yml`).
 - `distribution/` — landing-page README for the public APK releases repo.
 - `config.example.json` — sample tuners, channels, and options.
+- `docs/INTEGRATION.md` — FruitDeepLinks / Android TV deeplink integrator contract.
 - `CHANGELOG.md` — version history.
 
 ## Troubleshooting
@@ -266,6 +275,7 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Agent reachable from host, **Unreachable** from dashboard | Container cannot reach device LAN (common on Synology / some NAS bridges) | From the host: `curl http://DEVICE_IP:9092/api/health`. From the container: `docker exec apituner curl -v --connect-timeout 5 http://DEVICE_IP:9092/api/health`. If host works but container fails, try host networking, check the NAS firewall for **outbound** TCP 9092, or use a macvlan/host network so the container shares the LAN |
 | Discover shows device but Add fails / "Tuner not found" | Older UI bug treating Discover as an edit | Update to a build that posts new tuners from Discover; fill in the encoder stream URL before saving |
 | Import fails / Internal Server Error | Null `number` or duplicate channel numbers in ADBTuner JSON | Fix numbers in the export (or rely on `sort_order`); current builds return a named 400 error instead of 500 |
+| FruitDeepLinks lanes missing packages / skipped | Provider not in the deeplink catalog | Check `GET /api/deeplink-catalog`; import M3U with `package-name=` or file an APITuner mapping |
 | Fire TV Agent has no Permissions page / tune times out on Fire | Fire OS hides overlay/usage/notification toggles for sideloaded apps | One-time: enable Fire **ADB debugging**, then dashboard → tuner → **Grant permissions (ADB)**. Day-to-day tuning stays on the Agent (no ADB). Fire Sticks are not affected by Android 14’s wired-ADB breakage |
 | Grant permissions (ADB) → unauthorized / unreachable | Container has different ADB keys than the host, or TCP **5555** blocked | Mount `$HOME/.android` into the container (see `docker-compose.yml` / `docker run` above); accept **Allow USB debugging** on the TV; ensure the container can reach `DEVICE_IP:5555` |
 | Grant reports success but Agent badges stay red | Agent still restarting, or capability refresh raced | Wait a few seconds → **Recheck connection**; confirm overlay/usage with the Agent UI |

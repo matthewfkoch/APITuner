@@ -71,6 +71,11 @@
     "channels_dvr_url": "http://192.0.2.30:8089",
     "xmltv_source_device": "M3U-YouTubeTV",
     "xmltv_duration_seconds": 259200,
-    "xmltv_cache_seconds": 900.0
+    "xmltv_cache_seconds": 900.0,
+    "fruitdeeplinks_url": null,
+    "fruitdeeplinks_profile": "google_tv",
+    "fruitdeeplinks_start_number": 9000,
+    "fruitdeeplinks_xmltv_path": "/xmltv/adb",
+    "fruitdeeplinks_sync_seconds": 0.0
   }
 }

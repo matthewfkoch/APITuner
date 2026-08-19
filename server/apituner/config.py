@@ -28,6 +28,7 @@ _ADBTUNER_CHANNEL_FIELDS = (
     "compatibility_mode",
     "tvc_guide_stationid",
     "configuration_uuid",
+    "source",
 )
 
 
@@ -181,6 +182,23 @@ class ConfigStore:
             validate_channel_numbers(self._config.channels)
             self.save()
             return len(imported)
+
+    def replace_source_channels(self, source: str, incoming: list[Channel]) -> int:
+        """Replace channels whose ``source`` matches; leave all other rows."""
+        want = (source or "").strip()
+        if not want:
+            raise ChannelValidationError("source is required to replace a channel group")
+        with self._lock:
+            keep = [
+                ch
+                for ch in self._config.channels
+                if (ch.source or "").strip() != want
+            ]
+            merged = keep + list(incoming)
+            validate_channel_numbers(merged)
+            self._config.channels = merged
+            self.save()
+            return len(incoming)
 
     def export_configurations(self) -> list[dict[str, Any]]:
         with self._lock:

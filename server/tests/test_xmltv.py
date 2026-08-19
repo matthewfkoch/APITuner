@@ -46,3 +46,61 @@ def test_build_xmltv_remaps_by_station_id():
     assert 'channel id="201"' in xml
     # Channel 201 has no StationID / airings.
     assert xml.count("<programme") == 1
+
+
+FDL_XMLTV = """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="ADB-sportscenter-001">
+    <display-name>ADB SportsCenter 1</display-name>
+  </channel>
+  <programme start="20260812200000 +0000" stop="20260812230000 +0000" channel="ADB-sportscenter-001">
+    <title>College Basketball</title>
+  </programme>
+  <programme start="20260812200000 +0000" stop="20260812230000 +0000" channel="OTHER">
+    <title>Unmapped</title>
+  </programme>
+</tv>
+"""
+
+
+def test_rewrite_fdl_xmltv_maps_lane_dot_id():
+    from apituner.hdhr.xmltv import rewrite_fdl_xmltv
+
+    xml = """<?xml version="1.0"?><tv>
+  <channel id="lane.1"><display-name>Fruit Lane 1</display-name></channel>
+  <programme start="20260812200000 +0000" stop="20260812230000 +0000" channel="lane.1">
+    <title>Soccer</title>
+  </programme>
+</tv>
+"""
+    channels = [
+        Channel(
+            number=9000,
+            name="Fruit Lane 1 (Apple TV)",
+            package_name="com.apple.atve.androidtv.appletv",
+            url="http://192.0.2.40:6655/whatson/1?include=deeplink",
+            source="fruitdeeplinks",
+        )
+    ]
+    programmes = rewrite_fdl_xmltv(xml, channels)
+    assert 'channel="9000"' in programmes
+    assert "Soccer" in programmes
+    from apituner.hdhr.xmltv import merge_fdl_programmes, rewrite_fdl_xmltv
+
+    channels = [
+        Channel(
+            number=9001,
+            name="sportscenter 1",
+            package_name="com.espn.score_center",
+            url="http://192.0.2.40:6655/api/adb/lanes/sportscenter/1/deeplink?format=json",
+            source="fruitdeeplinks",
+        )
+    ]
+    programmes = rewrite_fdl_xmltv(FDL_XMLTV, channels)
+    assert 'channel="9001"' in programmes
+    assert "College Basketball" in programmes
+    assert "Unmapped" not in programmes
+    base = build_xmltv(channels, [])
+    merged = merge_fdl_programmes(base, programmes)
+    assert merged.count("<programme") == 1
+    assert 'channel="9001"' in merged

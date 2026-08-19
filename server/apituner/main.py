@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -20,12 +22,15 @@ from .backends import BackendNotPaired, BackendUnavailable
 from .backends.http_agent import HttpAgentBackend
 from .channels import ChannelValidationError, validate_channel_numbers
 from .config import ConfigStore
+from .deeplink_catalog import catalog_payload
 from .diagnostics import build_diagnostics
 from .discovery import discover
+from .fruitdeeplinks import FruitDeepLinksError, sync_fruitdeeplinks
 from .hdhr.discovery import DiscoverIdentity, HdhrDiscoveryService
 from .hdhr.lineup import resolve_base_url
 from .hdhr.routes import router as hdhr_router
 from .log_buffer import install_log_buffer
+from .m3u_import import channels_from_m3u
 from .models import Channel, GlobalOptions, Tuner
 from .keys import key_requires_dpad
 from .package_coverage import build_package_coverage
@@ -99,9 +104,16 @@ async def lifespan(app: FastAPI):
             logger.warning("HDHR discovery failed to start: %s", exc)
 
     logger.info("APITuner %s started", __version__)
+    sync_task = asyncio.create_task(_fruitdeeplinks_sync_loop(store))
+    app.state.fdl_sync_task = sync_task
     try:
         yield
     finally:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except asyncio.CancelledError:
+            pass
         discovery = getattr(app.state, "hdhr_discovery", None)
         if discovery is not None:
             await discovery.stop()
@@ -110,6 +122,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="APITuner", version=__version__, lifespan=lifespan)
 app.include_router(hdhr_router)
+
+
+async def _fruitdeeplinks_sync_loop(store: ConfigStore) -> None:
+    """Optional background refresh of FruitDeepLinks ADB lanes."""
+    while True:
+        options = store.config.options
+        seconds = float(options.fruitdeeplinks_sync_seconds or 0)
+        url = (options.fruitdeeplinks_url or "").strip()
+        if seconds > 0 and url:
+            try:
+                await sync_fruitdeeplinks(store)
+            except Exception:  # noqa: BLE001
+                logger.exception("FruitDeepLinks background sync failed")
+            await asyncio.sleep(max(30.0, seconds))
+        else:
+            await asyncio.sleep(30.0)
 
 
 def _store(request: Request) -> ConfigStore:
@@ -651,24 +679,94 @@ async def export_channels(request: Request) -> JSONResponse:
     return JSONResponse(_store(request).export_channels())
 
 
+@app.get("/api/deeplink-catalog")
+async def deeplink_catalog() -> dict:
+    """Provider / scheme → Android package map for FruitDeepLinks and similar sources."""
+    return catalog_payload()
+
+
+@app.post("/api/fruitdeeplinks/sync")
+async def fruitdeeplinks_sync(request: Request) -> dict:
+    try:
+        return await sync_fruitdeeplinks(_store(request))
+    except FruitDeepLinksError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/import")
 async def import_channels(request: Request) -> dict:
     body = await request.json()
-    data = body.get("channels", body) if isinstance(body, dict) else body
-    # Nested wrap: { "channels": { "channels": [...] } } from a paste + UI envelope.
-    if isinstance(data, dict) and isinstance(data.get("channels"), list):
-        data = data["channels"]
+    if not isinstance(body, dict) and not isinstance(body, list):
+        raise HTTPException(status_code=400, detail="Expected JSON object or array")
+
+    replace = bool(body.get("replace")) if isinstance(body, dict) else False
+    profile = None
+    start_number = 9000
+    if isinstance(body, dict):
+        profile = body.get("profile")
+        try:
+            start_number = int(body.get("start_number") or 9000)
+        except (TypeError, ValueError):
+            start_number = 9000
+
+    skipped: list[dict[str, str]] = []
+    data: Any = None
+
+    if isinstance(body, list):
+        data = body
+    elif isinstance(body, dict) and isinstance(body.get("m3u"), str):
+        data, skipped = channels_from_m3u(
+            body["m3u"], profile=profile, start_number=start_number
+        )
+    elif isinstance(body, dict) and body.get("url"):
+        fetch_url = str(body["url"]).strip()
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                resp = await client.get(fetch_url)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502, detail=f"Failed to fetch playlist: {exc}"
+            ) from exc
+        if resp.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Playlist URL returned HTTP {resp.status_code}",
+            )
+        text = resp.text or ""
+        stripped = text.lstrip()
+        if stripped.startswith("[") or stripped.startswith("{"):
+            try:
+                parsed = resp.json()
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=400, detail=f"Playlist JSON is invalid: {exc}"
+                ) from exc
+            data = parsed.get("channels", parsed) if isinstance(parsed, dict) else parsed
+        else:
+            data, skipped = channels_from_m3u(
+                text, profile=profile, start_number=start_number
+            )
+    else:
+        data = body.get("channels", body) if isinstance(body, dict) else body
+        if isinstance(data, dict) and isinstance(data.get("channels"), list):
+            data = data["channels"]
+
     if not isinstance(data, list):
         raise HTTPException(
             status_code=400,
-            detail="Expected a channel list (JSON array, or an object with a channels array)",
+            detail=(
+                "Expected a channel list (JSON array), M3U text in 'm3u', "
+                "or a playlist 'url'"
+            ),
         )
-    replace = bool(body.get("replace")) if isinstance(body, dict) else False
     try:
         count = _store(request).import_channels(data, replace=replace)
     except ChannelValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"success": True, "imported": count}
+    result: dict[str, Any] = {"success": True, "imported": count}
+    if skipped:
+        result["skipped"] = skipped
+    return result
 
 @app.get("/api/discover")
 async def discover_devices(timeout: float = 5.0) -> list[dict[str, Any]]:

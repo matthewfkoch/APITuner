@@ -304,7 +304,8 @@ async def test_app_play_uses_keys_backend(tmp_path):
         app_play=cfg,
         command_backend=split,
     )
-    # open_app prefers Agent; DPAD stays on keys.
+    # open_app prefers Agent; wake + HOME + DPAD stay on keys.
     assert agent.launches == [("com.espn.score_center", None)]
     assert remote.launches == []
-    assert remote.keys == ["DPAD_CENTER"]
+    assert remote.keys[:2] == ["POWER", "HOME"]
+    assert remote.keys[-1] == "DPAD_CENTER"

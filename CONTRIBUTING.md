@@ -34,11 +34,13 @@ cd agent
 4. CI must pass (`Server CI`, `Build APITuner Agent APK`)
 5. Expect maintainer review (`CODEOWNERS` auto-requests `@matthewfkoch`)
 
-Run tests:
+Run tests (Python **3.11+**; pytest 9 is not installable on 3.9):
 
 ```bash
 cd server && pip install -r requirements.txt -r requirements-dev.txt && pytest
 ```
+
+Or: `docker run --rm -v "$(pwd)/server:/app" -w /app python:3.11-slim bash -c "pip install -q -r requirements.txt -r requirements-dev.txt && pytest -q"`
 
 ## What not to commit
 

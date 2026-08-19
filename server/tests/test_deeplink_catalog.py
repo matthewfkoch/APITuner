@@ -11,6 +11,47 @@ from apituner.deeplink_catalog import (
 )
 
 
+def test_yttv_profile_packages():
+    google = packages_for("yttv", profile="google_tv")
+    fire = packages_for("yttv", profile="fire")
+    assert google == (
+        "com.google.android.youtube.tvunplugged",
+        "com.amazon.firetv.youtube.tv",
+    )
+    assert fire == (
+        "com.amazon.firetv.youtube.tv",
+        "com.google.android.youtube.tvunplugged",
+    )
+
+
+def test_profile_for_device_amazon_and_chromecast():
+    from apituner.deeplink_catalog import profile_for_device
+
+    assert (
+        profile_for_device(manufacturer="Amazon", fallback="google_tv") == "fire"
+    )
+    assert profile_for_device(model="AFTSSS", fallback="google_tv") == "fire"
+    assert profile_for_device(keys_type="firetv_rest", fallback="google_tv") == "fire"
+    assert (
+        profile_for_device(manufacturer="Google", fallback="fire") == "google_tv"
+    )
+    assert profile_for_device(fallback="google_tv") == "google_tv"
+
+
+def test_merge_package_try_order_channel_first():
+    from apituner.deeplink_catalog import merge_package_try_order
+
+    order = merge_package_try_order(
+        ["com.amazon.firetv.youtube.tv"],
+        (
+            "com.google.android.youtube.tvunplugged",
+            "com.amazon.firetv.youtube.tv",
+        ),
+    )
+    assert order[0] == "com.amazon.firetv.youtube.tv"
+    assert order[1] == "com.google.android.youtube.tvunplugged"
+
+
 def test_espn_profile_packages():
     google = packages_for("sportscenter", profile="google_tv")
     fire = packages_for("sportscenter", profile="fire")

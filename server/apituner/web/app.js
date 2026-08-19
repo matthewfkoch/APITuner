@@ -123,7 +123,9 @@ function initHdhr(status) {
       `${hdhr.tuner_count} tuner${hdhr.tuner_count === 1 ? "" : "s"}`,
       hdhr.device_id ? `ID ${hdhr.device_id}` : null,
       hdhr.discovery_running ? "discovery on" : "manual IP only",
-      hdhr.xmltv_url ? "XMLTV ready" : "set Channels DVR URL for EPG",
+      hdhr.epg_source
+        ? "XMLTV ready"
+        : "set Channels DVR or FruitDeepLinks URL for EPG",
     ].filter(Boolean);
     meta.textContent = parts.join(" · ");
   }
@@ -1471,7 +1473,7 @@ const OPTION_FIELDS = [
   ["fruitdeeplinks_profile", "FruitDeepLinks device profile", "select", [
     { value: "google_tv", label: "Google TV / Android TV" },
     { value: "fire", label: "Fire TV" },
-  ], "Chooses primary Android package (ESPN score_center vs gtv). The other package is stored as alternate"],
+  ], "Default primary package on Sync/Import (ESPN score_center vs gtv). At tune time Fire vs Google is taken from the stick"],
   ["fruitdeeplinks_start_number", "FruitDeepLinks start number", "number", null, "First channel number for synced lanes (default 9000). Occupied non-FDL numbers are skipped"],
   ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /xmltv/adb; falls back to /xmltv/lanes)"],
   ["fruitdeeplinks_sync_seconds", "FruitDeepLinks auto-sync (s)", "number", null, "0 = manual Sync only. Background refresh interval when a FruitDeepLinks URL is set"],

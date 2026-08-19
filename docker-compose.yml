@@ -1,9 +1,8 @@
 services:
   apituner:
+    # Pull a release by default. Use `docker compose up -d --build` to build locally.
+    image: ghcr.io/matthewfkoch/apituner:latest
     build: ./server
-    # Or pull a release image instead of building locally:
-    # image: ghcr.io/matthewfkoch/apituner:latest
-    image: apituner:latest
     container_name: apituner
     # Bridge networking with an explicit port mapping (default). Devices and
     # HDMI encoders are reached by their LAN IPs, so tuning + streaming work.

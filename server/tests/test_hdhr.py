@@ -227,3 +227,5 @@ def test_api_status_includes_hdhr(hdhr_client: TestClient):
     assert hdhr["enabled"] is True
     assert hdhr["tuner_count"] == 2
     assert hdhr["device_id"] == "AABBCCDD"
+    assert hdhr["xmltv_url"].endswith("/xmltv.xml")
+    assert hdhr["epg_source"] is False

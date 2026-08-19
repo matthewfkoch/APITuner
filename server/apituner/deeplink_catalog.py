@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Sequence
 from urllib.parse import urlparse
 
 DeeplinkProfile = Literal["google_tv", "fire"]
@@ -120,7 +120,7 @@ _PACKAGES: dict[str, tuple[str, str]] = {
     ),
     "yttv": (
         "com.google.android.youtube.tvunplugged",
-        "com.google.android.youtube.tvunplugged",
+        "com.amazon.firetv.youtube.tv",
     ),
     "mlb": (
         "com.bamnetworks.mobile.android.gameday.atbat",
@@ -208,6 +208,53 @@ def normalize_profile(profile: Optional[str]) -> DeeplinkProfile:
     if raw in ("fire", "firetv", "fire_tv", "amazon"):
         return "fire"
     return "google_tv"
+
+
+def profile_for_device(
+    *,
+    manufacturer: Optional[str] = None,
+    model: Optional[str] = None,
+    packages: Optional[Sequence[str]] = None,
+    control_type: Optional[str] = None,
+    keys_type: Optional[str] = None,
+    fallback: Optional[str] = None,
+) -> DeeplinkProfile:
+    """Pick google_tv vs fire from the stick, not only the global Options profile.
+
+    Sync/import still use ``fruitdeeplinks_profile``. Tune-time launches should
+    follow the device so a mixed Fire + Chromecast fleet does not try the
+    Google YouTube TV package on Amazon hardware first.
+    """
+    ctl = (control_type or "").strip().lower()
+    keys = (keys_type or "").strip().lower()
+    if ctl == "firetv_rest" or keys == "firetv_rest":
+        return "fire"
+    mfr = (manufacturer or "").strip().lower()
+    mdl = (model or "").strip().upper()
+    if mfr == "amazon" or mdl.startswith("AFT"):
+        return "fire"
+    have = {p.strip() for p in (packages or []) if p}
+    if "com.amazon.tv.launcher" in have or "com.amazon.firetv.youtube.tv" in have:
+        if "com.google.android.youtube.tvunplugged" not in have:
+            return "fire"
+    if mfr in ("google", "google llc"):
+        return "google_tv"
+    return normalize_profile(fallback)
+
+
+def merge_package_try_order(
+    channel_packages: Sequence[str],
+    inferred: Optional[tuple[str, Optional[str]]],
+) -> list[str]:
+    """Channel listing first, then catalog inference for the resolved deeplink."""
+    merged: list[str] = []
+    extra = ()
+    if inferred:
+        extra = tuple(p for p in inferred if p)
+    for pkg in (*channel_packages, *extra):
+        if pkg and pkg not in merged:
+            merged.append(pkg)
+    return merged
 
 
 def packages_for(

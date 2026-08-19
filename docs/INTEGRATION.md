@@ -96,7 +96,9 @@ Virtual lanes mix apps (ESPN, Prime, Apple TV, …). At tune time APITuner infer
 
 ## XMLTV
 
-When FruitDeepLinks URL is set, `/xmltv.xml` fetches FDL XMLTV (`fruitdeeplinks_xmltv_path`, default `/xmltv/adb`, then `/xmltv/lanes`) and rewrites `ADB-{provider}-{lane}` channel ids onto APITuner **channel numbers**. Gracenote remap from Channels DVR still applies to stations that have `tvc_guide_stationid`.
+When FruitDeepLinks URL is set, `/xmltv.xml` fetches FDL XMLTV (`fruitdeeplinks_xmltv_path`, default `/xmltv/adb`, then `/xmltv/lanes`) and rewrites FDL channel ids onto APITuner **channel numbers**. Matchers include `ADB-{provider}-{lane}`, `lane.{n}`, `Fruit Lane {n}`, and display-name. Gracenote remap from Channels DVR still applies to stations that have `tvc_guide_stationid`.
+
+Renamed FDL rows (custom names that no longer match those ids) get a channel element but **no programmes**.
 
 Point the HDHomeRun source’s guide provider at `http://<apituner>:6592/xmltv.xml`.
 

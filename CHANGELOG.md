@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- Deeplink tunes try the **channel package first**, then catalog packages for the **stick** (Amazon / `AFT*` / Fire REST → Fire apps). Mixed fleets no longer launch Google YouTube TV on Fire Sticks before the Amazon app.
+- YouTube TV catalog Fire package is `com.amazon.firetv.youtube.tv` (was duplicated Google `tvunplugged`).
+- Dashboard XMLTV URL is always shown when HDHomeRun is on; “XMLTV ready” when Channels DVR **or** FruitDeepLinks is configured.
+
+### Changed
+- `docker-compose.yml` pulls `ghcr.io/matthewfkoch/apituner:latest` by default (`--build` still builds locally).
+
 ## [0.1.19] - 2026-08-18
 
 ### Added

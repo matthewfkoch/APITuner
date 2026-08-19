@@ -891,6 +891,10 @@ async def status(request: Request) -> dict:
     options = store.config.options
     base = resolve_base_url(str(request.base_url), options)
     xmltv_url = f"{base}/xmltv.xml" if options.hdhr_enabled else None
+    epg_source = bool(
+        (options.channels_dvr_url or "").strip()
+        or (options.fruitdeeplinks_url or "").strip()
+    )
     return {
         "version": __version__,
         "agent_apk_url": AGENT_APK_RELEASES_URL,
@@ -905,7 +909,8 @@ async def status(request: Request) -> dict:
             "tuner_count": manager.tuner_count(),
             "base_url": base if options.hdhr_enabled else None,
             "discover_url": f"{base}/discover.json" if options.hdhr_enabled else None,
-            "xmltv_url": xmltv_url if options.channels_dvr_url else None,
+            "xmltv_url": xmltv_url,
+            "epg_source": epg_source,
             "channels_dvr_url": options.channels_dvr_url,
             "ssdp_enabled": options.hdhr_ssdp_enabled,
             "udp_discovery_enabled": options.hdhr_udp_discovery_enabled,

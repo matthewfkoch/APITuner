@@ -588,7 +588,7 @@ async def create_channel(channel: Channel, request: Request) -> dict:
         store.config.channels.pop()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     store.save()
-    return channel.model_dump()
+    return store.config.channels[-1].model_dump()
 
 
 @app.put("/api/channels/{channel_id}")
@@ -599,17 +599,16 @@ async def update_channel(channel_id: str, channel: Channel, request: Request) ->
     )
     if idx is None:
         raise HTTPException(status_code=404, detail="Channel not found")
-    if channel.id and channel.id != channel_id:
-        raise HTTPException(
-            status_code=409, detail="Channel id in body must match URL"
-        )
-    store.config.channels[idx] = channel.model_copy(update={"id": channel_id})
+    previous = store.config.channels[idx]
+    updated = channel.model_copy(update={"id": channel_id})
+    store.config.channels[idx] = updated
     try:
         validate_unique_ids(store.config.channels)
     except ChannelValidationError as exc:
+        store.config.channels[idx] = previous
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     store.save()
-    return channel.model_dump()
+    return store.config.channels[idx].model_dump()
 
 
 @app.delete("/api/channels/{channel_id}")
@@ -899,8 +898,10 @@ async def status(request: Request) -> dict:
     store = _store(request)
     manager = _manager(request)
     options = store.config.options
-    base = resolve_base_url(str(request.base_url), options)
+    request_base = str(request.base_url).rstrip("/")
+    base = resolve_base_url(request_base, options)
     xmltv_url = f"{base}/xmltv.xml" if options.hdhr_enabled else None
+    m3u_url = f"{request_base}/channels.m3u8"
     epg_source = bool(
         (options.channels_dvr_url or "").strip()
         or (options.fruitdeeplinks_url or "").strip()
@@ -909,6 +910,7 @@ async def status(request: Request) -> dict:
         "version": __version__,
         "agent_apk_url": AGENT_APK_RELEASES_URL,
         "agent_latest_url": latest_cache.url,
+        "m3u_url": m3u_url,
         "options": options.model_dump(),
         "tuners": manager.status(),
         "channel_count": len(store.config.channels),

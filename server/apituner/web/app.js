@@ -121,9 +121,42 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // ---- M3U + HDHomeRun URLs ----
-function initM3u() {
-  const url = `${location.origin}/channels.m3u`;
-  document.getElementById("m3u-url").value = url;
+async function copyToClipboard(text) {
+  if (!text) throw new Error("Nothing to copy");
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.select();
+  try {
+    if (!document.execCommand("copy")) throw new Error("Copy failed");
+  } finally {
+    document.body.removeChild(input);
+  }
+}
+
+function copyField(input, okMessage, emptyMessage) {
+  if (!input || !input.value || input.value.startsWith("(")) {
+    toast(emptyMessage || "Nothing to copy", true);
+    return;
+  }
+  copyToClipboard(input.value)
+    .then(() => toast(okMessage))
+    .catch(() => toast("Could not copy — select the URL and copy manually", true));
+}
+
+function initSidebarUrls(status) {
+  const m3uInput = document.getElementById("m3u-url");
+  if (m3uInput) {
+    m3uInput.value = (status && status.m3u_url) || `${location.origin}/channels.m3u8`;
+  }
+  initHdhr(status);
 }
 function initHdhr(status) {
   const input = document.getElementById("hdhr-url");
@@ -153,20 +186,13 @@ function initHdhr(status) {
   }
 }
 document.getElementById("copy-m3u").addEventListener("click", () => {
-  const input = document.getElementById("m3u-url");
-  navigator.clipboard.writeText(input.value).then(() => toast("M3U URL copied"));
+  copyField(document.getElementById("m3u-url"), "M3U URL copied");
 });
 document.getElementById("copy-hdhr").addEventListener("click", () => {
-  const input = document.getElementById("hdhr-url");
-  if (!input.value || input.value.startsWith("(")) {
-    toast("HDHomeRun is disabled", true);
-    return;
-  }
-  navigator.clipboard.writeText(input.value).then(() => toast("HDHomeRun URL copied"));
+  copyField(document.getElementById("hdhr-url"), "HDHomeRun URL copied", "HDHomeRun is disabled");
 });
 document.getElementById("copy-xmltv").addEventListener("click", () => {
-  const input = document.getElementById("xmltv-url");
-  navigator.clipboard.writeText(input.value).then(() => toast("XMLTV URL copied"));
+  copyField(document.getElementById("xmltv-url"), "XMLTV URL copied");
 });
 
 // ============================ TUNERS ============================
@@ -1313,9 +1339,8 @@ async function populateTunerSelect(sel) {
 document.getElementById("export-btn").addEventListener("click", async () => {
   try {
     const data = await api.get("/api/export?native=1");
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = "apituner-channels-native.json"; a.click();
+    downloadJson(data, "apituner-channels-native.json");
+    toast("Channels exported");
   } catch (e) { toast(e.message, true); }
 });
 document.getElementById("import-btn").addEventListener("click", () => {
@@ -1430,9 +1455,8 @@ async function loadConfigurations() {
 document.getElementById("export-config-btn")?.addEventListener("click", async () => {
   try {
     const data = await api.get("/api/configurations/export");
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = "apituner-configurations.json"; a.click();
+    downloadJson(data, "apituner-configurations.json");
+    toast("Configurations exported");
   } catch (e) { toast(e.message, true); }
 });
 
@@ -1542,7 +1566,7 @@ document.getElementById("save-options").addEventListener("click", async () => {
     await api.put("/api/options", payload);
     toast("Options saved (restart required for discovery changes)");
     const status = await api.get("/api/status");
-    initHdhr(status);
+    initSidebarUrls(status);
   } catch (e) { toast(e.message, true); }
 });
 
@@ -1577,7 +1601,7 @@ async function renderStatus() {
     `v${data.version} · ${data.options.stream_mode} stream mode${hdhrBits} · updates every 3s`;
 
   document.getElementById("app-version").textContent = `v${data.version}`;
-  initHdhr(data);
+  initSidebarUrls(data);
 
   stats.innerHTML = `
     <div class="stat-card"><div class="stat-label">Tuners</div><div class="stat-value">${data.tuners.length}</div></div>
@@ -1628,16 +1652,26 @@ document.getElementById("modal").addEventListener("click", (e) => { if (e.target
 function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function escapeAttr(s) { return escapeHtml(s); }
 
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ---- init ----
-initM3u();
+initSidebarUrls(null);
 loadTuners();
 api.get("/api/status").then((d) => {
   const elVer = document.getElementById("app-version");
   if (elVer) elVer.textContent = `v${d.version}`;
-  initHdhr(d);
+  initSidebarUrls(d);
   if (d.agent_apk_url) {
     document.querySelectorAll(".agent-apk-link").forEach((a) => {
       a.href = d.agent_apk_url;
     });
   }
-}).catch(() => {});
+}).catch((e) => toast(e.message || "Could not load server status", true));

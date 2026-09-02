@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-09-02
+
+### Fixed
+- Dashboard **Copy** on M3U / HDHomeRun / XMLTV URLs works on plain HTTP LAN (`http://192.168.x.x`) with a fallback when the Clipboard API is blocked.
+- `PUT /api/channels/{id}` rolls back in-memory config when validation fails instead of leaving a bad row loaded.
+- `PUT /api/channels/{id}` accepts bodies without `id` (id is always taken from the URL path).
+- Sidebar M3U URL comes from `/api/status` (same host the browser used to reach APITuner) instead of a one-time `location.origin` snapshot.
+
+### Changed
+- Dashboard M3U link shows `/channels.m3u8` and documents `?provider=` filtering in the sidebar.
+- Channel export downloads revoke blob URLs; failed startup status load shows a toast.
+
 ## [0.1.21] - 2026-09-01
 
 ### Added
@@ -229,7 +241,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.21...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.22...HEAD
+[0.1.22]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.22
 [0.1.21]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.21
 [0.1.20]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.20
 [0.1.19]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.19

@@ -659,6 +659,18 @@ code {
   white-space: nowrap;
 }
 
+.provider-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 16px;
+}
+
+.provider-filters .toolbar-meta {
+  margin-right: 4px;
+}
+
 /* ---- Table ---- */
 .table-shell {
   background: var(--surface);

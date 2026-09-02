@@ -18,7 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - Dashboard M3U link shows `/channels.m3u8` and documents `?provider=` filtering in the sidebar.
+- Channels page shows **M3U by provider** buttons (when 2+ providers exist) to copy a filtered playlist URL.
+- Sidebar URL fields select-all on click for manual copy; import/sync toasts name skipped rows.
 - Channel export downloads revoke blob URLs; failed startup status load shows a toast.
+- Tuner `PUT` uses the saved row from the URL path (same pattern as channels).
 
 ## [0.1.21] - 2026-09-01
 

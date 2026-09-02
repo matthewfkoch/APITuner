@@ -222,9 +222,11 @@ async def list_tuners(request: Request) -> list[dict]:
 @app.post("/api/tuners")
 async def create_tuner(tuner: Tuner, request: Request) -> dict:
     store = _store(request)
+    if any(t.id == tuner.id for t in store.config.tuners):
+        raise HTTPException(status_code=409, detail="Tuner id already exists")
     store.config.tuners.append(tuner)
     store.save()
-    return tuner.model_dump()
+    return store.config.tuners[-1].model_dump()
 
 
 @app.put("/api/tuners/{tuner_id}")
@@ -236,11 +238,11 @@ async def update_tuner(tuner_id: str, tuner: Tuner, request: Request) -> dict:
     )
     if idx is None:
         raise HTTPException(status_code=404, detail="Tuner not found")
-    tuner.id = tuner_id
-    store.config.tuners[idx] = tuner
+    updated = tuner.model_copy(update={"id": tuner_id})
+    store.config.tuners[idx] = updated
     store.save()
     await manager.invalidate(tuner_id)
-    return tuner.model_dump()
+    return store.config.tuners[idx].model_dump()
 
 
 @app.delete("/api/tuners/{tuner_id}")

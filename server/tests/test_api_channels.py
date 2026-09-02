@@ -78,6 +78,26 @@ def test_update_channel_rolls_back_on_validation_failure(api_client: TestClient)
     assert original["number"] == "1"
 
 
+def test_m3u_provider_filter(api_client: TestClient):
+    resp = api_client.get("/channels.m3u8?provider=Keep%20Me")
+    assert resp.status_code == 200
+    assert resp.text.count("#EXTINF:") == 0
+
+    store = api_client.app.state.store
+    ch = store.config.channels[0]
+    ch.provider_name = "YouTube TV"
+    store.save()
+
+    resp = api_client.get("/channels.m3u8?provider=YouTube%20TV")
+    assert resp.status_code == 200
+    assert "YouTube TV" in resp.text or "Keep Me" in resp.text
+    assert resp.text.count("#EXTINF:") == 1
+
+    resp = api_client.get("/channels.m3u8?provider=youtube%20tv")
+    assert resp.status_code == 200
+    assert resp.text.count("#EXTINF:") == 1
+
+
 def test_update_channel_returns_saved_row(api_client: TestClient):
     channel_id = "a" * 32
     resp = api_client.put(

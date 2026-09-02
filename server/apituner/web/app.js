@@ -195,6 +195,61 @@ document.getElementById("copy-xmltv").addEventListener("click", () => {
   copyField(document.getElementById("xmltv-url"), "XMLTV URL copied");
 });
 
+["m3u-url", "hdhr-url", "xmltv-url"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("click", (e) => {
+    const input = e.target;
+    if (!input.value || input.value.startsWith("(")) return;
+    input.focus();
+    input.select();
+  });
+});
+
+function baseM3uUrl() {
+  const input = document.getElementById("m3u-url");
+  const raw = (input && input.value) || `${location.origin}/channels.m3u8`;
+  return raw.split("?")[0];
+}
+
+function m3uUrlForProvider(provider) {
+  const base = baseM3uUrl();
+  if (!provider) return base;
+  return `${base}?provider=${encodeURIComponent(provider)}`;
+}
+
+function formatSkippedSummary(skipped, limit = 3) {
+  if (!skipped || !skipped.length) return "";
+  const bits = skipped.slice(0, limit).map((s) => s.name || s.reason || "row");
+  const more = skipped.length > limit ? ` +${skipped.length - limit} more` : "";
+  return ` (${skipped.length} skipped: ${bits.join(", ")}${more})`;
+}
+
+function renderProviderFilters(channels) {
+  const box = document.getElementById("channel-providers");
+  if (!box) return;
+  const providers = [...new Set(channels.map((c) => c.provider_name).filter(Boolean))].sort(
+    (a, b) => a.localeCompare(b)
+  );
+  if (providers.length < 2) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  box.classList.remove("hidden");
+  box.innerHTML = `<span class="toolbar-meta">M3U by provider (click to copy):</span>`;
+  providers.forEach((provider) => {
+    const btn = el(`<button type="button" class="btn btn-sm btn-secondary">${escapeHtml(provider)}</button>`);
+    btn.addEventListener("click", () => {
+      const url = m3uUrlForProvider(provider);
+      const input = document.getElementById("m3u-url");
+      if (input) input.value = url;
+      copyToClipboard(url)
+        .then(() => toast(`Copied M3U for ${provider}`))
+        .catch(() => toast(`M3U URL updated for ${provider} — copy from sidebar`, false));
+    });
+    box.appendChild(btn);
+  });
+}
+
 // ============================ TUNERS ============================
 let cachedChannels = [];
 let cachedConfigs = [];
@@ -1145,6 +1200,7 @@ async function loadChannels() {
     return;
   }
   cachedChannels.sort((a, b) => compareChannelNumbers(a.number, b.number));
+  renderProviderFilters(cachedChannels);
   renderChannels(cachedChannels);
   // Background package check (Agent app lists) — don't block the table.
   refreshPackageCoverage(true).then(() => renderChannels(cachedChannels));
@@ -1398,8 +1454,9 @@ document.getElementById("import-btn").addEventListener("click", () => {
     }
     try {
       const r = await api.post("/api/import", payload);
-      const extra = r.skipped && r.skipped.length ? ` (${r.skipped.length} skipped)` : "";
-      toast(`Imported ${r.imported} channels${extra}`); closeModal(); loadChannels();
+      toast(`Imported ${r.imported} channels${formatSkippedSummary(r.skipped)}`);
+      closeModal();
+      loadChannels();
     } catch (e) { toast(e.message, true); }
   });
   openModal("Import channels", node);
@@ -1408,8 +1465,7 @@ document.getElementById("import-btn").addEventListener("click", () => {
 async function syncFruitDeepLinks() {
   try {
     const r = await api.post("/api/fruitdeeplinks/sync", {});
-    const extra = r.skipped && r.skipped.length ? ` (${r.skipped.length} providers skipped)` : "";
-    toast(`Synced ${r.imported} FruitDeepLinks lanes${extra}`);
+    toast(`Synced ${r.imported} FruitDeepLinks lanes${formatSkippedSummary(r.skipped)}`);
     loadChannels();
   } catch (e) { toast(e.message, true); }
 }

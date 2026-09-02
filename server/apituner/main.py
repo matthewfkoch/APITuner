@@ -20,7 +20,7 @@ from .agent_update import AgentUpdateError, download_apk, latest_cache
 from .auto_pair import PairKind, auto_pair
 from .backends import BackendNotPaired, BackendUnavailable
 from .backends.http_agent import HttpAgentBackend
-from .channels import ChannelValidationError, validate_channel_numbers
+from .channels import ChannelValidationError, resolve_channel, validate_unique_ids
 from .config import ConfigStore
 from .deeplink_catalog import catalog_payload
 from .diagnostics import build_diagnostics
@@ -186,13 +186,21 @@ async def channels_m3u8(request: Request, provider: str | None = None) -> Respon
     return _channels_playlist(request, provider)
 
 
-@app.get("/stream/{number}", include_in_schema=False)
-async def stream(number: int, request: Request) -> Response:
+@app.get("/stream/{token}", include_in_schema=False)
+async def stream(token: str, request: Request) -> Response:
     store = _store(request)
     manager = _manager(request)
-    channel = next((c for c in store.config.channels if c.number == number), None)
+    channel, err = resolve_channel(store.config.channels, token)
+    if err == "ambiguous":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Channel number {token} matches multiple channels; "
+                "use the stream URL from channels.m3u"
+            ),
+        )
     if channel is None:
-        raise HTTPException(status_code=404, detail=f"Unknown channel {number}")
+        raise HTTPException(status_code=404, detail=f"Unknown channel {token}")
     try:
         return await open_stream(request, manager, channel)
     except NoTunerAvailable as exc:
@@ -571,11 +579,11 @@ async def list_channels(request: Request) -> list[dict]:
 @app.post("/api/channels")
 async def create_channel(channel: Channel, request: Request) -> dict:
     store = _store(request)
-    if any(c.number == channel.number for c in store.config.channels):
-        raise HTTPException(status_code=409, detail="Channel number already exists")
+    if any(c.id == channel.id for c in store.config.channels):
+        raise HTTPException(status_code=409, detail="Channel id already exists")
     store.config.channels.append(channel)
     try:
-        validate_channel_numbers(store.config.channels)
+        validate_unique_ids(store.config.channels)
     except ChannelValidationError as exc:
         store.config.channels.pop()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -583,32 +591,34 @@ async def create_channel(channel: Channel, request: Request) -> dict:
     return channel.model_dump()
 
 
-@app.put("/api/channels/{number}")
-async def update_channel(number: int, channel: Channel, request: Request) -> dict:
+@app.put("/api/channels/{channel_id}")
+async def update_channel(channel_id: str, channel: Channel, request: Request) -> dict:
     store = _store(request)
     idx = next(
-        (i for i, c in enumerate(store.config.channels) if c.number == number), None
+        (i for i, c in enumerate(store.config.channels) if c.id == channel_id), None
     )
     if idx is None:
         raise HTTPException(status_code=404, detail="Channel not found")
-    if channel.number != number and any(
-        c.number == channel.number for c in store.config.channels
-    ):
-        raise HTTPException(status_code=409, detail="Channel number already exists")
-    store.config.channels[idx] = channel
+    if channel.id and channel.id != channel_id:
+        raise HTTPException(
+            status_code=409, detail="Channel id in body must match URL"
+        )
+    store.config.channels[idx] = channel.model_copy(update={"id": channel_id})
     try:
-        validate_channel_numbers(store.config.channels)
+        validate_unique_ids(store.config.channels)
     except ChannelValidationError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     store.save()
     return channel.model_dump()
 
 
-@app.delete("/api/channels/{number}")
-async def delete_channel(number: int, request: Request) -> dict:
+@app.delete("/api/channels/{channel_id}")
+async def delete_channel(channel_id: str, request: Request) -> dict:
     store = _store(request)
     before = len(store.config.channels)
-    store.config.channels = [c for c in store.config.channels if c.number != number]
+    store.config.channels = [
+        c for c in store.config.channels if c.id != channel_id
+    ]
     if len(store.config.channels) == before:
         raise HTTPException(status_code=404, detail="Channel not found")
     store.save()
@@ -675,8 +685,8 @@ async def set_options(options: GlobalOptions, request: Request) -> dict:
 
 
 @app.get("/api/export")
-async def export_channels(request: Request) -> JSONResponse:
-    return JSONResponse(_store(request).export_channels())
+async def export_channels(request: Request, native: int = 0) -> JSONResponse:
+    return JSONResponse(_store(request).export_channels(native=bool(native)))
 
 
 @app.get("/api/deeplink-catalog")

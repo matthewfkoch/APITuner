@@ -108,7 +108,7 @@ async def test_stream_during_tune_returns_before_app_play_finishes(tmp_path):
     assert isinstance(lease, Lease)
     assert lease.tune_task is not None
     assert not lease.tune_task.done()
-    assert manager.status()[0]["channel_number"] == 1507
+    assert manager.status()[0]["channel_number"] == "1507"
     assert manager.status()[0]["locked"] is True
 
     hold.set()

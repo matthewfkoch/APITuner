@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .channels import sort_channels
 from .models import Channel
 
 
@@ -23,9 +24,9 @@ def build_m3u(channels: list[Channel], base_url: str) -> str:
     """Build a Channels-DVR-compatible M3U pointing back at APITuner."""
     base = base_url.rstrip("/")
     lines = ["#EXTM3U"]
-    for ch in sorted(channels, key=lambda c: c.number):
+    for ch in sort_channels(channels):
         attrs = [
-            f'channel-id="{ch.number}"',
+            f'channel-id="{ch.id}"',
             f'channel-number="{ch.number}"',
             f'tvg-chno="{ch.number}"',
         ]
@@ -34,7 +35,7 @@ def build_m3u(channels: list[Channel], base_url: str) -> str:
             attrs.append(f'tvc-guide-stationid="{ch.tvc_guide_stationid}"')
         attrs.append(f'tvg-name="{_escape(ch.name)}"')
         lines.append(f'#EXTINF:-1 {" ".join(attrs)},{ch.name}')
-        lines.append(f"{base}/stream/{ch.number}")
+        lines.append(f"{base}/stream/{ch.id}")
     return "\n".join(lines) + "\n"
 
 

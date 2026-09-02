@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 import httpx
 
+from .channel_numbers import occupied_integer_numbers
 from .channels import ChannelValidationError
 from .config import ConfigStore
 from .deeplink_catalog import code_from_display_name, packages_for
@@ -196,7 +197,9 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
     base = _base_url(options)
     if not base:
         raise FruitDeepLinksError("fruitdeeplinks_url is not set")
-    occupied = {c.number for c in store.config.channels if c.source != FDL_SOURCE}
+    occupied = occupied_integer_numbers(
+        [c.number for c in store.config.channels if c.source != FDL_SOURCE]
+    )
     profile = options.fruitdeeplinks_profile
     start = int(options.fruitdeeplinks_start_number or 9000)
     timeout = float(options.request_timeout or 10.0)

@@ -15,17 +15,24 @@ from apituner.hdhr.discovery import (
     parse_discover_request,
     wants_tuner,
 )
+from apituner.channels import find_channel
 from apituner.hdhr.lineup import (
     build_discover_json,
     build_lineup_json,
-    find_channel,
 )
 from apituner.models import Channel, ControlConfig, GlobalOptions, Tuner
 from apituner.tuner_manager import NoTunerAvailable, TunerInUse, TunerManager
 
 
-def _channel(number: int, name: str = "Test") -> Channel:
-    return Channel(number=number, name=name, package_name="com.example.app")
+ID_ABC = "a" * 32
+ID_ESPN = "e" * 32
+
+
+def _channel(number: int, name: str = "Test", *, cid: str | None = None) -> Channel:
+    kwargs: dict = {"number": number, "name": name, "package_name": "com.example.app"}
+    if cid is not None:
+        kwargs["id"] = cid
+    return Channel(**kwargs)
 
 
 def _tuner(name: str, *, enabled: bool = True) -> Tuner:
@@ -52,18 +59,20 @@ def test_build_discover_json_tuner_count():
 
 
 def test_build_lineup_json_auto_urls():
-    channels = [_channel(36, "ESPN"), _channel(1, "ABC")]
+    ch_abc = _channel(1, "ABC", cid=ID_ABC)
+    ch_espn = _channel(36, "ESPN", cid=ID_ESPN)
+    channels = [ch_espn, ch_abc]
     lineup = build_lineup_json(channels, "http://192.0.2.1:6592")
     assert [e["GuideNumber"] for e in lineup] == ["1", "36"]
     assert lineup[0]["GuideName"] == "ABC"
-    assert lineup[0]["URL"] == "http://192.0.2.1:6592/auto/v1"
-    assert lineup[1]["URL"] == "http://192.0.2.1:6592/auto/v36"
+    assert lineup[0]["URL"] == f"http://192.0.2.1:6592/auto/v{ID_ABC}"
+    assert lineup[1]["URL"] == f"http://192.0.2.1:6592/auto/v{ID_ESPN}"
 
 
 def test_find_channel_dotted_major():
     channels = [_channel(5, "NBC")]
-    assert find_channel(channels, "5").number == 5
-    assert find_channel(channels, "5.1").number == 5
+    assert find_channel(channels, "5").number == "5"
+    assert find_channel(channels, "5.1").number == "5"
     assert find_channel(channels, "999") is None
 
 
@@ -158,7 +167,10 @@ def hdhr_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     store.config.options.hdhr_ssdp_enabled = False
     store.config.options.hdhr_udp_discovery_enabled = False
     store.config.tuners = [_tuner("A"), _tuner("B", enabled=False), _tuner("C")]
-    store.config.channels = [_channel(9000, "ESPN"), _channel(1, "ABC")]
+    store.config.channels = [
+        _channel(9000, "ESPN", cid=ID_ESPN),
+        _channel(1, "ABC", cid=ID_ABC),
+    ]
     store.save()
 
     # Import after env is set so lifespan uses the temp data dir.
@@ -185,9 +197,9 @@ def test_lineup_json_with_channels_query_params(hdhr_client: TestClient):
     lineup = resp.json()
     assert len(lineup) == 2
     assert lineup[0]["GuideNumber"] == "1"
-    assert lineup[0]["URL"].endswith("/auto/v1")
+    assert lineup[0]["URL"].endswith(f"/auto/v{ID_ABC}")
     assert lineup[1]["GuideNumber"] == "9000"
-    assert lineup[1]["URL"].endswith("/auto/v9000")
+    assert lineup[1]["URL"].endswith(f"/auto/v{ID_ESPN}")
 
 
 def test_lineup_status(hdhr_client: TestClient):
@@ -202,6 +214,38 @@ def test_auto_unknown_channel_801(hdhr_client: TestClient):
     assert resp.headers.get("x-hdhomerun-error") == "801"
 
 
+def test_auto_ambiguous_channel_number(hdhr_client: TestClient):
+    store = hdhr_client.app.state.store
+    store.config.channels = [
+        _channel(213, "MLB Network", cid="1" * 32),
+        _channel(213, "MLB Alternate", cid="2" * 32),
+    ]
+    resp = hdhr_client.get("/auto/v213")
+    assert resp.status_code == 409
+
+
+def test_stream_ambiguous_channel_number(hdhr_client: TestClient):
+    store = hdhr_client.app.state.store
+    store.config.channels = [
+        _channel(213, "MLB Network", cid="1" * 32),
+        _channel(213, "MLB Alternate", cid="2" * 32),
+    ]
+    resp = hdhr_client.get("/stream/213")
+    assert resp.status_code == 409
+    assert "channels.m3u" in resp.json()["detail"]
+
+
+def test_auto_by_channel_id(hdhr_client: TestClient):
+    async def fake_open(request, manager, channel, *, tuner_index=None):
+        from fastapi.responses import PlainTextResponse
+
+        return PlainTextResponse("ok", media_type="video/mp2t")
+
+    with patch("apituner.hdhr.routes.open_hdhr_stream", new=fake_open):
+        resp = hdhr_client.get(f"/auto/v{ID_ESPN}")
+    assert resp.status_code == 200
+
+
 def test_tuner_index_route_uses_lease(hdhr_client: TestClient):
     """Ensure /tuner1/v{ch} passes tuner_index=1 into open_hdhr_stream."""
     called: dict = {}
@@ -214,9 +258,9 @@ def test_tuner_index_route_uses_lease(hdhr_client: TestClient):
         return PlainTextResponse("ok", media_type="video/mp2t")
 
     with patch("apituner.hdhr.routes.open_hdhr_stream", new=fake_open):
-        resp = hdhr_client.get("/tuner1/v9000")
+        resp = hdhr_client.get(f"/tuner1/v{ID_ESPN}")
     assert resp.status_code == 200
-    assert called["channel"] == 9000
+    assert called["channel"] == "9000"
     assert called["tuner_index"] == 1
 
 

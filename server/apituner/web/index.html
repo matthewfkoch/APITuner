@@ -133,13 +133,13 @@
           <header class="page-header">
             <div>
               <h1>Channels</h1>
-              <p class="page-desc">Custom channels imported from ADBTuner, FruitDeepLinks (Android/Google TV deeplinks), or added manually. Click a row or use Edit to change channel details. App Play stations also need matching entries under Configurations. Use <b>Check packages</b> to flag packages not installed on your Agent devices.</p>
+              <p class="page-desc">Custom channels imported from ADBTuner, FruitDeepLinks (Android/Google TV deeplinks), or added manually. Guide numbers may include subchannels (e.g. <code>100.1</code>, <code>100.2</code>) or repeat for alternate feeds (DirecTV). Click a row or use Edit to change channel details. App Play stations also need matching entries under Configurations. Use <b>Check packages</b> to flag packages not installed on your Agent devices.</p>
             </div>
             <div class="page-actions">
               <button id="check-packages-btn" class="btn btn-secondary" title="Compare channel packages to apps installed on Agent / ADB tuners">Check packages</button>
               <button id="sync-fdl-btn" class="btn btn-secondary" title="Replace FruitDeepLinks lanes from the URL in Options">Sync FruitDeepLinks</button>
               <button id="import-btn" class="btn btn-secondary">Import</button>
-              <button id="export-btn" class="btn btn-secondary">Export</button>
+              <button id="export-btn" class="btn btn-secondary" title="Download channel list with internal ids for APITuner backup/restore">Export</button>
               <button id="add-channel-btn" class="btn btn-primary">Add channel</button>
             </div>
           </header>

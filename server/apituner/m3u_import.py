@@ -6,6 +6,7 @@ import re
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+from .channel_numbers import normalize_channel_number
 from .deeplink_catalog import (
     infer_provider,
     parse_lane_url,
@@ -102,15 +103,14 @@ def normalize_resolver_url(url: str) -> str:
     )
 
 
-def _int_attr(attrs: dict[str, str], *keys: str) -> Optional[int]:
+def _channel_number_attr(attrs: dict[str, str], *keys: str) -> Optional[str]:
     for key in keys:
         raw = attrs.get(key)
         if raw is None or raw == "":
             continue
-        try:
-            return int(float(raw))
-        except (TypeError, ValueError):
-            continue
+        normalized = normalize_channel_number(raw)
+        if normalized is not None:
+            return normalized
     return None
 
 
@@ -126,7 +126,7 @@ def channels_from_m3u(
     pending_attrs: dict[str, str] = {}
     pending_name = ""
     next_number = int(start_number)
-    used: set[int] = set()
+    used: set[str] = set()
     channels: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
 
@@ -137,11 +137,11 @@ def channels_from_m3u(
             return
         attrs = dict(pending_attrs)
         name = pending_name or attrs.get("tvg-name") or attrs.get("tvg-id") or url
-        number = _int_attr(attrs, "tvg-chno", "channel-number", "tvg-channel")
+        number = _channel_number_attr(attrs, "tvg-chno", "channel-number", "tvg-channel")
         if number is None:
-            while next_number in used:
+            while str(next_number) in used:
                 next_number += 1
-            number = next_number
+            number = str(next_number)
             next_number += 1
         used.add(number)
         pkg_override = (

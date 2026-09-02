@@ -8,6 +8,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .channel_numbers import normalize_channel_number
+
 BackendType = Literal["androidtv_remote", "http_agent", "firetv_rest", "adb"]
 # D-pad / key injection plane (used with http_agent primary for hybrid control).
 KeysBackendType = Literal["androidtv_remote", "firetv_rest", "adb"]
@@ -80,10 +82,15 @@ class Tuner(BaseModel):
         return self
 
 
+def _new_channel_id() -> str:
+    return uuid.uuid4().hex
+
+
 class Channel(BaseModel):
     """A tunable channel. Schema mirrors ADBTuner's export for drop-in import."""
 
-    number: int
+    id: str = Field(default_factory=_new_channel_id)
+    number: str
     name: str
     provider_name: Optional[str] = None
     package_name: str
@@ -105,6 +112,14 @@ class Channel(BaseModel):
     configuration_uuid: Optional[str] = None
     # Integrator origin (e.g. fruitdeeplinks). Sync replaces only matching rows.
     source: Optional[str] = None
+
+    @field_validator("number", mode="before")
+    @classmethod
+    def _normalize_number_field(cls, value: object) -> str:
+        normalized = normalize_channel_number(value)
+        if normalized is None:
+            raise ValueError("invalid channel number")
+        return normalized
 
     @field_validator("key_macro", mode="before")
     @classmethod

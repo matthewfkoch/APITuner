@@ -30,6 +30,24 @@ async function handle(resp) {
   return data;
 }
 
+function channelNumberSortKey(number) {
+  const text = String(number ?? "").trim();
+  const dot = text.indexOf(".");
+  if (dot >= 0) {
+    return [parseInt(text.slice(0, dot), 10) || 0, parseInt(text.slice(dot + 1), 10) || 0, text];
+  }
+  return [parseInt(text, 10) || 0, 0, text];
+}
+
+function compareChannelNumbers(a, b) {
+  const ka = channelNumberSortKey(a);
+  const kb = channelNumberSortKey(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1;
+  }
+  return 0;
+}
+
 // ---- Capability definitions (label + tooltip; optional live status from /api/info) ----
 const CAP_DEFS = {
   http_agent: [
@@ -1005,7 +1023,7 @@ function channelMatchesQuery(c, q) {
 
 function coverageForChannel(c) {
   if (!packageCoverage || !packageCoverage.channels) return null;
-  return packageCoverage.channels.find((r) => Number(r.number) === Number(c.number)) || null;
+  return packageCoverage.channels.find((r) => r.id === c.id) || null;
 }
 
 function packageWarnTitle(row) {
@@ -1061,8 +1079,8 @@ function renderChannels(channels) {
     });
     tr.querySelector("[data-del]").addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(`Delete channel ${c.number}?`)) return;
-      try { await api.del(`/api/channels/${c.number}`); toast("Channel deleted"); loadChannels(); }
+      if (!confirm(`Delete ${c.number} · ${c.name}?`)) return;
+      try { await api.del(`/api/channels/${c.id}`); toast("Channel deleted"); loadChannels(); }
       catch (err) { toast(err.message, true); }
     });
     tbody.appendChild(tr);
@@ -1100,7 +1118,7 @@ async function loadChannels() {
     toast(e.message, true);
     return;
   }
-  cachedChannels.sort((a, b) => a.number - b.number);
+  cachedChannels.sort((a, b) => compareChannelNumbers(a.number, b.number));
   renderChannels(cachedChannels);
   // Background package check (Agent app lists) — don't block the table.
   refreshPackageCoverage(true).then(() => renderChannels(cachedChannels));
@@ -1163,10 +1181,10 @@ function updatePackageFieldWarnings(form) {
 }
 
 function channelForm(existing) {
-  const c = existing || { number: "", name: "", provider_name: "", package_name: "", alternate_package_name: "", component: "", url: "", action: "android.intent.action.VIEW", extra_string: "", key_macro: [], compatibility_mode: false, tvc_guide_stationid: "", configuration_uuid: "" };
+  const c = existing || { id: "", number: "", name: "", provider_name: "", package_name: "", alternate_package_name: "", component: "", url: "", action: "android.intent.action.VIEW", extra_string: "", key_macro: [], compatibility_mode: false, tvc_guide_stationid: "", configuration_uuid: "" };
   const form = el(`<form class="form-grid"></form>`);
   form.innerHTML = `
-    <div class="field"><label>Channel number</label><input name="number" type="number" value="${c.number}" ${existing ? "readonly" : ""} required /></div>
+    <div class="field"><label>Channel number</label><input name="number" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" placeholder="e.g. 100 or 100.1" value="${c.number}" required /></div>
     <div class="field"><label>Name</label><input name="name" value="${escapeAttr(c.name)}" required /></div>
     <div class="field"><label>Provider</label><input name="provider_name" value="${escapeAttr(c.provider_name || "")}" /></div>
     <div class="field"><label>Gracenote station id</label><input name="tvc_guide_stationid" value="${escapeAttr(c.tvc_guide_stationid || "")}" /></div>
@@ -1252,7 +1270,8 @@ function channelForm(existing) {
     const fd = new FormData(form);
     const km = (fd.get("key_macro") || "").toString().split(/[,;]/).map((s) => s.trim()).filter(Boolean);
     const payload = {
-      number: Number(fd.get("number")),
+      id: existing ? existing.id : undefined,
+      number: String(fd.get("number") || "").trim(),
       name: fd.get("name"),
       provider_name: fd.get("provider_name") || null,
       package_name: fd.get("package_name"),
@@ -1272,12 +1291,12 @@ function channelForm(existing) {
       if (!confirm("This package looks missing on one or more Agent tuners. Save anyway?")) return;
     }
     try {
-      if (existing) await api.put(`/api/channels/${existing.number}`, payload);
+      if (existing) await api.put(`/api/channels/${existing.id}`, { ...payload, id: existing.id });
       else await api.post("/api/channels", payload);
       toast("Channel saved"); closeModal(); loadChannels();
     } catch (err) { toast(err.message, true); }
   });
-  openModal(existing ? `Edit channel ${existing.number}` : "Add channel", form);
+  openModal(existing ? `Edit ${existing.number} · ${existing.name}` : "Add channel", form);
   if (!packageCoverage) refreshPackageCoverage(true).then(() => updatePackageFieldWarnings(form));
   else updatePackageFieldWarnings(form);
 }
@@ -1293,15 +1312,15 @@ async function populateTunerSelect(sel) {
 // Import / Export
 document.getElementById("export-btn").addEventListener("click", async () => {
   try {
-    const data = await api.get("/api/export");
+    const data = await api.get("/api/export?native=1");
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = "apituner-channels.json"; a.click();
+    a.href = URL.createObjectURL(blob); a.download = "apituner-channels-native.json"; a.click();
   } catch (e) { toast(e.message, true); }
 });
 document.getElementById("import-btn").addEventListener("click", () => {
   const node = el(`<div>
-    <p class="muted">Paste an ADBTuner / APITuner JSON list, a FruitDeepLinks ADB M3U, or fetch a playlist URL. Lane URLs stay as resolvers; Android packages are filled from the deeplink catalog. Channel numbers must be unique; null JSON numbers are filled from <code>sort_order</code> when present.</p>
+    <p class="muted">Paste an ADBTuner / APITuner JSON list, a FruitDeepLinks ADB M3U, or fetch a playlist URL. Lane URLs stay as resolvers; Android packages are filled from the deeplink catalog. Duplicate guide numbers are allowed (alternate feeds); each row gets a unique stream URL. Null JSON numbers are filled from <code>sort_order</code> when present. For DirecTV / OliveTin lineups, use <b>Replace all existing channels</b>.</p>
     <div class="field"><label>Format</label>
       <select id="import-kind">
         <option value="json">JSON channel list</option>

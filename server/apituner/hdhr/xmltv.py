@@ -13,6 +13,7 @@ import httpx
 
 from ..deeplink_catalog import parse_lane_url, parse_whatson_url
 from ..m3u_import import SOURCE_FRUITDEEPLINKS
+from ..channels import sort_channels
 from ..models import Channel, GlobalOptions
 
 logger = logging.getLogger(__name__)
@@ -66,17 +67,17 @@ def build_xmltv(
     *,
     generator_name: str = "APITuner",
 ) -> str:
-    """Remap Channels DVR airings onto APITuner channel numbers via StationID."""
-    station_to_number: dict[str, int] = {}
+    """Remap Channels DVR airings onto APITuner channel ids via StationID."""
+    station_to_id: dict[str, str] = {}
     for ch in channels:
         if ch.tvc_guide_stationid:
-            station_to_number[str(ch.tvc_guide_stationid)] = ch.number
+            station_to_id[str(ch.tvc_guide_stationid)] = ch.id
 
     # Guide airings keyed by station id.
     airings_by_station: dict[str, list[dict[str, Any]]] = {}
     for entry in guide_entries:
         station = _station_from_guide_entry(entry)
-        if not station or station not in station_to_number:
+        if not station or station not in station_to_id:
             continue
         for airing in entry.get("Airings") or []:
             airings_by_station.setdefault(station, []).append(airing)
@@ -87,12 +88,13 @@ def build_xmltv(
         f'<tv generator-info-name="{escape(generator_name)}">',
     ]
 
-    for ch in sorted(channels, key=lambda c: c.number):
-        cid = str(ch.number)
+    for ch in sort_channels(channels):
+        cid = ch.id
+        guide_num = ch.number
         lines.append(f'  <channel id="{escape(cid)}">')
-        lines.append(f"    {_text('display-name', cid)}")
+        lines.append(f"    {_text('display-name', guide_num)}")
         lines.append(f"    {_text('display-name', ch.name)}")
-        lines.append(f"    {_text('lcn', cid)}")
+        lines.append(f"    {_text('lcn', guide_num)}")
         if ch.tvc_guide_stationid:
             # Non-standard but useful breadcrumb for debugging.
             lines.append(
@@ -101,7 +103,7 @@ def build_xmltv(
         lines.append("  </channel>")
 
     programme_count = 0
-    for ch in sorted(channels, key=lambda c: c.number):
+    for ch in sort_channels(channels):
         station = str(ch.tvc_guide_stationid) if ch.tvc_guide_stationid else ""
         if not station:
             continue
@@ -112,7 +114,7 @@ def build_xmltv(
             if not isinstance(start, int) or not isinstance(duration, int):
                 continue
             stop = start + duration
-            cid = str(ch.number)
+            cid = ch.id
             lines.append(
                 f'  <programme start="{_xmltv_ts(start)}" stop="{_xmltv_ts(stop)}" '
                 f'channel="{escape(cid)}">'
@@ -194,21 +196,21 @@ def fdl_xmltv_aliases(channel: Channel) -> set[str]:
     return {a for a in aliases if a}
 
 
-def fdl_channel_id_map(channels: list[Channel]) -> dict[str, int]:
-    """Map foreign XMLTV channel ids onto APITuner channel numbers."""
-    mapping: dict[str, int] = {}
+def fdl_channel_id_map(channels: list[Channel]) -> dict[str, str]:
+    """Map foreign XMLTV channel ids onto APITuner channel ids."""
+    mapping: dict[str, str] = {}
     for ch in channels:
         url = ch.url or ""
         sourced = (ch.source or "").strip() == SOURCE_FRUITDEEPLINKS
         if not sourced and "/api/adb/lanes/" not in url and "/whatson/" not in url:
             continue
         for alias in fdl_xmltv_aliases(ch):
-            mapping[alias] = ch.number
+            mapping[alias] = ch.id
     return mapping
 
 
 def rewrite_fdl_xmltv(xml_text: str, channels: list[Channel]) -> str:
-    """Rewrite FDL <channel id> / programme channel= onto APITuner numbers.
+    """Rewrite FDL <channel id> / programme channel= onto APITuner channel ids.
 
     Returns only the remapped ``<programme>`` elements (channel list stays
     with ``build_xmltv``). Unmatched programmes are dropped.
@@ -223,7 +225,7 @@ def rewrite_fdl_xmltv(xml_text: str, channels: list[Channel]) -> str:
         return ""
 
     # Prefer explicit channel-id on FDL channel records (display-name fallback).
-    id_to_number: dict[str, int] = {}
+    id_to_cid: dict[str, str] = {}
     for child in list(root):
         if _local_tag(child.tag) != "channel":
             continue
@@ -235,7 +237,7 @@ def rewrite_fdl_xmltv(xml_text: str, channels: list[Channel]) -> str:
         for cand in candidates:
             key = cand.lower()
             if key in mapping:
-                id_to_number[raw_id] = mapping[key]
+                id_to_cid[raw_id] = mapping[key]
                 break
 
     snippets: list[str] = []
@@ -243,12 +245,12 @@ def rewrite_fdl_xmltv(xml_text: str, channels: list[Channel]) -> str:
         if _local_tag(child.tag) != "programme":
             continue
         foreign = (child.get("channel") or "").strip()
-        number = id_to_number.get(foreign)
-        if number is None:
-            number = mapping.get(foreign.lower())
-        if number is None:
+        cid = id_to_cid.get(foreign)
+        if cid is None:
+            cid = mapping.get(foreign.lower())
+        if cid is None:
             continue
-        child.set("channel", str(number))
+        child.set("channel", cid)
         snippets.append(ET.tostring(child, encoding="unicode"))
     return "\n".join(snippets)
 
@@ -315,9 +317,9 @@ async def get_xmltv(
 
     duration = int(duration_override or options.xmltv_duration_seconds)
     device = options.xmltv_source_device or "M3U-YouTubeTV"
-    numbers = ",".join(str(ch.number) for ch in sorted(channels, key=lambda c: c.number))
+    ids = ",".join(ch.id for ch in sorted(channels, key=lambda c: c.id))
     cache_key = (
-        f"{dvr}|{fdl}|{options.fruitdeeplinks_xmltv_path}|{device}|{duration}|{numbers}"
+        f"{dvr}|{fdl}|{options.fruitdeeplinks_xmltv_path}|{device}|{duration}|{ids}"
     )
     now = time.time()
     if (

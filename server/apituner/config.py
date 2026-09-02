@@ -10,8 +10,14 @@ from typing import Any, Optional
 
 from pydantic import ValidationError
 
+from .channel_numbers import normalize_channel_number, export_channel_number
 from .models import AppConfig, Channel, TuneConfiguration
-from .channels import ChannelValidationError, validate_channel_numbers
+from .channels import (
+    ChannelValidationError,
+    ensure_channel_ids,
+    new_channel_id,
+    validate_unique_ids,
+)
 
 # Fields ADBTuner uses in its channel export; we keep parity for drop-in import/export.
 _ADBTUNER_CHANNEL_FIELDS = (
@@ -32,25 +38,21 @@ _ADBTUNER_CHANNEL_FIELDS = (
 )
 
 
-def _coerce_channel_number(value: Any) -> int | None:
-    """Best-effort int coercion for ADBTuner number/sort_order quirks."""
-    if value is None or value == "":
-        return None
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
-
-
 def normalize_adbtuner_channel(item: dict[str, Any]) -> dict[str, Any]:
     """Coerce common ADBTuner export quirks into APITuner's channel schema."""
     out = dict(item)
 
-    number = _coerce_channel_number(out.get("number"))
+    number = normalize_channel_number(out.get("number"))
     if number is None:
-        number = _coerce_channel_number(out.get("sort_order"))
+        number = normalize_channel_number(out.get("sort_order"))
     if number is not None:
         out["number"] = number
+
+    cid = out.get("id")
+    if cid is None or str(cid).strip() == "":
+        out.pop("id", None)
+    else:
+        out["id"] = str(cid).strip()
 
     sid = out.get("tvc_guide_stationid")
     if sid is None or sid == "":
@@ -97,6 +99,7 @@ class ConfigStore:
 
     def _load(self) -> AppConfig:
         had_device_id = False
+        needs_id_migration = False
         if self.path.exists():
             try:
                 raw = json.loads(self.path.read_text())
@@ -105,7 +108,13 @@ class ConfigStore:
                     and isinstance(raw.get("options"), dict)
                     and raw["options"].get("hdhr_device_id")
                 )
+                if isinstance(raw, dict):
+                    for ch in raw.get("channels") or []:
+                        if isinstance(ch, dict) and not (ch.get("id") or "").strip():
+                            needs_id_migration = True
+                            break
                 config = AppConfig.model_validate(raw)
+                ensure_channel_ids(config.channels)
             except (json.JSONDecodeError, ValueError):
                 # Corrupt config: back it up rather than lose it, then start fresh.
                 backup = self.path.with_suffix(".json.bak")
@@ -113,8 +122,8 @@ class ConfigStore:
                 config = AppConfig()
         else:
             config = AppConfig()
-        # Persist auto-generated HDHR DeviceID so Channels doesn't see a new device.
-        if not had_device_id:
+        # Persist auto-generated HDHR DeviceID and migrated channel ids.
+        if not had_device_id or needs_id_migration:
             self._config = config
             self.save()
         return config
@@ -138,12 +147,16 @@ class ConfigStore:
 
     # -- Import / export (ADBTuner-compatible channel lists) --
 
-    def export_channels(self) -> list[dict[str, Any]]:
+    def export_channels(self, *, native: bool = False) -> list[dict[str, Any]]:
         with self._lock:
             out: list[dict[str, Any]] = []
             for ch in self._config.channels:
                 dumped = ch.model_dump()
-                out.append({k: dumped.get(k) for k in _ADBTUNER_CHANNEL_FIELDS})
+                row = {k: dumped.get(k) for k in _ADBTUNER_CHANNEL_FIELDS}
+                row["number"] = export_channel_number(str(dumped.get("number") or ""))
+                if native:
+                    row["id"] = dumped.get("id")
+                out.append(row)
             return out
 
     def import_channels(self, data: list[dict[str, Any]], *, replace: bool = False) -> int:
@@ -162,6 +175,8 @@ class ConfigStore:
                         f"Invalid channel '{label}': missing channel number "
                         "(set number, or include sort_order so it can be filled in)"
                     )
+                if "id" not in normalized:
+                    normalized["id"] = new_channel_id()
                 try:
                     imported.append(Channel.model_validate(normalized))
                 except ValidationError as exc:
@@ -171,15 +186,24 @@ class ConfigStore:
                     raise ChannelValidationError(
                         f"Invalid channel '{label}': {msgs}"
                     ) from exc
-            validate_channel_numbers(imported)
+            validate_unique_ids(imported)
             if replace:
                 self._config.channels = imported
             else:
-                merged = {c.number: c for c in self._config.channels}
+                by_id = {c.id: c for c in self._config.channels}
+                merged = list(self._config.channels)
                 for ch in imported:
-                    merged[ch.number] = ch
-                self._config.channels = list(merged.values())
-            validate_channel_numbers(self._config.channels)
+                    if ch.id in by_id:
+                        idx = next(
+                            i for i, c in enumerate(merged) if c.id == ch.id
+                        )
+                        merged[idx] = ch
+                        by_id[ch.id] = ch
+                    else:
+                        merged.append(ch)
+                        by_id[ch.id] = ch
+                self._config.channels = merged
+            validate_unique_ids(self._config.channels)
             self.save()
             return len(imported)
 
@@ -189,13 +213,14 @@ class ConfigStore:
         if not want:
             raise ChannelValidationError("source is required to replace a channel group")
         with self._lock:
+            ensure_channel_ids(incoming)
             keep = [
                 ch
                 for ch in self._config.channels
                 if (ch.source or "").strip() != want
             ]
             merged = keep + list(incoming)
-            validate_channel_numbers(merged)
+            validate_unique_ids(merged)
             self._config.channels = merged
             self.save()
             return len(incoming)

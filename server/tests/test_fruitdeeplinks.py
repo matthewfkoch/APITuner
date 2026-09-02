@@ -18,7 +18,7 @@ def test_channels_from_adb_lanes_skips_disabled_and_unknown():
         start_number=9000,
         occupied={9000},
     )
-    assert [c.number for c in channels] == [9001, 9002]
+    assert [c.number for c in channels] == ["9001", "9002"]
     assert all(c.source == "fruitdeeplinks" for c in channels)
     assert all(c.package_name == "com.espn.score_center" for c in channels)
     assert channels[0].alternate_package_name == "com.espn.gtv"

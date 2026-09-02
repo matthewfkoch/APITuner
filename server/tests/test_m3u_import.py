@@ -30,7 +30,7 @@ def test_channels_from_m3u_fills_packages():
     assert skipped == []
     assert len(channels) == 2
     espn = channels[0]
-    assert espn["number"] == 9000
+    assert espn["number"] == "9000"
     assert espn["name"] == "ADB SportsCenter 1"
     assert espn["package_name"] == "com.espn.score_center"
     assert espn["alternate_package_name"] == "com.espn.gtv"
@@ -40,7 +40,7 @@ def test_channels_from_m3u_fills_packages():
     assert "dynamic_url_json_key=deeplink_url" in espn["url"]
     max_ch = channels[1]
     assert max_ch["package_name"] == "com.wbd.stream"
-    assert max_ch["number"] == 9001
+    assert max_ch["number"] == "9001"
 
 
 def test_rewrite_stream_m3u_to_whatson():
@@ -50,7 +50,7 @@ http://192.0.2.40:6655/lane/1/stream.m3u8
 """
     channels, skipped = channels_from_m3u(text, profile="google_tv", start_number=1)
     assert skipped == []
-    assert channels[0]["number"] == 9000
+    assert channels[0]["number"] == "9000"
     assert "/whatson/1" in channels[0]["url"]
     assert "stream.m3u8" not in channels[0]["url"]
     assert channels[0]["package_name"]
@@ -92,8 +92,8 @@ def test_import_source_replace_keeps_yttv(tmp_path):
         ],
     )
     names = {ch.number: ch.name for ch in store.config.channels}
-    assert names[1] == "YouTube TV"
-    assert 9000 in names
+    assert names["1"] == "YouTube TV"
+    assert "9000" in names
     assert len([c for c in store.config.channels if c.source == "fruitdeeplinks"]) == 1
     exported = store.export_channels()
     assert any(row.get("source") == "fruitdeeplinks" for row in exported)

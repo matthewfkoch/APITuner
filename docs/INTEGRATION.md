@@ -38,7 +38,8 @@ Use FruitDeepLinks **Android / Fire ADB** playlists (`/m3u/adb` or `/api/adb/lan
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `number` | yes | Unique across the APITuner lineup. `sort_order` is used if `number` is null. |
+| `number` | yes | Guide / dial number as an integer or ATSC subchannel (e.g. `100`, `100.1`, `100.2`). May repeat for alternate feeds (DirecTV). `sort_order` is used if `number` is null (`3.0` → `3`). |
+| `id` | no | Stable internal identity (auto-assigned on import). Used in M3U `channel-id` and stream URLs. Omit from ADBTuner exports; use `GET /api/export?native=1` for round-trip backup. |
 | `name` | yes | Guide / dashboard label. |
 | `package_name` | yes | Android application id launched with the intent. |
 | `alternate_package_name` | no | Tried if the primary package is missing (ESPN Google vs Fire). |
@@ -47,7 +48,9 @@ Use FruitDeepLinks **Android / Fire ADB** playlists (`/m3u/adb` or `/api/adb/lan
 | `source` | no | `fruitdeeplinks` lets **Sync** replace only this group (YouTube TV / App Play rows stay). |
 | `component`, `key_macro`, `configuration_uuid`, `tvc_guide_stationid` | no | Same meaning as ADBTuner import. |
 
-`GET /api/export` returns the same shape, including `source`.
+`GET /api/export` returns the same ADBTuner-compatible shape (no `id`). Use `GET /api/export?native=1` to include `id` for APITuner backup/restore.
+
+**OliveTin / DirecTV:** duplicate dial numbers are supported. Import with `replace: true` (dashboard: **Replace all existing channels**).
 
 ## Dynamic / lane URLs
 
@@ -96,7 +99,7 @@ Virtual lanes mix apps (ESPN, Prime, Apple TV, …). At tune time APITuner infer
 
 ## XMLTV
 
-When FruitDeepLinks URL is set, `/xmltv.xml` fetches FDL XMLTV (`fruitdeeplinks_xmltv_path`, default `/xmltv/adb`, then `/xmltv/lanes`) and rewrites FDL channel ids onto APITuner **channel numbers**. Matchers include `ADB-{provider}-{lane}`, `lane.{n}`, `Fruit Lane {n}`, and display-name. Gracenote remap from Channels DVR still applies to stations that have `tvc_guide_stationid`.
+When FruitDeepLinks URL is set, `/xmltv.xml` fetches FDL XMLTV (`fruitdeeplinks_xmltv_path`, default `/xmltv/adb`, then `/xmltv/lanes`) and rewrites FDL channel ids onto APITuner **channel ids**. Matchers include `ADB-{provider}-{lane}`, `lane.{n}`, `Fruit Lane {n}`, and display-name. Gracenote remap from Channels DVR still applies to stations that have `tvc_guide_stationid`.
 
 Renamed FDL rows (custom names that no longer match those ids) get a channel element but **no programmes**.
 

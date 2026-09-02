@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from xml.sax.saxutils import escape
 
+from ..channels import sort_channels
 from ..models import Channel, GlobalOptions
 
 # Widely-recognized CONNECT DUO model string used by most HDHR emulators.
@@ -57,15 +58,15 @@ def build_discover_json(
 
 
 def build_lineup_json(channels: list[Channel], base_url: str) -> list[dict[str, Any]]:
-    """Build lineup.json entries pointing at /auto/v{number} stream URLs."""
+    """Build lineup.json entries pointing at /auto/v{id} stream URLs."""
     base = base_url.rstrip("/")
     out: list[dict[str, Any]] = []
-    for ch in sorted(channels, key=lambda c: c.number):
+    for ch in sort_channels(channels):
         entry: dict[str, Any] = {
             "GuideNumber": str(ch.number),
             "GuideName": ch.name,
             "HD": 1,
-            "URL": f"{base}/auto/v{ch.number}",
+            "URL": f"{base}/auto/v{ch.id}",
         }
         if ch.tvc_guide_stationid:
             entry["StationID"] = ch.tvc_guide_stationid
@@ -90,9 +91,9 @@ def build_lineup_m3u(channels: list[Channel], base_url: str) -> str:
     """HDHomeRun-style lineup.m3u."""
     base = base_url.rstrip("/")
     lines = ["#EXTM3U"]
-    for ch in sorted(channels, key=lambda c: c.number):
+    for ch in sort_channels(channels):
         lines.append(f'#EXTINF:-1 tvg-chno="{ch.number}",{ch.name}')
-        lines.append(f"{base}/auto/v{ch.number}")
+        lines.append(f"{base}/auto/v{ch.id}")
     return "\n".join(lines) + "\n"
 
 
@@ -138,31 +139,5 @@ def build_lineup_status() -> dict[str, Any]:
 
 
 def parse_channel_token(token: str) -> str:
-    """Normalize /auto/v{token} channel token (supports dotted ATSC-style).
-
-    Returns the string form used to look up channels. Prefer exact integer
-    match first; dotted forms (e.g. \"5.1\") are returned as-is for lookup.
-    """
+    """Normalize /auto/v{token} channel token (supports dotted ATSC-style)."""
     return token.strip()
-
-
-def find_channel(channels: list[Channel], token: str) -> Channel | None:
-    """Resolve a GuideNumber token to a configured Channel."""
-    token = parse_channel_token(token)
-    if not token:
-        return None
-    # Exact numeric match (\"9000\" or \"9000.0\").
-    for ch in channels:
-        if str(ch.number) == token:
-            return ch
-    # Dotted major.minor mapped to an integer channel number \"major\".
-    if "." in token:
-        major, _, minor = token.partition(".")
-        if major.isdigit() and (not minor or minor.isdigit()):
-            for ch in channels:
-                if str(ch.number) == major:
-                    return ch
-                # Also allow storing as \"5.1\" via name-only if number was int-rounded.
-                if f"{ch.number}.{minor}" == token and minor:
-                    return ch
-    return None

@@ -61,7 +61,7 @@ class TunerState:
     tuner_id: str
     locked: bool = False
     tune_id: Optional[str] = None
-    channel_number: Optional[int] = None
+    channel_number: Optional[str] = None
     channel_name: Optional[str] = None
     lock_obtained: float = 0.0
     last_seen: float = 0.0

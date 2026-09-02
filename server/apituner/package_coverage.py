@@ -88,6 +88,7 @@ async def build_package_coverage(
             status = "unknown"
         channel_rows.append(
             {
+                "id": ch.id,
                 "number": ch.number,
                 "name": ch.name,
                 "package_name": ch.package_name,

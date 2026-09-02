@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-09-01
+
+### Added
+- **ATSC subchannel numbers** (`100.1`, `100.2`, …): channel `number` is stored as a string; import, M3U `tvg-chno`, HDHomeRun `GuideNumber`, and tune URLs accept dotted guide numbers. ADBTuner `sort_order` values like `3.0` still normalize to `3`.
+- **Duplicate guide numbers** (ADBTuner / OliveTin DirecTV parity): multiple channels may share the same `number` (e.g. MLB Network + MLB Network Alternate at 213). Each row gets a stable internal `id`; M3U uses unique `channel-id` and id-based stream URLs while `tvg-chno` / `channel-number` stay on the dial number.
+- `GET /api/export?native=1` includes `id` for APITuner backup/restore round-trip (default export stays ADBTuner-compatible without `id`).
+
+### Changed
+- Channel CRUD API is keyed by `id` (`PUT` / `DELETE /api/channels/{id}`).
+- Channel `number` is stored as a string internally; `GET /api/export` still emits JSON numbers (`int` / `float`) for ADBTuner compatibility.
+- M3U stream URLs are `/stream/{id}`; HDHomeRun lineup URLs are `/auto/v{id}`. Legacy `/stream/{number}` still works when the number is unique.
+- XMLTV channel identity uses `id`; Gracenote remap maps station IDs to channel `id`.
+- Dashboard **Export** includes channel `id` values (`native` export) for APITuner backup/restore.
+
+### Fixed
+- Import no longer rejects duplicate channel numbers in ADBTuner / OliveTin DirecTV exports.
+
 ## [0.1.20] - 2026-08-18
 
 ### Fixed
@@ -212,7 +229,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.20...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.21...HEAD
+[0.1.21]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.21
 [0.1.20]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.20
 [0.1.19]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.19
 [0.1.18]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.18

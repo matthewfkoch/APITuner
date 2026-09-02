@@ -75,6 +75,6 @@ async def test_build_package_coverage_missing(tmp_path, monkeypatch):
     )
     by_num = {c["number"]: c for c in report["channels"]}
     # gtv channel OK via family alternate score_center
-    assert by_num[1507]["status"] == "ok"
-    assert by_num[36]["status"] == "missing"
+    assert by_num["1507"]["status"] == "ok"
+    assert by_num["36"]["status"] == "missing"
     assert report["summary"]["channels_missing"] == 1

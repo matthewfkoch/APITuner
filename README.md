@@ -156,7 +156,8 @@ See `config.example.json` for a sample configuration.
 
 Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is compatible). Each channel has:
 
-- `number` — must be unique across the list (fix duplicate numbers in the export before import)
+- `number` — guide / dial number as an integer or subchannel (`100`, `100.1`, `100.2`; may repeat for alternate feeds, e.g. DirecTV MLB Network + MLB Network Alternate at 213)
+- `id` — stable internal identity (auto-assigned; used in M3U stream URLs and API CRUD; included in `GET /api/export?native=1`)
 - `package_name` (+ optional `alternate_package_name`)
 - `url` — deep link (intent data), e.g. `https://tv.youtube.com/watch/...`, **or** an App Play loop index (`"0"`, `"1"`, …)
 - `configuration_uuid` — optional; set for [babsonnexus HDMI Encoder Native Apps](https://github.com/babsonnexus/hdmi-encoder-native-apps) App Play stations
@@ -170,6 +171,8 @@ Dynamic / lane URLs (FruitDeepLinks, OliveTin, ADBTuner-style resolvers) are fet
 **FruitDeepLinks (Android / Google TV sticks):** set the FDL base URL in Options and click **Sync FruitDeepLinks**, or Import an ADB M3U / playlist URL. Packages are filled from the [deeplink catalog](docs/INTEGRATION.md). Use FDL `/m3u/adb` (not Apple `profile=apple`) and the Agent (`http_agent`) backend. See [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 ADBTuner exports sometimes have `"number": null`. APITuner fills that from `sort_order` when present; otherwise import returns a clear 400 error naming the channel instead of an internal server error.
+
+**DirecTV / OliveTin lineups** often use duplicate dial numbers for alternate feeds. Import with **Replace all existing channels** checked. Each row gets a unique stream URL in the M3U while `tvg-chno` stays on the dial number for Channels DVR stacking.
 
 ### App Play configurations (babsonnexus)
 
@@ -274,7 +277,8 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Need logs for forum support | — | Options → **Download diagnostics** (redacted JSON: recent logs, tuner probes; tokens stripped) |
 | Agent reachable from host, **Unreachable** from dashboard | Container cannot reach device LAN (common on Synology / some NAS bridges) | From the host: `curl http://DEVICE_IP:9092/api/health`. From the container: `docker exec apituner curl -v --connect-timeout 5 http://DEVICE_IP:9092/api/health`. If host works but container fails, try host networking, check the NAS firewall for **outbound** TCP 9092, or use a macvlan/host network so the container shares the LAN |
 | Discover shows device but Add fails / "Tuner not found" | Older UI bug treating Discover as an edit | Update to a build that posts new tuners from Discover; fill in the encoder stream URL before saving |
-| Import fails / Internal Server Error | Null `number` or duplicate channel numbers in ADBTuner JSON | Fix numbers in the export (or rely on `sort_order`); current builds return a named 400 error instead of 500 |
+| Import fails | Null `number` in ADBTuner JSON | Set `number` or include `sort_order` so it can be filled in |
+| After upgrade, Channels shows wrong / missing streams | M3U stream URLs now use channel `id` | Re-add or rescan the Custom Channels source (`/channels.m3u8`) |
 | FruitDeepLinks lanes missing packages / skipped | Provider not in the deeplink catalog | Check `GET /api/deeplink-catalog`; import M3U with `package-name=` or file an APITuner mapping |
 | Fire TV Agent has no Permissions page / tune times out on Fire | Fire OS hides overlay/usage/notification toggles for sideloaded apps | One-time: enable Fire **ADB debugging**, then dashboard → tuner → **Grant permissions (ADB)**. Day-to-day tuning stays on the Agent (no ADB). Fire Sticks are not affected by Android 14’s wired-ADB breakage |
 | Grant permissions (ADB) → unauthorized / unreachable | Container has different ADB keys than the host, or TCP **5555** blocked | Mount `$HOME/.android` into the container (see `docker-compose.yml` / `docker run` above); accept **Allow USB debugging** on the TV; ensure the container can reach `DEVICE_IP:5555` |

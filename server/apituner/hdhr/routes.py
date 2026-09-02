@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .. import __version__
 from ..backends import BackendNotPaired, BackendUnavailable
+from ..channels import resolve_channel
 from ..stream import HDHR_SERVER_HEADER, open_hdhr_stream
 from ..tuner_manager import NoTunerAvailable, TuneFailed, TunerInUse, TunerManager
 from .lineup import (
@@ -19,7 +20,7 @@ from .lineup import (
     build_lineup_m3u,
     build_lineup_status,
     build_lineup_xml,
-    find_channel,
+    parse_channel_token,
     resolve_base_url,
 )
 from .xmltv import get_xmltv
@@ -197,7 +198,15 @@ async def _stream_channel(
     _require_hdhr(request)
     store = _store(request)
     manager = _manager(request)
-    channel = find_channel(store.config.channels, channel_token)
+    token = parse_channel_token(channel_token)
+    channel, err = resolve_channel(store.config.channels, token)
+    if err == "ambiguous":
+        return _error(
+            409,
+            f"Channel number {token} matches multiple channels; "
+            "use the stream URL from channels.m3u",
+            hdhr_code=801,
+        )
     if channel is None:
         return _error(404, f"Unknown channel {channel_token}", hdhr_code=801)
     try:

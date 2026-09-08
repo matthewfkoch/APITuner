@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import math
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Defaults match GlobalOptions.dynamic_url_timeout / dynamic_url_attempts.
+# Lane resolvers (yttv-epg /whatson, FruitDeepLinks) can stall on first Docker
+# hairpin to a LAN IP. Fail hung connects quickly and retry on this tuner
+# instead of burning Channels' ~30s window across three boxes.
+DEFAULT_TIMEOUT = 15.0
+DEFAULT_CONNECT_TIMEOUT = 5.0
+DEFAULT_ATTEMPTS = 3
+RETRY_PAUSE_SECONDS = 0.25
 
 
 class DynamicUrlError(Exception):
@@ -66,11 +77,31 @@ def _dig(data: Any, key: str) -> Any:
     return None
 
 
+def _http_timeout(timeout: float) -> httpx.Timeout:
+    try:
+        total = float(timeout)
+    except (TypeError, ValueError):
+        total = DEFAULT_TIMEOUT
+    if not math.isfinite(total):
+        total = DEFAULT_TIMEOUT
+    total = max(1.0, total)
+    connect = min(DEFAULT_CONNECT_TIMEOUT, total)
+    return httpx.Timeout(total, connect=connect)
+
+
+def _fetch_error_text(exc: BaseException, timeout: float) -> str:
+    detail = str(exc).strip()
+    if isinstance(exc, httpx.TimeoutException):
+        return detail or f"timed out after {timeout:g}s"
+    return detail or type(exc).__name__
+
+
 async def resolve_dynamic_url(
     url: str,
     *,
     client: Optional[httpx.AsyncClient] = None,
-    timeout: float = 10.0,
+    timeout: float = DEFAULT_TIMEOUT,
+    attempts: int = DEFAULT_ATTEMPTS,
 ) -> str:
     """Fetch a lane / dynamic URL and return the concrete deeplink string."""
     raw = (url or "").strip()
@@ -85,15 +116,45 @@ async def resolve_dynamic_url(
 
     fetch_url = _strip_query_key(raw, "dynamic_url_json_key") if json_key else raw
 
+    tries = max(1, int(attempts))
     owns_client = client is None
-    http = client or httpx.AsyncClient(timeout=timeout)
+    http: Optional[httpx.AsyncClient] = client
+    timeout_cfg = _http_timeout(timeout)
+    resp: Optional[httpx.Response] = None
     try:
-        resp = await http.get(fetch_url)
-    except Exception as exc:  # noqa: BLE001
-        raise DynamicUrlError(f"Failed to fetch dynamic URL {fetch_url!r}: {exc}") from exc
+        for attempt in range(1, tries + 1):
+            if owns_client:
+                http = httpx.AsyncClient(
+                    timeout=timeout_cfg, follow_redirects=True
+                )
+            assert http is not None
+            try:
+                resp = await http.get(fetch_url, timeout=timeout_cfg)
+                break
+            except httpx.TransportError as exc:
+                reason = _fetch_error_text(exc, timeout)
+                if owns_client:
+                    await http.aclose()
+                    http = None
+                if attempt < tries:
+                    logger.warning(
+                        "Dynamic URL fetch failed (%s); retrying %s/%s %s",
+                        reason,
+                        attempt + 1,
+                        tries,
+                        fetch_url,
+                    )
+                    await asyncio.sleep(RETRY_PAUSE_SECONDS)
+                    continue
+                raise DynamicUrlError(
+                    f"Failed to fetch dynamic URL {fetch_url!r}: {reason}"
+                ) from exc
     finally:
-        if owns_client:
+        if owns_client and http is not None:
             await http.aclose()
+
+    if resp is None:
+        raise DynamicUrlError(f"Failed to fetch dynamic URL {fetch_url!r}")
 
     if resp.status_code >= 400:
         raise DynamicUrlError(

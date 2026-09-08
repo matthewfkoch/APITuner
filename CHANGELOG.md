@@ -1,12 +1,23 @@
 # Changelog
 
-All notable changes to APITuner are documented here. Tagged releases keep
-`server/apituner/__init__.py` and the Agent APK `versionName` in sync; work under
-`[Unreleased]` may briefly advance the Agent ahead of the server.
+All notable changes to APITuner are documented here. Tagged releases bump
+`server/apituner/__init__.py`. Agent `versionName` / `versionCode` are bumped
+only when the APK changes; `[Unreleased]` may briefly list Agent work ahead of
+the server.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
+
+## [0.1.23] - 2026-09-07
+
+### Changed
+- Dynamic / lane URL fetches (`/whatson`, FruitDeepLinks) retry on timeout or connection error (default 15s × 3, 5s connect cap) so a stalled first request does not burn two more tuners. **Lane URL timeout** and **attempts** are in Options. Timeout errors now say `timed out after 15s` instead of an empty message.
+- Channels **Copy M3U** is a header menu (All + each provider) instead of chips under the search field.
+
+### Fixed
+- Copy M3U dropdown stacks above the channel table so menu items are clickable.
+- Copy M3U copies the provider URL to the clipboard only; the sidebar stays on the full playlist unless clipboard write fails.
 
 ## [0.1.22] - 2026-09-07
 
@@ -249,7 +260,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.22...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.23
 [0.1.22]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.22
 [0.1.21]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.21
 [0.1.20]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.20

@@ -41,7 +41,7 @@ Open the dashboard at `http://<docker-host>:6592`.
 
 - Web dashboard on port **6592** — manage tuners, channels, and options
 - **Recommended:** HDHomeRun source in Channels DVR (device URL shown in the dashboard) — enables **Tuner Sharing**
-- **Alternate:** M3U playlist at `/channels.m3u` as a Custom Channels source
+- **Alternate:** M3U playlist at `/channels.m3u8` as a Custom Channels source (`?provider=` to filter)
 - Optional XMLTV guide at `/xmltv.xml` (Custom URL) when using HDHomeRun
 - Each **tuner** is one Android TV device plus its HDMI encoder stream URL
 

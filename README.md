@@ -17,7 +17,7 @@ An **ADB-free day-to-day** virtual tuner for [Channels DVR](https://getchannels.
 
 ```
 Channels DVR ──HDHomeRun /auto/v…──▶ APITuner ──control──▶ Android TV device
-                (or /channels.m3u)       │                     (launches app / deep link)
+                (or /channels.m3u8)      │                     (launches app / deep link)
                                          └──relay MPEG-TS◀── HDMI encoder ◀─HDMI─ device
 ```
 
@@ -217,13 +217,18 @@ HDHomeRun sources don't read `tvc-guide-stationid` the way M3U Custom Channels d
 
 ### Alternate: Custom Channels (M3U)
 
-In Channels DVR: **Settings → Add Source → Custom Channels → M3U URL** and paste the URL shown at the top of the dashboard:
+In Channels DVR: **Settings → Add Source → Custom Channels → M3U URL** and paste the URL shown in the dashboard sidebar (or **Copy M3U** on the Channels page):
 
 ```
-http://<docker-host>:6592/channels.m3u
+http://<docker-host>:6592/channels.m3u8
 ```
+
+`/channels.m3u` is the same playlist. With two or more `provider_name` values, **Copy M3U** can copy a filtered URL (`?provider=YouTube%20TV`). Filter matching is case-insensitive. The sidebar always shows the full playlist; provider copies go to the clipboard only.
+
+**YTTV Sports guide data:** those rows (`source` `yttv-sports`) write M3U `tvg-id` as `yttv-sports-N` (from `/whatson/{n}`). In Channels, set that Custom Channels source’s XMLTV URL to **yttv-epg** (`http://<yttv-epg-host>:8095/xmltv.xml`), joined on `tvg-id`. Do **not** use APITuner `/xmltv.xml` for those lanes, and do **not** put the sports id in `tvc-guide-stationid` (that field is Gracenote).
 
 Custom Channels does **not** support Tuner Sharing — each TV typically opens its own stream, which is why the same channel can look out of sync across rooms.
+
 ## Global options
 
 Configurable in the dashboard:
@@ -237,7 +242,11 @@ Configurable in the dashboard:
 | Keep apps running | When off, always send HOME on release (overrides keep-warm behavior) |
 | Retry on other tuner | Try another eligible tuner if a tune fails |
 | Request timeout | HTTP timeout for Agent API calls (seconds) |
+| Lane URL timeout | Per-try HTTP timeout for `/whatson` and FruitDeepLinks (default 15s; hung connects stop at 5s). A hung **read** can still run the full timeout. Takes effect on the next tune |
+| Lane URL attempts | Retry count on timeout or connection error (default 3, max 10). Keep timeout × attempts near Channels' ~30s connect window (15s × 3 = 45s) |
 | Stream mode | `proxy` (default, like ADBTuner) or `redirect` (Channels hits encoder directly; M3U only) |
+| Stream during App Play | Start the encoder while App Play D-pad runs so Channels does not hit its connect timeout (on by default). Does **not** apply to lane URL fetches |
+| App Play stick preference | When several tuners can run App Play, prefer Fire / ADB, Google TV, or no preference |
 | Release grace | Seconds to hold tuner lock after stream disconnect |
 | Stuck / idle timeouts | Reclaim tuners that stop making progress |
 | HDHomeRun emulation | Appear as an HDHomeRun tuner (`discover.json` / `lineup.json` / `/auto/v…`) |
@@ -278,6 +287,7 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Agent reachable from host, **Unreachable** from dashboard | Container cannot reach device LAN (common on Synology / some NAS bridges) | From the host: `curl http://DEVICE_IP:9092/api/health`. From the container: `docker exec apituner curl -v --connect-timeout 5 http://DEVICE_IP:9092/api/health`. If host works but container fails, try host networking, check the NAS firewall for **outbound** TCP 9092, or use a macvlan/host network so the container shares the LAN |
 | Discover shows device but Add fails / "Tuner not found" | Older UI bug treating Discover as an edit | Update to a build that posts new tuners from Discover; fill in the encoder stream URL before saving |
 | Import fails | Null `number` in ADBTuner JSON | Set `number` or include `sort_order` so it can be filled in |
+| Sports / FDL lane tune fails with `timed out after 15s` | First HTTP fetch to a LAN resolver hangs (Docker hairpin to the host) | Options → **Lane URL timeout** / **attempts** (defaults 15s × 3, 5s connect). Retry stays on the same tuner. Keep timeout × attempts under Channels' ~30s window |
 | After upgrade, Channels shows wrong / missing streams | M3U stream URLs now use channel `id` | Re-add or rescan the Custom Channels source (`/channels.m3u8`) |
 | FruitDeepLinks lanes missing packages / skipped | Provider not in the deeplink catalog | Check `GET /api/deeplink-catalog`; import M3U with `package-name=` or file an APITuner mapping |
 | Fire TV Agent has no Permissions page / tune times out on Fire | Fire OS hides overlay/usage/notification toggles for sideloaded apps | One-time: enable Fire **ADB debugging**, then dashboard → tuner → **Grant permissions (ADB)**. Day-to-day tuning stays on the Agent (no ADB). Fire Sticks are not affected by Android 14’s wired-ADB breakage |
@@ -312,7 +322,7 @@ git tag v0.1.7
 git push origin v0.1.7
 ```
 
-Bump `server/apituner/__init__.py` and the Agent `versionName`/`versionCode` first, move `[Unreleased]` notes in `CHANGELOG.md` into the new version section, then tag. Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.
+Bump `server/apituner/__init__.py` (and the Agent `versionName`/`versionCode` **if the APK changed**), move `[Unreleased]` notes in `CHANGELOG.md` into the new version section, then tag. Between releases, debug APK artifacts are available from the **Build APITuner Agent APK** workflow on `main`.
 
 ### Agent APK releases repo
 

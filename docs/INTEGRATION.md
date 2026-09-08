@@ -47,7 +47,7 @@ Use FruitDeepLinks **Android / Fire ADB** playlists (`/m3u/adb` or `/api/adb/lan
 | `action` | no | Default `android.intent.action.VIEW`. |
 | `source` | no | `fruitdeeplinks` lets **Sync** replace only this group (YouTube TV / App Play rows stay). |
 | `component`, `key_macro`, `configuration_uuid`, `tvc_guide_stationid` | no | Same meaning as ADBTuner import. Gracenote only. |
-| `tvg_id` | no | XMLTV channel id written as M3U `tvg-id` for Channels DVR Custom Channels. Use this for virtual lanes (e.g. `yttv-sports-1`). Do not put it in `tvc_guide_stationid`. |
+| `tvg_id` | no | XMLTV channel id written as M3U `tvg-id` for Channels DVR Custom Channels. Use this for virtual lanes (e.g. `yttv-sports-1`). Do not put it in `tvc_guide_stationid`. YTTV Sports rows join yttv-epg XMLTV (`http://<host>:8095/xmltv.xml`), not APITuner `/xmltv.xml`. |
 
 `GET /api/export` returns the same ADBTuner-compatible shape (no `id`). Use `GET /api/export?native=1` to include `id` for APITuner backup/restore.
 
@@ -61,7 +61,7 @@ At tune time, APITuner fetches the channel `url` when it looks like a resolver:
 - query has `dynamic_url_json_key`
 - path looks like a deeplink API (`deeplink` or `/api/`) **and** `format=json|text`
 
-JSON bodies are read with `dynamic_url_json_key` if set, then `deeplink`, `deeplink_url`, `url`. Empty bodies, `none` / `null`, or `{ "ok": false }` fail the tune with **no event on this lane**.
+JSON bodies are read with `dynamic_url_json_key` if set, then `deeplink`, `deeplink_url`, `url`. Empty bodies, `none` / `null`, or `{ "ok": false }` fail the tune with **no event on this lane**. Timeouts retry (Options: `dynamic_url_timeout`, default 15s; `dynamic_url_attempts`, default 3; hung connects stop at 5s). Lane resolution runs **before** the encoder stream opens (`stream_during_tune` does not apply), so keep timeout × attempts under Channels' ~30s connect window.
 
 Prefer:
 
@@ -70,6 +70,8 @@ http://<fdl-host>:6655/api/adb/lanes/<provider>/<n>/deeplink?format=json&dynamic
 ```
 
 M3U import and FruitDeepLinks sync append those query params when missing.
+
+Custom Channels playlist: `GET /channels.m3u8` (or `/channels.m3u`). `?provider=<provider_name>` filters by `provider_name` (case-insensitive). The dashboard **Copy M3U** menu copies these URLs when two or more providers exist.
 
 ## M3U import
 

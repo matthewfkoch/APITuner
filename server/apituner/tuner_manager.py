@@ -31,7 +31,11 @@ from .deeplink_catalog import (
     packages_for,
     profile_for_device,
 )
-from .dynamic_url import DynamicUrlError, looks_like_dynamic_url, resolve_dynamic_url
+from .dynamic_url import (
+    DynamicUrlError,
+    looks_like_dynamic_url,
+    resolve_dynamic_url,
+)
 from .keys import key_requires_dpad, normalize_key_macro
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
 from .packages import package_candidates, package_try_order
@@ -647,8 +651,10 @@ class TunerManager:
         if not looks_like_dynamic_url(url):
             return url
         try:
+            timeout = float(self._options.dynamic_url_timeout)
+            attempts = int(self._options.dynamic_url_attempts)
             return await resolve_dynamic_url(
-                url, timeout=self._options.request_timeout
+                url, timeout=timeout, attempts=attempts
             )
         except DynamicUrlError as exc:
             raise TuneFailed(str(exc)) from exc

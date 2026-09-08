@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import secrets
 import uuid
 from typing import Any, Literal, Optional
@@ -9,6 +10,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .channel_numbers import normalize_channel_number
+from .dynamic_url import DEFAULT_ATTEMPTS, DEFAULT_TIMEOUT
 
 BackendType = Literal["androidtv_remote", "http_agent", "firetv_rest", "adb"]
 # D-pad / key injection plane (used with http_agent primary for hybrid control).
@@ -172,6 +174,9 @@ class GlobalOptions(BaseModel):
     keep_apps_running: bool = True
     retry_on_other_tuner: bool = True
     request_timeout: float = 10.0
+    # /whatson and FruitDeepLinks lane fetches (not Agent ADB). Saved from Options.
+    dynamic_url_timeout: float = DEFAULT_TIMEOUT
+    dynamic_url_attempts: int = DEFAULT_ATTEMPTS
     stream_mode: Literal["proxy", "redirect"] = "proxy"
     # App Play can take > Channels' ~30s connect timeout. When on, start the
     # encoder MPEG-TS immediately while D-pad navigation runs (show tuning UI).
@@ -205,6 +210,30 @@ class GlobalOptions(BaseModel):
     fruitdeeplinks_start_number: int = 9000
     fruitdeeplinks_xmltv_path: str = "/xmltv/adb"
     fruitdeeplinks_sync_seconds: float = 0.0
+
+    @field_validator("dynamic_url_timeout", mode="before")
+    @classmethod
+    def _dynamic_url_timeout(cls, value: object) -> object:
+        if value is None or value == "":
+            return DEFAULT_TIMEOUT
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return DEFAULT_TIMEOUT
+        if not math.isfinite(parsed):
+            return DEFAULT_TIMEOUT
+        return max(1.0, parsed)
+
+    @field_validator("dynamic_url_attempts", mode="before")
+    @classmethod
+    def _dynamic_url_attempts(cls, value: object) -> object:
+        if value is None or value == "":
+            return DEFAULT_ATTEMPTS
+        try:
+            parsed = int(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return DEFAULT_ATTEMPTS
+        return max(1, min(10, parsed))
 
     @field_validator("fruitdeeplinks_start_number", mode="before")
     @classmethod

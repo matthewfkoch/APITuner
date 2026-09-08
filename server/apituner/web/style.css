@@ -378,8 +378,8 @@ code {
 .tab-panel.active { display: block; }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ---- Page header ---- */
@@ -390,11 +390,13 @@ code {
   gap: 20px;
   margin-bottom: 24px;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 4;
 }
 
 .page-header h1 { font-size: 26px; margin-bottom: 4px; }
 .page-desc { color: var(--text-secondary); font-size: 14px; margin: 0; max-width: 520px; }
-.page-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.page-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 
 /* ---- Buttons ---- */
 .btn {
@@ -659,16 +661,56 @@ code {
   white-space: nowrap;
 }
 
-.provider-filters {
-  display: flex;
-  flex-wrap: wrap;
+.menu-wrap {
+  position: relative;
+  z-index: 5;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin: -8px 0 16px;
 }
 
-.provider-filters .toolbar-meta {
-  margin-right: 4px;
+.menu-wrap .menu-caret {
+  margin-left: 2px;
+  opacity: 0.75;
+}
+
+.menu {
+  position: fixed;
+  min-width: 200px;
+  max-width: min(320px, 80vw);
+  max-height: min(70vh, calc(100vh - 160px));
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--surface-hover);
+  outline: none;
 }
 
 /* ---- Table ---- */
@@ -1124,4 +1166,6 @@ code {
 @media (max-width: 480px) {
   .page-actions { width: 100%; }
   .page-actions .btn { flex: 1; }
+  .page-actions .menu-wrap { flex: 1; }
+  .page-actions .menu-wrap .btn { width: 100%; }
 }

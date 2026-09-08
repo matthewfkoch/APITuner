@@ -16,7 +16,7 @@ APITUNER_DATA_DIR=../data uvicorn apituner.main:app --reload --port 6592
 - Dashboard: http://localhost:6592
 - OpenAPI docs: http://localhost:6592/docs
 - HDHomeRun discover: http://localhost:6592/discover.json
-- M3U playlist: http://localhost:6592/channels.m3u
+- M3U playlist: http://localhost:6592/channels.m3u8 (`?provider=` optional)
 - XMLTV guide: http://localhost:6592/xmltv.xml
 
 ## Tests

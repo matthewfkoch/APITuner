@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v={{VERSION}}" />
 </head>
 <body>
   <div class="app-shell">
@@ -87,7 +87,7 @@
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
         </div>
-        <div class="sidebar-version" style="margin-top:4px">Add <code>?provider=</code> to filter the playlist.</div>
+        <div class="sidebar-version" style="margin-top:4px">Use Copy M3U on Channels, or add <code>?provider=</code> to this URL.</div>
         <div class="sidebar-links">
           <a href="/docs" target="_blank" rel="noopener">API docs</a>
           <a class="agent-apk-link" href="{{AGENT_APK_RELEASES_URL}}" target="_blank" rel="noopener">Agent APK</a>
@@ -141,6 +141,13 @@
               <button id="sync-fdl-btn" class="btn btn-secondary" title="Refresh FruitDeepLinks lanes from Options">Sync FruitDeepLinks</button>
               <button id="import-btn" class="btn btn-secondary">Import</button>
               <button id="export-btn" class="btn btn-secondary" title="Download channel list">Export</button>
+              <div id="copy-m3u-menu-wrap" class="menu-wrap hidden">
+                <button type="button" id="copy-m3u-menu-btn" class="btn btn-secondary" title="Copy playlist URL for all channels or one provider" aria-haspopup="true" aria-expanded="false" aria-controls="copy-m3u-menu">
+                  Copy M3U
+                  <svg class="menu-caret" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div id="copy-m3u-menu" class="menu hidden" role="menu"></div>
+              </div>
               <button id="add-channel-btn" class="btn btn-primary">Add channel</button>
             </div>
           </header>
@@ -152,7 +159,6 @@
             </div>
             <span id="channel-count" class="toolbar-meta"></span>
           </div>
-          <div id="channel-providers" class="provider-filters hidden"></div>
 
           <div class="table-shell">
             <table class="table" id="channel-table">

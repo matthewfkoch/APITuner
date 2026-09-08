@@ -223,32 +223,88 @@ function formatSkippedSummary(skipped, limit = 3) {
   return ` (${skipped.length} skipped: ${bits.join(", ")}${more})`;
 }
 
-function renderProviderFilters(channels) {
-  const box = document.getElementById("channel-providers");
-  if (!box) return;
-  const providers = [...new Set(channels.map((c) => c.provider_name).filter(Boolean))].sort(
-    (a, b) => a.localeCompare(b)
-  );
-  if (providers.length < 2) {
-    box.classList.add("hidden");
-    box.innerHTML = "";
-    return;
-  }
-  box.classList.remove("hidden");
-  box.innerHTML = `<span class="toolbar-meta">Copy M3U by provider</span>`;
-  providers.forEach((provider) => {
-    const btn = el(`<button type="button" class="btn btn-sm btn-secondary">${escapeHtml(provider)}</button>`);
-    btn.addEventListener("click", () => {
-      const url = m3uUrlForProvider(provider);
+function copyPlaylistUrl(url, okMessage) {
+  closeCopyM3uMenu();
+  copyToClipboard(url)
+    .then(() => toast(okMessage))
+    .catch(() => {
       const input = document.getElementById("m3u-url");
       if (input) input.value = url;
-      copyToClipboard(url)
-        .then(() => toast(`Copied M3U for ${provider}`))
-        .catch(() => toast(`M3U URL updated for ${provider} — copy from sidebar`, false));
+      toast("M3U URL updated — copy from sidebar", false);
     });
-    box.appendChild(btn);
+}
+
+function closeCopyM3uMenu() {
+  const menu = document.getElementById("copy-m3u-menu");
+  const btn = document.getElementById("copy-m3u-menu-btn");
+  if (menu) menu.classList.add("hidden");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+function positionCopyM3uMenu() {
+  const btn = document.getElementById("copy-m3u-menu-btn");
+  const menu = document.getElementById("copy-m3u-menu");
+  if (!btn || !menu || menu.classList.contains("hidden")) return;
+  const r = btn.getBoundingClientRect();
+  menu.style.top = `${Math.round(r.bottom + 6)}px`;
+  menu.style.left = "auto";
+  menu.style.right = `${Math.max(8, Math.round(window.innerWidth - r.right))}px`;
+}
+
+function renderCopyM3uMenu(channels) {
+  const wrap = document.getElementById("copy-m3u-menu-wrap");
+  const menu = document.getElementById("copy-m3u-menu");
+  if (!wrap || !menu) return;
+  const providers = [...new Set(
+    channels.map((c) => String(c.provider_name || "").trim()).filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  if (providers.length < 2) {
+    wrap.classList.add("hidden");
+    menu.innerHTML = "";
+    closeCopyM3uMenu();
+    return;
+  }
+  wrap.classList.remove("hidden");
+  const items = [{ label: "All channels", provider: null }].concat(
+    providers.map((provider) => ({ label: provider, provider }))
+  );
+  menu.innerHTML = "";
+  items.forEach(({ label, provider }) => {
+    const item = el(
+      `<button type="button" class="menu-item" role="menuitem">${escapeHtml(label)}</button>`
+    );
+    item.addEventListener("click", () => {
+      copyPlaylistUrl(
+        m3uUrlForProvider(provider),
+        provider ? `Copied M3U for ${provider}` : "M3U URL copied"
+      );
+    });
+    menu.appendChild(item);
   });
 }
+
+document.getElementById("copy-m3u-menu-btn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById("copy-m3u-menu");
+  const btn = document.getElementById("copy-m3u-menu-btn");
+  if (!menu || !btn) return;
+  const willOpen = menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !willOpen);
+  btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  if (willOpen) positionCopyM3uMenu();
+});
+document.addEventListener("click", (e) => {
+  const wrap = document.getElementById("copy-m3u-menu-wrap");
+  const menu = document.getElementById("copy-m3u-menu");
+  if (!wrap || wrap.classList.contains("hidden")) return;
+  if (wrap.contains(e.target) || (menu && menu.contains(e.target))) return;
+  closeCopyM3uMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeCopyM3uMenu();
+});
+window.addEventListener("resize", positionCopyM3uMenu);
+document.addEventListener("scroll", positionCopyM3uMenu, true);
 
 // ============================ TUNERS ============================
 let cachedChannels = [];
@@ -1192,7 +1248,7 @@ async function loadChannels() {
     return;
   }
   cachedChannels.sort((a, b) => compareChannelNumbers(a.number, b.number));
-  renderProviderFilters(cachedChannels);
+  renderCopyM3uMenu(cachedChannels);
   renderChannels(cachedChannels);
   // Background package check (Agent app lists) — don't block the table.
   refreshPackageCoverage(true).then(() => renderChannels(cachedChannels));
@@ -1546,6 +1602,8 @@ document.getElementById("import-config-btn")?.addEventListener("click", () => {
 const OPTION_FIELDS = [
   ["tune_timeout_seconds", "Tune timeout (s)", "number", null, "How long to wait for a channel to become ready"],
   ["request_timeout", "Request timeout (s)", "number", null, "HTTP timeout for Agent API calls"],
+  ["dynamic_url_timeout", "Lane URL timeout (s)", "number", null, "Per try for /whatson and FruitDeepLinks. Hung connects stop at 5s; a hung read can still be timeout × attempts (15 × 3 = 45s). Stay near Channels' ~30s window. Applies on next tune."],
+  ["dynamic_url_attempts", "Lane URL attempts", "number", null, "Tries on timeout or connection error (1–10, default 3). Hung reads add another full timeout each try."],
   ["release_grace_seconds", "Release grace (s)", "number", null, "Hold the tuner briefly after the stream disconnects"],
   ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number", null, "Reclaim tuners that stop making progress"],
   ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
@@ -1618,7 +1676,8 @@ document.getElementById("save-options").addEventListener("click", async () => {
     if (type === "bool") payload[key] = input.checked;
     else if (type === "number") {
       const raw = String(input.value ?? "").trim();
-      payload[key] = raw === "" ? null : Number(raw);
+      const n = Number(raw);
+      payload[key] = Number.isFinite(n) ? n : null;
     } else payload[key] = input.value;
   }
   try {

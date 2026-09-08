@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from .channels import sort_channels
+from .deeplink_catalog import parse_whatson_url
 from .models import Channel
+
+SOURCE_YTTV_SPORTS = "yttv-sports"
 
 
 def filter_channels_by_provider(
@@ -20,6 +23,18 @@ def filter_channels_by_provider(
     ]
 
 
+def m3u_tvg_id(channel: Channel) -> str:
+    """XMLTV join key for Channels DVR (tvg-id). Not Gracenote."""
+    explicit = (channel.tvg_id or "").strip()
+    if explicit:
+        return explicit
+    lane = parse_whatson_url(channel.url or "")
+    source = (channel.source or "").strip()
+    if lane is not None and source == SOURCE_YTTV_SPORTS:
+        return f"{SOURCE_YTTV_SPORTS}-{lane}"
+    return ""
+
+
 def build_m3u(channels: list[Channel], base_url: str) -> str:
     """Build a Channels-DVR-compatible M3U pointing back at APITuner."""
     base = base_url.rstrip("/")
@@ -30,6 +45,9 @@ def build_m3u(channels: list[Channel], base_url: str) -> str:
             f'channel-number="{ch.number}"',
             f'tvg-chno="{ch.number}"',
         ]
+        tvg_id = m3u_tvg_id(ch)
+        if tvg_id:
+            attrs.append(f'tvg-id="{_escape(tvg_id)}"')
         if ch.tvc_guide_stationid:
             # Channels DVR reads Gracenote IDs from tvc-guide-stationid (not tvg-id).
             attrs.append(f'tvc-guide-stationid="{ch.tvc_guide_stationid}"')

@@ -106,8 +106,10 @@ class Channel(BaseModel):
     key_macro: Optional[list[str]] = None
     # More aggressive stop/relaunch behavior for finicky apps.
     compatibility_mode: bool = False
-    # Gracenote / TVG station id, included in the generated M3U when present.
+    # Gracenote station id, included in the generated M3U when present.
     tvc_guide_stationid: Optional[str] = None
+    # XMLTV channel id for Channels DVR Custom Channels (M3U tvg-id). Not Gracenote.
+    tvg_id: Optional[str] = None
     # ADBTuner / babsonnexus App Play configuration UUID (D-pad navigation scripts).
     configuration_uuid: Optional[str] = None
     # Integrator origin (e.g. fruitdeeplinks). Sync replaces only matching rows.

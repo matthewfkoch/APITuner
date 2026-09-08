@@ -602,7 +602,12 @@ async def update_channel(channel_id: str, channel: Channel, request: Request) ->
     if idx is None:
         raise HTTPException(status_code=404, detail="Channel not found")
     previous = store.config.channels[idx]
-    updated = channel.model_copy(update={"id": channel_id})
+    updates: dict = {"id": channel_id}
+    # Dashboard (and other clients) often omit `source`; clearing it breaks
+    # FruitDeepLinks sync grouping and YTTV Sports tvg-id inference.
+    if not (channel.source or "").strip() and previous.source:
+        updates["source"] = previous.source
+    updated = channel.model_copy(update=updates)
     store.config.channels[idx] = updated
     try:
         validate_unique_ids(store.config.channels)

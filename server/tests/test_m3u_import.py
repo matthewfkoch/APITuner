@@ -51,6 +51,7 @@ http://192.0.2.40:6655/lane/1/stream.m3u8
     channels, skipped = channels_from_m3u(text, profile="google_tv", start_number=1)
     assert skipped == []
     assert channels[0]["number"] == "9000"
+    assert not channels[0].get("tvg_id")
     assert "/whatson/1" in channels[0]["url"]
     assert "stream.m3u8" not in channels[0]["url"]
     assert channels[0]["package_name"]

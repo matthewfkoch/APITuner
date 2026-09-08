@@ -164,7 +164,7 @@ Add channels manually or **Import** an ADBTuner channel-list JSON (the schema is
 - `action` (default `android.intent.action.VIEW`)
 - `component` — explicit activity (used by the Agent backend; Android 12+)
 - `key_macro` — keys sent after launch to dismiss prompts (comma or semicolon; needs D-pad via primary remote/adb **or** hybrid `keys_control`)
-- `compatibility_mode`, `tvc_guide_stationid`
+- `compatibility_mode`, `tvc_guide_stationid` (Gracenote), `tvg_id` (Channels DVR XMLTV / M3U `tvg-id`)
 
 Dynamic / lane URLs (FruitDeepLinks, OliveTin, ADBTuner-style resolvers) are fetched at tune time when the URL looks like a resolver (`/lanes/`, `/whatson/`, `dynamic_url_json_key=…`, or `format=json|text` on a deeplink API). The stored URL stays the resolver; only the resolved deeplink is launched.
 

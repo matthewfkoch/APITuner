@@ -182,6 +182,9 @@ def channels_from_m3u(
                 )
                 return
         launch_url = url if "/whatson/" in url else normalize_resolver_url(url)
+        # Do not copy M3U tvg-id (e.g. FDL lane.1). APITuner XMLTV remaps those
+        # lanes onto channel ids; emitting the foreign id on our playlist can
+        # steal Channels DVR matching. JSON import still stores tvg_id.
         channels.append(
             {
                 "number": number,

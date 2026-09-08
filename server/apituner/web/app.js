@@ -51,29 +51,29 @@ function compareChannelNumbers(a, b) {
 // ---- Capability definitions (label + tooltip; optional live status from /api/info) ----
 const CAP_DEFS = {
   http_agent: [
-    { label: "Launch channels", hint: "Opens the streaming app and deep link when a station is tuned.", always: true },
-    { label: "Foreground app", hint: "Detects which app is on screen after a tune. Requires Usage Access on the device.", cap: "current_app" },
-    { label: "Playback check", hint: "Waits for a playing MediaSession before the HDMI stream is ready. Requires Notification Access.", cap: "playback_state" },
-    { label: "Send keys", hint: "Sends BACK, HOME, and RECENTS through the Agent. Requires Accessibility on the device. Not full D-pad (App Play needs androidtv_remote, firetv_rest, or adb).", cap: "keys" },
-    { label: "App list", hint: "Lists installed apps on the device — used when picking a package while editing channels.", cap: "app_list" },
-    { label: "Install APKs", hint: "Can sideload APKs to the device through the Agent (advanced).", cap: "install" },
+    { label: "Launch channels", hint: "Opens the streaming app when a station is tuned.", always: true },
+    { label: "Foreground app", hint: "Sees which app is on screen. Needs Usage Access.", cap: "current_app" },
+    { label: "Playback check", hint: "Waits for playback before the HDMI stream. Needs Notification Access.", cap: "playback_state" },
+    { label: "Send keys", hint: "Back, Home, and Recents. Needs Accessibility. Not full D-pad.", cap: "keys" },
+    { label: "App list", hint: "Lists installed apps for the channel editor.", cap: "app_list" },
+    { label: "Install APKs", hint: "Can sideload APKs.", cap: "install" },
   ],
   androidtv_remote: [
-    { label: "Send keys", hint: "Full remote keys including D-pad — required for babsonnexus App Play configs.", cap: "keys" },
-    { label: "D-pad / App Play", hint: "Can run ADBTuner App Play navigation scripts without ADB.", always: true },
-    { label: "Foreground app", hint: "Reads which app is in the foreground after a tune.", cap: "current_app" },
-    { label: "Playback check", hint: "Best-effort playback detection. May be limited compared to the Agent APK.", cap: "playback_state" },
+    { label: "Send keys", hint: "Full remote including D-pad.", cap: "keys" },
+    { label: "D-pad / App Play", hint: "Runs App Play navigation without ADB.", always: true },
+    { label: "Foreground app", hint: "Sees which app is in the foreground.", cap: "current_app" },
+    { label: "Playback check", hint: "Best-effort playback detection.", cap: "playback_state" },
   ],
   firetv_rest: [
-    { label: "Send keys", hint: "D-pad and Home/Back via the Fire TV Remote HTTP API (no ADB).", cap: "keys" },
-    { label: "D-pad / App Play", hint: "Can run ADBTuner App Play navigation scripts on Fire Stick / Fire TV without ADB.", always: true },
-    { label: "Launch apps", hint: "Opens apps by package name through the Fire TV Remote protocol.", always: true },
+    { label: "Send keys", hint: "D-pad, Home, and Back. No ADB.", cap: "keys" },
+    { label: "D-pad / App Play", hint: "App Play on Fire Stick / Fire TV.", always: true },
+    { label: "Launch apps", hint: "Opens apps by package name.", always: true },
   ],
   adb: [
-    { label: "Send keys", hint: "Full keyevents via network ADB (including D-pad).", cap: "keys" },
-    { label: "D-pad / App Play", hint: "Runs babsonnexus App Play scripts over network ADB — Fire OS 7 fallback when firetv_rest is unavailable.", always: true },
-    { label: "Force-stop", hint: "Real am force-stop (closer to ADBTuner than HOME-only backends).", always: true },
-    { label: "App list", hint: "Lists installed packages via pm list packages.", cap: "app_list" },
+    { label: "Send keys", hint: "Full keys including D-pad over network ADB.", cap: "keys" },
+    { label: "D-pad / App Play", hint: "App Play fallback on Fire OS 7.", always: true },
+    { label: "Force-stop", hint: "Force-stops the app (stronger than Home).", always: true },
+    { label: "App list", hint: "Lists installed packages.", cap: "app_list" },
   ],
 };
 
@@ -176,7 +176,7 @@ function initHdhr(status) {
       hdhr.discovery_running ? "discovery on" : "manual IP only",
       hdhr.epg_source
         ? "XMLTV ready"
-        : "set Channels DVR or FruitDeepLinks URL for EPG",
+        : "set Channels DVR or FruitDeepLinks URL for the guide",
     ].filter(Boolean);
     meta.textContent = parts.join(" · ");
   }
@@ -235,7 +235,7 @@ function renderProviderFilters(channels) {
     return;
   }
   box.classList.remove("hidden");
-  box.innerHTML = `<span class="toolbar-meta">M3U by provider (click to copy):</span>`;
+  box.innerHTML = `<span class="toolbar-meta">Copy M3U by provider</span>`;
   providers.forEach((provider) => {
     const btn = el(`<button type="button" class="btn btn-sm btn-secondary">${escapeHtml(provider)}</button>`);
     btn.addEventListener("click", () => {
@@ -325,11 +325,9 @@ function renderKeysControlWarning(tuners, needsDpad) {
   banner.innerHTML = `
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
     <div>
-      <strong>Keys / D-pad backend missing</strong> on ${escapeHtml(names)}.
-      Max profile prompts, App Play (ESPN, etc.), and DPAD key macros need
-      <code>androidtv_remote</code> (Google TV / onn), <code>firetv_rest</code>, or <code>adb</code> (Fire).
-      Edit each Agent tuner → set <b>Keys / D-pad backend</b> → <b>Pair</b>.
-      Without it, those tunes fail instead of opening a stuck profile or home screen.
+      <strong>Keys / D-pad missing</strong> on ${escapeHtml(names)}.
+      Edit each Agent tuner, set <b>Keys / D-pad</b> (Google TV Remote, Fire REST, or ADB), then <b>Pair</b>.
+      Needed for Max, App Play, and D-pad macros.
     </div>`;
 }
 
@@ -410,22 +408,22 @@ async function loadTuners() {
           <span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "Enabled" : "Disabled"}</span>
           <span class="badge muted" data-health title="Checking whether the device is reachable…">Checking…</span>
           ${isAgent ? `<span class="badge muted" data-agent-version title="Installed Agent APK version">Agent …</span>` : ""}
-          ${needsKeysWarn ? `<span class="badge warn" title="Edit this tuner and set Keys / D-pad backend, then Pair">No D-pad keys</span>` : ""}
+          ${needsKeysWarn ? `<span class="badge warn" title="Set Keys / D-pad, then Pair">No D-pad keys</span>` : ""}
         </div>
       </div>
-      ${needsKeysWarn ? `<div class="card-callout-warn">Max / App Play / DPAD macros need a Keys / D-pad backend on this Agent tuner. Edit → set <b>androidtv_remote</b> (or Fire <b>firetv_rest</b> / <b>adb</b>) → Pair.</div>` : ""}
+      ${needsKeysWarn ? `<div class="card-callout-warn">Set Keys / D-pad on this Agent tuner, then Pair — needed for Max, App Play, and D-pad macros.</div>` : ""}
       <div class="card-meta">
         <div class="card-row"><span class="label">Encoder</span><span class="value mono">${escapeHtml(t.stream_endpoint)}</span></div>
       </div>
       <div class="cap-section">
-        <div class="cap-label">What this backend can do</div>
+        <div class="cap-label">Capabilities</div>
         <div class="badges" data-badges></div>
       </div>
       <div class="card-actions">
-        <button class="btn btn-sm btn-primary" data-act="preview" title="Open encoder stream preview with remote controls">Preview</button>
-        <button class="btn btn-sm btn-secondary" data-act="health" title="Ping the device to verify the Agent APK or TV remote is reachable on the network">Recheck connection</button>
-        ${showGrantPerms ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="Fire TV one-time setup: grant overlay/usage/notification via network ADB. Day-to-day tuning stays on the Agent HTTP API when using http_agent.">Grant permissions (ADB)</button>` : ""}
-        ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Download the latest Agent APK and open the Install dialog on the TV">Update Agent</button>` : ""}
+        <button class="btn btn-sm btn-primary" data-act="preview" title="Preview the encoder stream">Preview</button>
+        <button class="btn btn-sm btn-secondary" data-act="health" title="Check whether the device is reachable">Recheck connection</button>
+        ${showGrantPerms ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="One-time Fire TV permission grant over ADB">Grant permissions (ADB)</button>` : ""}
+        ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Install the latest Agent APK on the TV">Update Agent</button>` : ""}
         ${needsPair ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
         <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
         <button class="btn btn-sm btn-danger" data-act="delete">Delete</button>
@@ -503,23 +501,17 @@ async function loadTuners() {
     if (grantBtn) {
       grantBtn.addEventListener("click", async () => {
         const proceed = window.confirm(
-          "One-time Fire TV / Fire Stick setup via network ADB.\n\n" +
-            "Requires ADB debugging on the device (and an accepted RSA prompt). " +
-            "Appends Agent notification/accessibility bindings without removing other apps. " +
-            "Day-to-day tuning stays on the Agent HTTP API (no ADB).\n\nContinue?",
+          "One-time Fire TV setup over network ADB. Enable ADB debugging and accept the RSA prompt on the TV.\n\nContinue?",
         );
         if (!proceed) return;
         grantBtn.disabled = true;
         grantBtn.textContent = "Granting…";
         try {
           const r = await api.post(`/api/tuners/${t.id}/grant-permissions`, {});
-          const tail = Array.isArray(r.messages) && r.messages.length
-            ? " — " + r.messages.slice(-3).join("; ")
-            : "";
           if (r.success) {
-            toast((r.message || "Permissions granted") + tail, false, 6000);
+            toast(r.message || "Permissions granted", false, 6000);
           } else {
-            toast((r.message || "Partial grant — check device ADB") + tail, true, 10000);
+            toast(r.message || "Partial grant — check ADB on the device", true, 10000);
           }
           await runHealthCheck();
         } catch (err) {
@@ -603,7 +595,7 @@ function openTunerPreview(tuner) {
         <button type="button" class="preview-key preview-key-wide" data-key="SLEEP" title="Sleep / standby">Sleep</button>
         <button type="button" class="preview-key preview-key-wide" data-key="REBOOT" title="Reboot (ADB only)">Reboot</button>
       </div>
-      <p class="preview-remote-hint muted">Arrows / Enter need <b>Keys / D-pad</b> set on the tuner (androidtv_remote, firetv_rest, or adb) and Pair. Agent alone: Back / Home only.</p>
+      <p class="preview-remote-hint muted">Arrows and Enter need Keys / D-pad on this tuner. Agent alone can send Back and Home.</p>
     </div>`;
 
   const img = node.querySelector(".preview-stream");
@@ -704,7 +696,7 @@ function renderCapabilityBadges(container, backendType, keysType) {
     const keyDefs = CAP_DEFS[keysType] || [];
     keyDefs.forEach((def) => {
       if (def.label.includes("D-pad") || def.label === "Force-stop") {
-        defs.push({ ...def, label: def.label + " (keys)", hint: def.hint + " Via keys_control." });
+        defs.push({ ...def, label: def.label + " (keys)", hint: def.hint + " Uses Keys / D-pad." });
       }
     });
   }
@@ -745,14 +737,14 @@ async function refreshPairStatus(tuner, badge) {
     const r = await api.get(`/api/tuners/${tuner.id}/pair/status`);
     if (!r.requires_pairing) {
       badge.className = "badge";
-      badge.textContent = "n/a";
+      badge.textContent = "—";
       return;
     }
     badge.className = `badge ${r.paired ? "on" : "off"}`;
     badge.textContent = r.paired ? "Paired" : "Not paired";
   } catch (e) {
     badge.className = "badge off";
-    badge.textContent = "pair unknown";
+    badge.textContent = "Unknown";
   }
 }
 
@@ -770,33 +762,33 @@ function tunerForm(existing) {
     <div class="field full"><label>Name</label><input name="name" value="${escapeAttr(t.name)}" required /></div>
     <div class="field"><label>Backend</label>
       <select name="type">
-        <option value="http_agent">http_agent (Agent APK) — recommended for deep links</option>
-        <option value="androidtv_remote">androidtv_remote (Google TV Remote) — App Play</option>
-        <option value="firetv_rest">firetv_rest (Fire TV Remote HTTP) — App Play on Fire</option>
-        <option value="adb">adb (network ADB) — Fire App Play fallback</option>
+        <option value="http_agent">Agent APK — recommended</option>
+        <option value="androidtv_remote">Google TV Remote — App Play</option>
+        <option value="firetv_rest">Fire TV Remote — App Play</option>
+        <option value="adb">Network ADB — Fire fallback</option>
       </select>
     </div>
     <div class="field"><label>Host / IP</label><input name="host" value="${escapeAttr(t.control.host)}" required /></div>
-    <div class="field"><label>Port <span class="hint">(updates with backend; blank = default)</span></label><input name="port" type="number" value="${t.control.port ?? ""}" /></div>
-    <div class="field" data-remote><label>Pair port <span class="hint">(Google TV remote, default 6467)</span></label><input name="pair_port" type="number" value="${t.control.pair_port ?? ""}" /></div>
-    <div class="field" data-token><label>Token <span class="hint" data-token-hint>(agent auth or Fire TV client token)</span></label><input name="token" value="${escapeAttr(t.control.token || "")}" /></div>
+    <div class="field"><label>Port <span class="hint">(blank = default for this backend)</span></label><input name="port" type="number" value="${t.control.port ?? ""}" /></div>
+    <div class="field" data-remote><label>Pair port <span class="hint">(Google TV Remote, default 6467)</span></label><input name="pair_port" type="number" value="${t.control.pair_port ?? ""}" /></div>
+    <div class="field" data-token><label>Token <span class="hint" data-token-hint>(optional)</span></label><input name="token" value="${escapeAttr(t.control.token || "")}" /></div>
     <div class="field full" data-keys-section>
-      <label>Keys / D-pad backend <span class="hint">(optional hybrid — keep Agent for YTTV launches; add Remote or ADB for Max profile / App Play)</span></label>
+      <label>Keys / D-pad <span class="hint">(optional — Max profile / App Play)</span></label>
       <select name="keys_type">
         <option value="">None</option>
-        <option value="androidtv_remote">androidtv_remote (Google TV)</option>
-        <option value="firetv_rest">firetv_rest (Fire)</option>
-        <option value="adb">adb (network ADB)</option>
+        <option value="androidtv_remote">Google TV Remote</option>
+        <option value="firetv_rest">Fire TV Remote</option>
+        <option value="adb">Network ADB</option>
       </select>
       <p class="field-warn ${catalogNeedsDpadKeys && !(kc.type) ? "" : "hidden"}" data-keys-warn>
-        Your channel list includes Max / App Play / DPAD macros. Set a Keys / D-pad backend here, save, then use <b>Pair</b> on the tuner card — otherwise those tunes will fail.
+        This channel list needs Keys / D-pad. Set it here, save, then Pair on the tuner card.
       </p>
     </div>
-    <div class="field" data-keys-host><label>Keys host <span class="hint">(blank = same as primary)</span></label><input name="keys_host" value="${escapeAttr(kc.host || "")}" /></div>
+    <div class="field" data-keys-host><label>Keys host <span class="hint">(blank = same as device)</span></label><input name="keys_host" value="${escapeAttr(kc.host || "")}" /></div>
     <div class="field" data-keys-port><label>Keys port</label><input name="keys_port" type="number" value="${kc.port ?? ""}" placeholder="6466 / 8080 / 5555" /></div>
     <div class="field" data-keys-pair><label>Keys pair port</label><input name="keys_pair_port" type="number" value="${kc.pair_port ?? ""}" placeholder="6467" /></div>
-    <div class="field" data-keys-token><label>Keys token <span class="hint">(Fire REST)</span></label><input name="keys_token" value="${escapeAttr(kc.token || "")}" /></div>
-    <div class="field full"><label>Encoder stream URL <span class="hint">(HDMI encoder MPEG-TS)</span></label><input name="stream_endpoint" value="${escapeAttr(t.stream_endpoint)}" placeholder="http://192.0.2.20:8090/stream0" required /></div>
+    <div class="field" data-keys-token><label>Keys token <span class="hint">(Fire Remote)</span></label><input name="keys_token" value="${escapeAttr(kc.token || "")}" /></div>
+    <div class="field full"><label>Encoder stream URL <span class="hint">(HDMI encoder)</span></label><input name="stream_endpoint" value="${escapeAttr(t.stream_endpoint)}" placeholder="http://192.0.2.20:8090/stream0" required /></div>
     <div class="field checkbox full"><input type="checkbox" name="enabled" ${t.enabled ? "checked" : ""} /><label>Enabled</label></div>
     <div class="form-actions full"><button type="button" class="btn btn-ghost" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>`;
   const DEFAULT_PORTS = {
@@ -862,8 +854,8 @@ function tunerForm(existing) {
     const hint = form.querySelector("[data-token-hint]");
     if (hint) {
       hint.textContent = type === "firetv_rest"
-        ? "(filled automatically after Pair; optional)"
-        : "(agent, optional)";
+        ? "(filled after Pair; optional)"
+        : "(optional)";
     }
     prevType = applyDefaultPort(typeSel, portInput, DEFAULT_PORTS, prevType);
     applyPairPortDefault(pairPortInput, type === "androidtv_remote");
@@ -905,8 +897,8 @@ function tunerForm(existing) {
   const hint = form.querySelector("[data-token-hint]");
   if (hint) {
     hint.textContent = type === "firetv_rest"
-      ? "(filled automatically after Pair; optional)"
-      : "(agent, optional)";
+      ? "(filled after Pair; optional)"
+      : "(optional)";
   }
   portInput.placeholder = String(DEFAULT_PORTS[type] || "");
   if (type === "androidtv_remote" && !(pairPortInput.value || "").trim()) {
@@ -988,12 +980,12 @@ async function pairFlow(t) {
   const isFire = pairType === "firetv_rest";
   const hasStream = !!(t.stream_endpoint && String(t.stream_endpoint).trim());
   const node = el(`<div>
-    <p class="muted">Pair <b>${escapeHtml(t.name)}</b>. A PIN will appear on the TV screen.${isFire ? " Uses the Fire TV Remote HTTP API (no ADB)." : ""}${t.keys_control ? " (keys / D-pad backend)" : ""}</p>
-    <p class="muted">Auto-pair reads the PIN from the HDMI encoder feed via OCR.${hasStream ? "" : " <b>Add a stream endpoint first</b> to enable Auto-pair."}</p>
+    <p class="muted">Pair <b>${escapeHtml(t.name)}</b>. A PIN will appear on the TV.${isFire ? " Uses the Fire TV Remote (no ADB)." : ""}</p>
+    <p class="muted">Auto-pair reads the PIN from the encoder.${hasStream ? "" : " <b>Add an encoder stream first</b> to enable Auto-pair."}</p>
     <div class="field full"><label>PIN from TV</label><input id="pair-pin" placeholder="${isFire ? "e.g. 1234" : "e.g. A1B2C3"}" /></div>
     <div class="form-actions">
       <button class="btn btn-ghost" data-cancel>Cancel</button>
-      <button class="btn btn-secondary" data-auto ${hasStream ? "" : "disabled"} title="${hasStream ? "Start pairing and OCR the PIN from the encoder" : "Requires stream endpoint"}">Auto-pair</button>
+      <button class="btn btn-secondary" data-auto ${hasStream ? "" : "disabled"} title="${hasStream ? "Read the PIN from the encoder" : "Requires an encoder stream"}">Auto-pair</button>
       <button class="btn btn-primary" data-finish>Complete pairing</button>
     </div>
     <p id="pair-msg" class="muted"></p>
@@ -1133,7 +1125,7 @@ function renderChannels(channels) {
   if (countEl) countEl.textContent = countText;
   tbody.innerHTML = "";
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import an ADBTuner export or add one manually."}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import a list or add one."}</div></td></tr>`;
     return;
   }
   for (const c of filtered) {
@@ -1174,15 +1166,15 @@ async function refreshPackageCoverage(quiet) {
     if (!quiet) {
       const s = packageCoverage.summary || {};
       if (!s.listable_tuners) {
-        toast("No Agent/ADB tuners available to list apps", true);
+        toast("No tuners available to list apps", true);
       } else if (s.channels_missing || s.channels_partial) {
         toast(
-          `Packages: ${s.channels_missing || 0} missing on all listable tuners, ${s.channels_partial || 0} partial`,
+          `Packages: ${s.channels_missing || 0} missing, ${s.channels_partial || 0} on some tuners`,
           true,
           8000
         );
       } else {
-        toast(`All channel packages found on reachable Agent/ADB tuners (${s.reachable_tuners || 0})`);
+        toast("All channel packages found");
       }
     }
   } catch (e) {
@@ -1223,13 +1215,13 @@ function updatePackageFieldWarnings(form) {
   const alternate = (form.querySelector('[name="alternate_package_name"]').value || "").trim();
   if (!packageCoverage || !(packageCoverage.tuners || []).length) {
     status.className = "pkg-status muted";
-    status.textContent = "Select a tuner below to browse installed apps, or click Check packages on the Channels page.";
+    status.textContent = "Select a tuner below to browse installed apps.";
     return;
   }
   const tuners = packageCoverage.tuners.filter((t) => (t.packages || []).length);
   if (!tuners.length) {
     status.className = "pkg-status warn";
-    status.textContent = "Could not read installed apps (is the Agent reachable? Usage Access helps package lists).";
+    status.textContent = "Could not read installed apps. Is the Agent reachable?";
     return;
   }
   if (!primary) {
@@ -1252,7 +1244,7 @@ function updatePackageFieldWarnings(form) {
   }
   if (missing.length && !found.length) {
     status.className = "pkg-status warn";
-    status.innerHTML = `<b>Not installed</b> on ${escapeHtml(missing.join(", "))}. Pick an app from the list below, or set alternate_package_name (ESPN: gtv on Fire ↔ score_center on Google TV).`;
+    status.innerHTML = `<b>Not installed</b> on ${escapeHtml(missing.join(", "))}. Pick an app below, or set an alternate package.`;
   } else if (missing.length) {
     status.className = "pkg-status warn";
     status.textContent = `Installed on ${found.join(", ")}; missing on ${missing.join(", ")}.`;
@@ -1262,25 +1254,34 @@ function updatePackageFieldWarnings(form) {
   }
 }
 
+function inferredTvgId(channel) {
+  if ((channel.tvg_id || "").trim()) return "";
+  if ((channel.source || "").trim() !== "yttv-sports") return "";
+  const match = String(channel.url || "").match(/\/whatson\/(\d+)/i);
+  return match ? `yttv-sports-${match[1]}` : "";
+}
+
 function channelForm(existing) {
-  const c = existing || { id: "", number: "", name: "", provider_name: "", package_name: "", alternate_package_name: "", component: "", url: "", action: "android.intent.action.VIEW", extra_string: "", key_macro: [], compatibility_mode: false, tvc_guide_stationid: "", configuration_uuid: "" };
+  const c = existing || { id: "", number: "", name: "", provider_name: "", package_name: "", alternate_package_name: "", component: "", url: "", action: "android.intent.action.VIEW", extra_string: "", key_macro: [], compatibility_mode: false, tvc_guide_stationid: "", tvg_id: "", configuration_uuid: "" };
+  const tvgPlaceholder = inferredTvgId(c) || "yttv-sports-1";
   const form = el(`<form class="form-grid"></form>`);
   form.innerHTML = `
     <div class="field"><label>Channel number</label><input name="number" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" placeholder="e.g. 100 or 100.1" value="${c.number}" required /></div>
     <div class="field"><label>Name</label><input name="name" value="${escapeAttr(c.name)}" required /></div>
     <div class="field"><label>Provider</label><input name="provider_name" value="${escapeAttr(c.provider_name || "")}" /></div>
     <div class="field"><label>Gracenote station id</label><input name="tvc_guide_stationid" value="${escapeAttr(c.tvc_guide_stationid || "")}" /></div>
+    <div class="field"><label>XMLTV id <span class="hint">(leave blank to infer for YTTV Sports)</span></label><input name="tvg_id" value="${escapeAttr(c.tvg_id || "")}" placeholder="${escapeAttr(tvgPlaceholder)}" /></div>
     <div class="field"><label>Package name</label><input name="package_name" value="${escapeAttr(c.package_name)}" required autocomplete="off" /></div>
     <div class="field"><label>Alternate package</label><input name="alternate_package_name" value="${escapeAttr(c.alternate_package_name || "")}" autocomplete="off" /></div>
     <div class="field full"><div class="pkg-status muted" data-pkg-status></div></div>
-    <div class="field full"><label>Deep link URL / App Play index <span class="hint">(intent data, or loop index for App Play)</span></label><input name="url" value="${escapeAttr(c.url || "")}" placeholder="https://... or 0, 1, 2…" /></div>
-    <div class="field full"><label>Configuration UUID <span class="hint">(babsonnexus App Play; leave blank for deep links)</span></label><input name="configuration_uuid" value="${escapeAttr(c.configuration_uuid || "")}" placeholder="0AppPlay-1500-0000-0000-ESPN00000000" /></div>
+    <div class="field full"><label>Deep link URL <span class="hint">(or App Play loop index)</span></label><input name="url" value="${escapeAttr(c.url || "")}" placeholder="https://… or 0, 1, 2…" /></div>
+    <div class="field full"><label>Configuration UUID <span class="hint">(App Play; leave blank for deep links)</span></label><input name="configuration_uuid" value="${escapeAttr(c.configuration_uuid || "")}" placeholder="0AppPlay-1500-0000-0000-ESPN00000000" /></div>
     <div class="field"><label>Action</label><input name="action" value="${escapeAttr(c.action || "android.intent.action.VIEW")}" /></div>
-    <div class="field"><label>Component <span class="hint">(agent; Android 12+)</span></label><input name="component" value="${escapeAttr(c.component || "")}" /></div>
-    <div class="field full"><label>Intent extras <span class="hint">(agent; key:value,key:value)</span></label><input name="extra_string" value="${escapeAttr(c.extra_string || "")}" /></div>
-    <div class="field full"><label>Key macro <span class="hint">(after launch; comma or semicolon, e.g. DPAD_CENTER;DPAD_CENTER — needs keys_control / D-pad backend)</span></label><input name="key_macro" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
+    <div class="field"><label>Component <span class="hint">(Android 12+)</span></label><input name="component" value="${escapeAttr(c.component || "")}" /></div>
+    <div class="field full"><label>Intent extras <span class="hint">(key:value,key:value)</span></label><input name="extra_string" value="${escapeAttr(c.extra_string || "")}" /></div>
+    <div class="field full"><label>Key macro <span class="hint">(after launch; needs Keys / D-pad)</span></label><input name="key_macro" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
     <div class="field checkbox full"><input type="checkbox" name="compatibility_mode" ${c.compatibility_mode ? "checked" : ""} /><label>Compatibility mode (stop app before launch)</label></div>
-    <div class="field full"><label>Installed apps on a tuner <span class="hint">(search, then set as package or alternate)</span></label>
+    <div class="field full"><label>Installed apps <span class="hint">(search, then set as package or alternate)</span></label>
       <select id="app-picker-tuner"><option value="">Select a tuner…</option></select>
       <input id="app-picker-filter" class="app-picker-filter hidden" type="search" placeholder="Filter by name or package…" />
       <div id="app-picker" class="app-picker hidden"></div>
@@ -1365,7 +1366,9 @@ function channelForm(existing) {
       key_macro: km.length ? km : null,
       compatibility_mode: form.querySelector('[name="compatibility_mode"]').checked,
       tvc_guide_stationid: fd.get("tvc_guide_stationid") || null,
+      tvg_id: fd.get("tvg_id") || null,
       configuration_uuid: fd.get("configuration_uuid") || null,
+      source: existing ? existing.source || null : null,
     };
     updatePackageFieldWarnings(form);
     const status = form.querySelector("[data-pkg-status]");
@@ -1401,7 +1404,7 @@ document.getElementById("export-btn").addEventListener("click", async () => {
 });
 document.getElementById("import-btn").addEventListener("click", () => {
   const node = el(`<div>
-    <p class="muted">Paste an ADBTuner / APITuner JSON list, a FruitDeepLinks ADB M3U, or fetch a playlist URL. Lane URLs stay as resolvers; Android packages are filled from the deeplink catalog. Duplicate guide numbers are allowed (alternate feeds); each row gets a unique stream URL. Null JSON numbers are filled from <code>sort_order</code> when present. For DirecTV / OliveTin lineups, use <b>Replace all existing channels</b>.</p>
+    <p class="muted">Paste a JSON channel list, an M3U, or a playlist URL. For DirecTV lineups, replace all existing channels.</p>
     <div class="field"><label>Format</label>
       <select id="import-kind">
         <option value="json">JSON channel list</option>
@@ -1418,7 +1421,7 @@ document.getElementById("import-btn").addEventListener("click", () => {
         <option value="fire">Fire TV</option>
       </select>
     </div>
-    <div class="field"><label>Start number (when M3U has no tvg-chno)</label><input id="import-start" type="number" value="9000" /></div>
+    <div class="field"><label>Start number (if the M3U has none)</label><input id="import-start" type="number" value="9000" /></div>
     <div class="field checkbox"><input type="checkbox" id="import-replace" /><label>Replace all existing channels</label></div>
     <div class="form-actions"><button class="btn btn-ghost" data-cancel>Cancel</button><button class="btn btn-primary" data-import>Import</button></div>
   </div>`);
@@ -1485,7 +1488,7 @@ async function loadConfigurations() {
   const tbody = document.querySelector("#config-table tbody");
   if (!tbody) return;
   if (!cachedConfigs.length) {
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty">No configurations yet — import babsonnexus App Play JSON from <code>adbtuner_native/configurations</code>.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty">No configurations yet — import App Play JSON.</div></td></tr>`;
     return;
   }
   tbody.innerHTML = "";
@@ -1518,7 +1521,7 @@ document.getElementById("export-config-btn")?.addEventListener("click", async ()
 
 document.getElementById("import-config-btn")?.addEventListener("click", () => {
   const node = el(`<div>
-    <p class="muted">Paste one babsonnexus / ADBTuner configuration object, or an array of them (from <code>adbtuner_native/configurations/*.json</code>).</p>
+    <p class="muted">Paste an App Play configuration JSON object or array.</p>
     <div class="field full"><textarea id="import-config-json" rows="12" placeholder='{ "uuid": "0AppPlay-…", "tune_commands": [ … ] }'></textarea></div>
     <div class="field checkbox"><input type="checkbox" id="import-config-replace" /><label>Replace all existing configurations</label></div>
     <div class="form-actions"><button class="btn btn-ghost" data-cancel>Cancel</button><button class="btn btn-primary" data-import>Import</button></div>
@@ -1541,41 +1544,41 @@ document.getElementById("import-config-btn")?.addEventListener("click", () => {
 
 // ============================ OPTIONS ============================
 const OPTION_FIELDS = [
-  ["tune_timeout_seconds", "Tune timeout (s)", "number", null, "Max seconds to wait for a channel to become ready"],
+  ["tune_timeout_seconds", "Tune timeout (s)", "number", null, "How long to wait for a channel to become ready"],
   ["request_timeout", "Request timeout (s)", "number", null, "HTTP timeout for Agent API calls"],
-  ["release_grace_seconds", "Release grace (s)", "number", null, "Hold tuner lock briefly after stream disconnect"],
+  ["release_grace_seconds", "Release grace (s)", "number", null, "Hold the tuner briefly after the stream disconnects"],
   ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number", null, "Reclaim tuners that stop making progress"],
   ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
-  ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays MPEG-TS; redirect sends clients to the encoder"],
-  ["stream_during_tune", "Stream during App Play", "bool", null, "Start the HDMI encoder stream while App Play navigates (keeps Channels connected past its ~30s timeout; you’ll briefly see the on-screen automation)"],
+  ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays the encoder; redirect sends clients to it"],
+  ["stream_during_tune", "Stream during App Play", "bool", null, "Start the encoder while App Play runs so Channels does not time out"],
   ["app_play_prefer", "App Play stick preference", "select", [
     { value: "fire", label: "Fire Stick / ADB first" },
     { value: "google_tv", label: "Google TV / Chromecast first" },
     { value: "any", label: "No preference" },
-  ], "When several tuners can run App Play, prefer this D-pad path (Fire-tuned ESPN scripts usually need Fire Stick / ADB)"],
-  ["wait_for_playback", "Wait for playback signal", "bool", null, "When on, wait for a playing MediaSession before accepting a tune (falls back to foreground if playback never appears)"],
-  ["ready_settle_seconds", "Ready settle (s)", "number", null, "Extra wait after playback is detected before opening the HDMI stream"],
-  ["stop_on_release", "Stop app on release", "bool", null, "Send HOME when the stream ends"],
-  ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send HOME on release"],
-  ["retry_on_other_tuner", "Retry on another tuner", "bool", null, "Try another eligible tuner if a tune fails"],
-  ["hdhr_enabled", "HDHomeRun emulation", "bool", null, "Appear as an HDHomeRun tuner for Channels DVR (enables Tuner Sharing)"],
-  ["hdhr_friendly_name", "HDHomeRun name", "text", null, "Friendly name shown in Channels / Plex source list"],
-  ["hdhr_device_id", "HDHomeRun DeviceID", "text", null, "Stable 8-char hex ID (persisted; do not change lightly)"],
+  ], "When several tuners can run App Play, prefer this path"],
+  ["wait_for_playback", "Wait for playback signal", "bool", null, "Wait until playback is detected before accepting the tune"],
+  ["ready_settle_seconds", "Ready settle (s)", "number", null, "Extra wait after playback before opening the HDMI stream"],
+  ["stop_on_release", "Stop app on release", "bool", null, "Send Home when the stream ends"],
+  ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send Home on release"],
+  ["retry_on_other_tuner", "Retry on another tuner", "bool", null, "Try another tuner if a tune fails"],
+  ["hdhr_enabled", "HDHomeRun emulation", "bool", null, "Appear as an HDHomeRun tuner in Channels DVR"],
+  ["hdhr_friendly_name", "HDHomeRun name", "text", null, "Name shown in the Channels / Plex source list"],
+  ["hdhr_device_id", "HDHomeRun DeviceID", "text", null, "Stable 8-character hex ID — do not change lightly"],
   ["hdhr_port", "HDHomeRun port (optional)", "number", null, "Leave blank to use the main APITuner port"],
-  ["hdhr_ssdp_enabled", "SSDP discovery", "bool", null, "Advertise via SSDP/UPnP multicast (needs host networking in Docker)"],
-  ["hdhr_udp_discovery_enabled", "UDP 65001 discovery", "bool", null, "SiliconDust broadcast discovery (needs host networking in Docker)"],
-  ["channels_dvr_url", "Channels DVR URL", "text", null, "LAN base URL for guide import, e.g. http://192.0.2.30:8089"],
-  ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as schedule source (e.g. M3U-YouTubeTV)"],
-  ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 259200 = 3 days)"],
-  ["xmltv_cache_seconds", "XMLTV cache (s)", "number", null, "How long to reuse a built /xmltv.xml response"],
-  ["fruitdeeplinks_url", "FruitDeepLinks URL", "text", null, "LAN base URL, e.g. http://192.0.2.40:6655. Sync pulls ADB lanes; /xmltv.xml remaps FDL guide onto those channels"],
+  ["hdhr_ssdp_enabled", "SSDP discovery", "bool", null, "SSDP/UPnP multicast (needs host networking in Docker)"],
+  ["hdhr_udp_discovery_enabled", "UDP 65001 discovery", "bool", null, "SiliconDust discovery (needs host networking in Docker)"],
+  ["channels_dvr_url", "Channels DVR URL", "text", null, "LAN URL, e.g. http://192.0.2.30:8089"],
+  ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as the schedule source"],
+  ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 3 days)"],
+  ["xmltv_cache_seconds", "XMLTV cache (s)", "number", null, "How long to reuse a built XMLTV response"],
+  ["fruitdeeplinks_url", "FruitDeepLinks URL", "text", null, "LAN URL. Sync imports lanes; XMLTV remaps their guide"],
   ["fruitdeeplinks_profile", "FruitDeepLinks device profile", "select", [
     { value: "google_tv", label: "Google TV / Android TV" },
     { value: "fire", label: "Fire TV" },
-  ], "Default primary package on Sync/Import (ESPN score_center vs gtv). At tune time Fire vs Google is taken from the stick"],
-  ["fruitdeeplinks_start_number", "FruitDeepLinks start number", "number", null, "First channel number for synced lanes (default 9000). Occupied non-FDL numbers are skipped"],
-  ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /xmltv/adb; falls back to /xmltv/lanes)"],
-  ["fruitdeeplinks_sync_seconds", "FruitDeepLinks auto-sync (s)", "number", null, "0 = manual Sync only. Background refresh interval when a FruitDeepLinks URL is set"],
+  ], "Primary package on sync (ESPN differs on Fire vs Google TV)"],
+  ["fruitdeeplinks_start_number", "FruitDeepLinks start number", "number", null, "First channel number for synced lanes (default 9000)"],
+  ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /xmltv/adb)"],
+  ["fruitdeeplinks_sync_seconds", "FruitDeepLinks auto-sync (s)", "number", null, "0 = manual Sync only"],
 ];
 async function loadOptions() {
   const form = document.getElementById("options-form");
@@ -1654,7 +1657,7 @@ async function renderStatus() {
     ? ` · HDHR ${data.hdhr.tuner_count} tuner${data.hdhr.tuner_count === 1 ? "" : "s"}`
     : "";
   document.getElementById("status-meta").textContent =
-    `v${data.version} · ${data.options.stream_mode} stream mode${hdhrBits} · updates every 3s`;
+    `v${data.version} · ${data.options.stream_mode} stream mode${hdhrBits}`;
 
   document.getElementById("app-version").textContent = `v${data.version}`;
   initSidebarUrls(data);
@@ -1686,7 +1689,6 @@ async function renderStatus() {
       </div>
       <div class="card-meta">
         ${s.locked ? `<div class="card-row"><span class="label">Channel</span><span class="value"><strong>${s.channel_number ?? "?"}</strong> · ${escapeHtml(s.channel_name || "")}</span></div>` : ""}
-        ${s.tune_id ? `<div class="card-row"><span class="label">Tune ID</span><span class="value mono">${s.tune_id}</span></div>` : ""}
         ${s.last_tune_seconds != null ? `<div class="card-row"><span class="label">Last tune</span><span class="value">${s.last_tune_seconds.toFixed(1)}s</span></div>` : ""}
         ${s.locked && s.bytes_transferred ? `<div class="card-row"><span class="label">Streamed</span><span class="value">${fmtBytes(s.bytes_transferred)}</span></div>` : ""}
         ${s.locked && s.lock_seconds != null ? `<div class="card-row"><span class="label">Lock time</span><span class="value">${s.lock_seconds}s</span></div>` : ""}

@@ -33,6 +33,7 @@ _ADBTUNER_CHANNEL_FIELDS = (
     "key_macro",
     "compatibility_mode",
     "tvc_guide_stationid",
+    "tvg_id",
     "configuration_uuid",
     "source",
 )
@@ -59,6 +60,16 @@ def normalize_adbtuner_channel(item: dict[str, Any]) -> dict[str, Any]:
         out["tvc_guide_stationid"] = None
     else:
         out["tvc_guide_stationid"] = str(sid)
+
+    if not out.get("tvg_id"):
+        hyphen = out.get("tvg-id")
+        if hyphen:
+            out["tvg_id"] = hyphen
+    tid = out.get("tvg_id")
+    if tid is None or tid == "":
+        out["tvg_id"] = None
+    else:
+        out["tvg_id"] = str(tid).strip() or None
 
     if out.get("alternate_package_name") == "":
         out["alternate_package_name"] = None

@@ -46,7 +46,8 @@ Use FruitDeepLinks **Android / Fire ADB** playlists (`/m3u/adb` or `/api/adb/lan
 | `url` | yes | Resolver URL **or** a static deeplink. Resolvers are fetched at tune time; the stored URL is not replaced. |
 | `action` | no | Default `android.intent.action.VIEW`. |
 | `source` | no | `fruitdeeplinks` lets **Sync** replace only this group (YouTube TV / App Play rows stay). |
-| `component`, `key_macro`, `configuration_uuid`, `tvc_guide_stationid` | no | Same meaning as ADBTuner import. |
+| `component`, `key_macro`, `configuration_uuid`, `tvc_guide_stationid` | no | Same meaning as ADBTuner import. Gracenote only. |
+| `tvg_id` | no | XMLTV channel id written as M3U `tvg-id` for Channels DVR Custom Channels. Use this for virtual lanes (e.g. `yttv-sports-1`). Do not put it in `tvc_guide_stationid`. |
 
 `GET /api/export` returns the same ADBTuner-compatible shape (no `id`). Use `GET /api/export?native=1` to include `id` for APITuner backup/restore.
 

@@ -114,6 +114,7 @@ def test_import_normalizes_adbtuner_quirks(tmp_path):
                 "package_name": "com.google.android.youtube.tvunplugged",
                 "alternate_package_name": "",
                 "tvc_guide_stationid": 21220,
+                "tvg-id": "yttv-sports-3",
                 "sort_order": "3.0",
             }
         ],
@@ -123,6 +124,7 @@ def test_import_normalizes_adbtuner_quirks(tmp_path):
     ch = store.config.channels[0]
     assert ch.number == "3"
     assert ch.tvc_guide_stationid == "21220"
+    assert ch.tvg_id == "yttv-sports-3"
     assert ch.alternate_package_name is None
     assert len(ch.id) == 32
 

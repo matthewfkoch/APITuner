@@ -113,3 +113,21 @@ def test_update_channel_returns_saved_row(api_client: TestClient):
     assert body["id"] == channel_id
     assert body["number"] == "100.1"
     assert body["name"] == "Updated"
+
+
+def test_update_channel_preserves_source_when_omitted(api_client: TestClient):
+    channel_id = "a" * 32
+    store = api_client.app.state.store
+    store.config.channels[0].source = "yttv-sports"
+    store.save()
+
+    resp = api_client.put(
+        f"/api/channels/{channel_id}",
+        json={
+            "number": "1",
+            "name": "Keep Me",
+            "package_name": "com.example.app",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["source"] == "yttv-sports"

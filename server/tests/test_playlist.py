@@ -50,6 +50,52 @@ def test_build_m3u_escapes_quotes_in_name():
     assert "Channel 'HD'" in m3u or "tvg-name=\"Channel 'HD'\"" in m3u
 
 
+def test_build_m3u_emits_explicit_tvg_id():
+    channels = [
+        Channel(
+            id=ID_ABC,
+            number=9100,
+            name="YTTV Sports 1",
+            package_name="com.yttv",
+            tvg_id="yttv-sports-1",
+        )
+    ]
+    m3u = build_m3u(channels, "http://192.0.2.1:6592")
+    assert 'tvg-id="yttv-sports-1"' in m3u
+    assert f'channel-id="{ID_ABC}"' in m3u
+
+
+def test_build_m3u_infers_tvg_id_from_yttv_sports_whatson():
+    channels = [
+        Channel(
+            id=ID_ABC,
+            number=9100,
+            name="YTTV Sports 1",
+            package_name="com.yttv",
+            provider_name="youtube_tv",
+            source="yttv-sports",
+            url="http://192.0.2.40:8095/whatson/1?format=json&dynamic_url_json_key=deeplink_url",
+        )
+    ]
+    m3u = build_m3u(channels, "http://192.0.2.1:6592")
+    assert 'tvg-id="yttv-sports-1"' in m3u
+
+
+def test_build_m3u_does_not_infer_tvg_id_for_fruitdeeplinks_whatson():
+    channels = [
+        Channel(
+            id=ID_ABC,
+            number=9000,
+            name="Fruit Lane 1",
+            package_name="com.apple.atve.androidtv.appletv",
+            source="fruitdeeplinks",
+            url="http://192.0.2.40:6655/whatson/1?format=json",
+        )
+    ]
+    m3u = build_m3u(channels, "http://192.0.2.1:6592")
+    assert "tvg-id=" not in m3u
+
+
 def test_filter_channels_by_provider():
     channels = [
         Channel(number=1, name="ABC", package_name="com.yttv", provider_name="YouTube TV"),

@@ -4,7 +4,7 @@
     <string name="brand_title">APITuner</string>
     <string name="brand_subtitle">Device control agent</string>
     <string name="connection_title">Control server</string>
-    <string name="connection_hint">Add this device in the APITuner dashboard using the http_agent backend. After the first launch, the control server auto-starts on reboot.</string>
+    <string name="connection_hint">Add this device in the APITuner dashboard as an Agent tuner. After the first launch, the control server auto-starts on reboot.</string>
     <string name="permissions_title">Permissions</string>
     <string name="permissions_hint">Grant these on the device so APITuner can launch apps and detect playback. On Fire TV, use the APITuner dashboard Grant permissions (ADB) button for overlay / usage / notification.</string>
     <string name="token_title">API token</string>

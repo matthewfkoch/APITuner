@@ -8,20 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.1.22] - 2026-09-02
+## [0.1.22] - 2026-09-07
 
-### Fixed
-- Dashboard **Copy** on M3U / HDHomeRun / XMLTV URLs works on plain HTTP LAN (`http://192.168.x.x`) with a fallback when the Clipboard API is blocked.
-- `PUT /api/channels/{id}` rolls back in-memory config when validation fails instead of leaving a bad row loaded.
-- `PUT /api/channels/{id}` accepts bodies without `id` (id is always taken from the URL path).
-- Sidebar M3U URL comes from `/api/status` (same host the browser used to reach APITuner) instead of a one-time `location.origin` snapshot.
+### Added
+- M3U `tvg-id` for Channels DVR XMLTV matching. JSON import stores `tvg_id` / `tvg-id`. YTTV Sports rows (`source` `yttv-sports` with `/whatson/{n}`) infer `yttv-sports-{n}` if the field is empty. FruitDeepLinks M3U `tvg-id` is not copied (our XMLTV remaps those lanes onto channel ids). `tvc-guide-stationid` remains Gracenote-only.
 
 ### Changed
+- Dashboard copy is shorter; internal field names and setup essays are out of the UI.
 - Dashboard M3U link shows `/channels.m3u8` and documents `?provider=` filtering in the sidebar.
 - Channels page shows **M3U by provider** buttons (when 2+ providers exist) to copy a filtered playlist URL.
 - Sidebar URL fields select-all on click for manual copy; import/sync toasts name skipped rows.
 - Channel export downloads revoke blob URLs; failed startup status load shows a toast.
 - Tuner `PUT` uses the saved row from the URL path (same pattern as channels).
+
+### Fixed
+- Editing a channel no longer clears `source` (FruitDeepLinks sync grouping and YTTV Sports `tvg-id` inference).
+- Dashboard **Copy** on M3U / HDHomeRun / XMLTV URLs works on plain HTTP LAN (`http://192.168.x.x`) with a fallback when the Clipboard API is blocked.
+- `PUT /api/channels/{id}` rolls back in-memory config when validation fails instead of leaving a bad row loaded.
+- `PUT /api/channels/{id}` accepts bodies without `id` (id is always taken from the URL path).
+- Sidebar M3U URL comes from `/api/status` (same host the browser used to reach APITuner) instead of a one-time `location.origin` snapshot.
 
 ## [0.1.21] - 2026-09-01
 

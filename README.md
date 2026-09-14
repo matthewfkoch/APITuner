@@ -182,7 +182,7 @@ Native apps without reliable deep links (ESPN, CBS, Fox, NBC, …) use ADBTuner 
 2. On **Channels**, import the matching station list (keeps `configuration_uuid`).
 3. Use a D-pad backend **or** Agent + `keys_control` on the tuner (`http_agent` alone cannot inject D-pad). On older Fire sticks without `:8080`, use **`adb`** as `keys_control` or primary.
 4. **ESPN package:** babsonnexus stations use `com.espn.score_center`. Some Google TV devices use `com.espn.gtv` instead — set `package_name` / `alternate_package_name` to match what’s installed. APITuner tries primary → alternate → ESPN family until one opens, and **Check packages** on the Channels page flags packages missing from Agent devices. Wrong package on Google TV often opens the **Play Store**.
-5. Long App Play scripts can exceed Channels’ ~30s connect timeout; **Stream during App Play** (Options, on by default) keeps the encoder stream open while D-pad runs so Channels does not mark the tuner unreachable.
+5. Long App Play / deeplink waits can exceed Channels’ ~30s connect timeout; **Stream during tune** (Options, on by default) keeps the encoder stream open while the tune finishes so Channels does not mark the tuner unreachable.
 6. On mixed Fire + Chromecast fleets, **App Play stick preference** (Options) chooses which D-pad path is tried first when layouts differ (e.g. Fire-tuned ESPN).
 
 Deep-link stations with a `configuration_uuid` (e.g. Max + ADBTuner Compatibility Mode) use the normal Agent launch path **and** apply that config as an overlay: `pre_tune_commands`, who’s-watching clears when `check_for_and_clear_whos_watching_prompts` is true, `key_macro`, and `post_playback_start_commands`. Redundant `am start` lines are skipped when the Agent already launched the deeplink.
@@ -236,7 +236,8 @@ Configurable in the dashboard:
 | Option | Description |
 | ------ | ----------- |
 | Tune timeout | Max seconds to wait for a channel to become ready |
-| Wait for playback | Prefer a playing MediaSession before accepting a tune (falls back to foreground if playback never appears) |
+| Wait for playback | Prefer a playing MediaSession before accepting a tune (falls back to foreground if playback never appears, unless deeplink relaunch is enabled) |
+| Deeplink relaunch | If playback never starts, wait this many seconds then re-send the channel intent once (`0` = off, default `6`). Helps DirecTV after device reboot; needs Notification access |
 | Ready settle | Extra seconds after playback is detected before opening the HDMI stream |
 | Stop on release | Send HOME when the stream ends |
 | Keep apps running | When off, always send HOME on release (overrides keep-warm behavior) |
@@ -245,7 +246,7 @@ Configurable in the dashboard:
 | Lane URL timeout | Per-try HTTP timeout for `/whatson` and FruitDeepLinks (default 15s; hung connects stop at 5s). A hung **read** can still run the full timeout. Takes effect on the next tune |
 | Lane URL attempts | Retry count on timeout or connection error (default 3, max 10). Keep timeout × attempts near Channels' ~30s connect window (15s × 3 = 45s) |
 | Stream mode | `proxy` (default, like ADBTuner) or `redirect` (Channels hits encoder directly; M3U only) |
-| Stream during App Play | Start the encoder while App Play D-pad runs so Channels does not hit its connect timeout (on by default). Does **not** apply to lane URL fetches |
+| Stream during tune | Start the encoder while App Play or deeplink playback wait runs so Channels does not hit its connect timeout (on by default). Does **not** apply to lane URL fetches |
 | App Play stick preference | When several tuners can run App Play, prefer Fire / ADB, Google TV, or no preference |
 | Release grace | Seconds to hold tuner lock after stream disconnect |
 | Stuck / idle timeouts | Reclaim tuners that stop making progress |
@@ -289,6 +290,7 @@ HDHomeRun endpoints (`/discover.json`, `/lineup.json`, `/auto/v{channel}`, `/tun
 | Import fails | Null `number` in ADBTuner JSON | Set `number` or include `sort_order` so it can be filled in |
 | Sports / FDL lane tune fails with `timed out after 15s` | First HTTP fetch to a LAN resolver hangs (Docker hairpin to the host) | Options → **Lane URL timeout** / **attempts** (defaults 15s × 3, 5s connect). Retry stays on the same tuner. Keep timeout × attempts under Channels' ~30s window |
 | After upgrade, Channels shows wrong / missing streams | M3U stream URLs now use channel `id` | Re-add or rescan the Custom Channels source (`/channels.m3u8`) |
+| First DirecTV tune after device reboot opens the app but not the channel | Cold-start drops the first deeplink; older builds accepted splash as ready | Update server; grant Agent **Notification** access (playback wait); optional Options → **Deeplink relaunch** (default 6s). Second tune worked because the app was already warm |
 | FruitDeepLinks lanes missing packages / skipped | Provider not in the deeplink catalog | Check `GET /api/deeplink-catalog`; import M3U with `package-name=` or file an APITuner mapping |
 | Fire TV Agent has no Permissions page / tune times out on Fire | Fire OS hides overlay/usage/notification toggles for sideloaded apps | One-time: enable Fire **ADB debugging**, then dashboard → tuner → **Grant permissions (ADB)**. Day-to-day tuning stays on the Agent (no ADB). Fire Sticks are not affected by Android 14’s wired-ADB breakage |
 | Grant permissions (ADB) → unauthorized / unreachable | Container has different ADB keys than the host, or TCP **5555** blocked | Mount `$HOME/.android` into the container (see `docker-compose.yml` / `docker run` above); accept **Allow USB debugging** on the TV; ensure the container can reach `DEVICE_IP:5555` |

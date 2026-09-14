@@ -209,3 +209,96 @@ async def test_tune_failed_helper():
 
     lease.tune_task = None
     assert _tune_failed(lease) is None
+
+
+class SlowDeeplinkBackend(ControlBackend):
+    """Deeplink launch that stays IDLE until hold is released, then PLAYING."""
+
+    capabilities = Capabilities(keys=True, current_app=True, playback_state=True)
+
+    def __init__(self, *, hold: asyncio.Event) -> None:
+        self.hold = hold
+        self.launches: list[str] = []
+        self.current: str | None = "com.android.launcher"
+        self._playing = False
+
+    async def connect(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+    async def health(self) -> bool:
+        return True
+
+    async def get_info(self):
+        from apituner.backends.base import DeviceInfo
+
+        return DeviceInfo(packages=["com.att.tv"])
+
+    async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
+        self.launches.append(package)
+        self.current = package
+        await self.hold.wait()
+        self._playing = True
+
+    async def send_key(self, key: str) -> None:
+        return None
+
+    async def current_app(self):
+        return self.current
+
+    async def playback_state(self) -> PlaybackState:
+        return PlaybackState.PLAYING if self._playing else PlaybackState.IDLE
+
+    async def stop(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_stream_during_tune_returns_before_deeplink_finishes(tmp_path):
+    hold = asyncio.Event()
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.options = GlobalOptions(
+        stream_during_tune=True,
+        wait_for_playback=True,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0,
+        tune_timeout_seconds=10.0,
+    )
+    store.config.tuners = [
+        Tuner(
+            id="t1",
+            name="Agent",
+            control=ControlConfig(type="http_agent", host="192.0.2.1"),
+            stream_endpoint="http://192.0.2.2/s",
+        )
+    ]
+    store.config.channels = [
+        Channel(
+            number=213,
+            name="MLB",
+            package_name="com.att.tv",
+            url="https://stream.directv.com/watch/213",
+        )
+    ]
+    store.save()
+
+    manager = TunerManager(store)
+    backend = SlowDeeplinkBackend(hold=hold)
+    manager._backends["t1"] = backend
+
+    lease_task = asyncio.create_task(manager.lease(store.config.channels[0]))
+    lease = await asyncio.wait_for(lease_task, timeout=2.0)
+    assert isinstance(lease, Lease)
+    assert lease.tune_task is not None
+    assert not lease.tune_task.done()
+    assert manager.status()[0]["locked"] is True
+
+    hold.set()
+    await asyncio.wait_for(lease.tune_task, timeout=2.0)
+    assert lease.tune_task.exception() is None
+    assert backend.launches == ["com.att.tv"]
+
+    await manager.release(lease)
+    assert manager.status()[0]["locked"] is False

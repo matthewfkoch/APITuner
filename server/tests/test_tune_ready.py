@@ -231,3 +231,287 @@ async def test_live_caps_disable_playback_wait(tmp_path):
     assert ready is True
     # Without live playback permission, foreground accept is immediate.
     assert time.monotonic() - launch_at < 2.0
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_relaunches_once_then_plays(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+        backend.playback = PlaybackState.PLAYING
+
+    channel = Channel(
+        number=213,
+        name="MLB",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/213",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=10.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.4,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + 10.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert relaunches == 1
+    assert time.monotonic() - launch_at >= 0.4
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_playing_before_relaunch_skips_retry(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=213,
+        name="MLB",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/213",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=5.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=2.0,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + 5.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert relaunches == 0
+    assert time.monotonic() - launch_at < 1.5
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_relaunch_zero_keeps_idle_fallback(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=213,
+        name="MLB",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/213",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=10.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0,
+    )
+    launch_at = time.monotonic()
+    # Callback present but seconds=0 → can_relaunch false; old IDLE fallback.
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + 10.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert relaunches == 0
+    assert time.monotonic() - launch_at >= 3.0
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_after_relaunch_never_playing_fails(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=213,
+        name="MLB",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/213",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=1.2,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.3,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is False
+    assert relaunches == 1
+
+
+@pytest.mark.asyncio
+async def test_deeplink_tune_relaunches_via_backend_launch(tmp_path):
+    """Full deeplink path: second launch after IDLE, then PLAYING."""
+    from apituner.models import ControlConfig, Tuner
+
+    class CountingBackend(StubBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.launches: list[tuple] = []
+            self.current = "com.android.launcher"
+
+        async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
+            self.launches.append((package, deeplink))
+            self.current = package
+            # First launch stays IDLE; second starts playback.
+            if len(self.launches) >= 2:
+                self.playback = PlaybackState.PLAYING
+            else:
+                self.playback = PlaybackState.IDLE
+
+        async def get_info(self):
+            from apituner.backends.base import DeviceInfo
+
+            return DeviceInfo(packages=["com.att.tv"])
+
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.options = GlobalOptions(
+        wait_for_playback=True,
+        stream_during_tune=False,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.4,
+        tune_timeout_seconds=8.0,
+    )
+    store.config.tuners = [
+        Tuner(
+            id="t1",
+            name="Stream",
+            control=ControlConfig(type="http_agent", host="192.0.2.1"),
+            stream_endpoint="http://192.0.2.2/s",
+        )
+    ]
+    store.config.channels = [
+        Channel(
+            number=213,
+            name="MLB",
+            package_name="com.att.tv",
+            url="https://stream.directv.com/watch/213",
+        )
+    ]
+    store.save()
+
+    manager = TunerManager(store)
+    backend = CountingBackend()
+    manager._backends["t1"] = backend
+
+    lease = await manager.lease(store.config.channels[0])
+    assert len(backend.launches) == 2
+    assert backend.launches[0][1] == "https://stream.directv.com/watch/213"
+    assert backend.launches[1][1] == "https://stream.directv.com/watch/213"
+    await manager.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_deeplink_tune_relaunch_timeout_raises(tmp_path):
+    from apituner.models import ControlConfig, Tuner
+    from apituner.tuner_manager import TuneFailed
+
+    class IdleBackend(StubBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.launches = 0
+            self.current = "com.android.launcher"
+            self.playback = PlaybackState.IDLE
+
+        async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
+            self.launches += 1
+            self.current = package
+
+        async def get_info(self):
+            from apituner.backends.base import DeviceInfo
+
+            return DeviceInfo(packages=["com.att.tv"])
+
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.options = GlobalOptions(
+        wait_for_playback=True,
+        stream_during_tune=False,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.3,
+        tune_timeout_seconds=1.0,
+        retry_on_other_tuner=False,
+    )
+    store.config.tuners = [
+        Tuner(
+            id="t1",
+            name="Stream",
+            control=ControlConfig(type="http_agent", host="192.0.2.1"),
+            stream_endpoint="http://192.0.2.2/s",
+        )
+    ]
+    store.config.channels = [
+        Channel(
+            number=213,
+            name="MLB",
+            package_name="com.att.tv",
+            url="https://stream.directv.com/watch/213",
+        )
+    ]
+    store.save()
+
+    manager = TunerManager(store)
+    backend = IdleBackend()
+    manager._backends["t1"] = backend
+
+    with pytest.raises(TuneFailed):
+        await manager.lease(store.config.channels[0])
+    assert backend.launches == 2

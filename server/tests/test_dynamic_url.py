@@ -153,6 +153,7 @@ def test_dynamic_url_options_default_and_blank():
     opts = GlobalOptions()
     assert opts.dynamic_url_timeout == 15.0
     assert opts.dynamic_url_attempts == 3
+    assert opts.deeplink_relaunch_seconds == 6.0
     blank = GlobalOptions(dynamic_url_timeout=None, dynamic_url_attempts="")  # type: ignore[arg-type]
     assert blank.dynamic_url_timeout == 15.0
     assert blank.dynamic_url_attempts == 3
@@ -167,6 +168,8 @@ def test_dynamic_url_options_default_and_blank():
     assert wild.dynamic_url_attempts == 3
     inf = GlobalOptions(dynamic_url_timeout=float("inf"))
     assert inf.dynamic_url_timeout == 15.0
+    assert GlobalOptions(deeplink_relaunch_seconds=0).deeplink_relaunch_seconds == 0.0
+    assert GlobalOptions(deeplink_relaunch_seconds=-1).deeplink_relaunch_seconds == 0.0
 
 
 @pytest.mark.asyncio

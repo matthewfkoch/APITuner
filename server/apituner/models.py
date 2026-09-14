@@ -170,6 +170,9 @@ class GlobalOptions(BaseModel):
     tune_timeout_seconds: float = 30.0
     wait_for_playback: bool = True
     ready_settle_seconds: float = 1.0
+    # If playback never starts, wait this long then re-send the channel deeplink
+    # once (cold-start / dropped-intent recovery). 0 disables.
+    deeplink_relaunch_seconds: float = 6.0
     stop_on_release: bool = False
     keep_apps_running: bool = True
     retry_on_other_tuner: bool = True
@@ -178,8 +181,8 @@ class GlobalOptions(BaseModel):
     dynamic_url_timeout: float = DEFAULT_TIMEOUT
     dynamic_url_attempts: int = DEFAULT_ATTEMPTS
     stream_mode: Literal["proxy", "redirect"] = "proxy"
-    # App Play can take > Channels' ~30s connect timeout. When on, start the
-    # encoder MPEG-TS immediately while D-pad navigation runs (show tuning UI).
+    # App Play / deeplink waits can exceed Channels' ~30s connect timeout. When on,
+    # start the encoder MPEG-TS immediately while tune finishes (show tuning UI).
     stream_during_tune: bool = True
     # When App Play channels are free on mixed fleets, prefer this D-pad path.
     # fire = adb / firetv_rest first; google_tv = androidtv_remote first; any = no preference.
@@ -223,6 +226,19 @@ class GlobalOptions(BaseModel):
         if not math.isfinite(parsed):
             return DEFAULT_TIMEOUT
         return max(1.0, parsed)
+
+    @field_validator("deeplink_relaunch_seconds", mode="before")
+    @classmethod
+    def _deeplink_relaunch_seconds(cls, value: object) -> object:
+        if value is None or value == "":
+            return 6.0
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return 6.0
+        if not math.isfinite(parsed):
+            return 6.0
+        return max(0.0, parsed)
 
     @field_validator("dynamic_url_attempts", mode="before")
     @classmethod

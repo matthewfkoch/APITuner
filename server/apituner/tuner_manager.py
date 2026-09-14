@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from .backends import (
     Capabilities,
@@ -83,7 +83,7 @@ class Lease:
     tune_configuration: Optional[TuneConfiguration] = None
     # Backend used for post_tune key/shell commands (keys plane when hybrid).
     command_backend: Optional[ControlBackend] = None
-    # Background App Play / tune when stream_during_tune is enabled.
+    # Background App Play / deeplink tune when stream_during_tune is enabled.
     tune_task: Optional[asyncio.Task] = None
 
 
@@ -458,8 +458,8 @@ class TunerManager:
         st.bytes_transferred = 0
         st.last_error = None
 
-        # Long App Play scripts exceed Channels' ~30s HDHR connect timeout unless
-        # the encoder stream starts before navigation finishes.
+        # Long App Play / deeplink waits exceed Channels' ~30s HDHR connect
+        # timeout unless the encoder stream starts before tune finishes.
         if options.stream_during_tune and app_play is not None:
             # Fail *before* returning a lease so retry_on_other_tuner can pick a
             # D-pad tuner. Streaming first then failing looks like an instant
@@ -491,6 +491,42 @@ class TunerManager:
                     options,
                     app_play=app_play,
                     overlay=None,
+                    command_backend=cmd_backend,
+                ),
+                name=f"tune-{tune_id}",
+            )
+            return Lease(
+                tuner=tuner,
+                backend=backend,
+                tune_id=tune_id,
+                channel=channel,
+                tune_configuration=tune_configuration,
+                command_backend=cmd_backend,
+                tune_task=task,
+            )
+
+        # Deeplink playback waits (incl. one relaunch) can also burn the connect
+        # window; stream early when we will wait for MediaSession PLAYING.
+        if (
+            options.stream_during_tune
+            and options.wait_for_playback
+            and app_play is None
+        ):
+            logger.info(
+                "Tune %s streaming during deeplink wait on %s (%s)",
+                tune_id,
+                tuner.name,
+                channel.name,
+            )
+            task = asyncio.create_task(
+                self._do_tune_background(
+                    tuner,
+                    backend,
+                    channel,
+                    tune_id,
+                    options,
+                    app_play=None,
+                    overlay=overlay,
                     command_backend=cmd_backend,
                 ),
                 name=f"tune-{tune_id}",
@@ -732,6 +768,29 @@ class TunerManager:
                 raise TuneFailed(str(exc)) from exc
 
         deadline = launch_at + options.tune_timeout_seconds
+
+        async def _relaunch_deeplink() -> None:
+            logger.info(
+                "Re-sending deeplink for channel %s (%s) on %s after no playback",
+                channel.number,
+                channel.name,
+                tuner.name,
+            )
+            await backend.launch(
+                package=chosen_pkg,
+                deeplink=launch_url or None,
+                component=channel.component,
+                action=channel.action,
+                extras=channel.extra_string,
+            )
+
+        relaunch: Optional[Callable[[], Awaitable[None]]] = None
+        if (
+            options.deeplink_relaunch_seconds > 0
+            and (launch_url or "").strip()
+        ):
+            relaunch = _relaunch_deeplink
+
         ready = await self._wait_ready(
             backend,
             channel,
@@ -740,6 +799,7 @@ class TunerManager:
             deadline,
             prior_app=prior_app,
             launch_at=launch_at,
+            relaunch=relaunch,
         )
         if not ready:
             raise TuneFailed(f"channel {channel.number} not ready within timeout")
@@ -957,6 +1017,7 @@ class TunerManager:
         *,
         prior_app: Optional[str] = None,
         launch_at: Optional[float] = None,
+        relaunch: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> bool:
         loop = asyncio.get_event_loop()
         caps = await self._effective_capabilities(backend)
@@ -978,34 +1039,65 @@ class TunerManager:
         use_playback = options.wait_for_playback and caps.playback_state
         playback_unknown_since: Optional[float] = None
         playback_idle_since: Optional[float] = None
+        non_playing_since: Optional[float] = None
+        relaunch_sec = float(options.deeplink_relaunch_seconds or 0.0)
+        can_relaunch = relaunch is not None and relaunch_sec > 0
+        relaunched = False
+        saw_playing = False
 
         # No readiness signal at all: fixed short delay then accept.
         if not use_playback and not caps.current_app:
             await asyncio.sleep(min(3.0, max(0.0, deadline - loop.time())))
             return True
 
+        async def _foreground_in_targets() -> bool:
+            if not caps.current_app:
+                return False
+            app = await backend.current_app()
+            return bool(app and app in targets)
+
         while loop.time() < deadline:
             if use_playback:
                 ps = await backend.playback_state()
                 if ps == PlaybackState.PLAYING:
+                    saw_playing = True
                     settle = max(0.0, float(options.ready_settle_seconds))
                     if settle:
                         await asyncio.sleep(min(settle, max(0.0, deadline - loop.time())))
                     return True
-                if ps == PlaybackState.UNKNOWN:
-                    if playback_unknown_since is None:
-                        playback_unknown_since = loop.time()
-                    elif loop.time() - playback_unknown_since > 3.0:
-                        use_playback = False  # signal never materialized; fall back
-                elif ps == PlaybackState.IDLE:
-                    playback_unknown_since = None
-                    if playback_idle_since is None:
-                        playback_idle_since = loop.time()
-                    elif loop.time() - playback_idle_since > 3.0:
-                        use_playback = False  # buffering between channels; fall back
+                if ps in (PlaybackState.UNKNOWN, PlaybackState.IDLE):
+                    if can_relaunch:
+                        if non_playing_since is None:
+                            non_playing_since = loop.time()
+                        elapsed = loop.time() - non_playing_since
+                        if not relaunched and elapsed >= relaunch_sec:
+                            if await _foreground_in_targets():
+                                try:
+                                    await relaunch()  # type: ignore[misc]
+                                except Exception as exc:  # noqa: BLE001
+                                    logger.warning(
+                                        "Deeplink relaunch failed: %s", exc
+                                    )
+                                relaunched = True
+                                non_playing_since = loop.time()
+                                launch_at = loop.time()
+                    elif ps == PlaybackState.UNKNOWN:
+                        non_playing_since = None
+                        if playback_unknown_since is None:
+                            playback_unknown_since = loop.time()
+                        elif loop.time() - playback_unknown_since > 3.0:
+                            use_playback = False  # signal never materialized
+                    else:  # IDLE, no relaunch
+                        playback_unknown_since = None
+                        if playback_idle_since is None:
+                            playback_idle_since = loop.time()
+                        elif loop.time() - playback_idle_since > 3.0:
+                            use_playback = False  # buffering; fall back
                 else:
                     playback_unknown_since = None
                     playback_idle_since = None
+                    # PAUSED etc.: keep non_playing timer so a brief PAUSE
+                    # does not postpone relaunch forever; only PLAYING clears it.
 
             # While still waiting on a usable playback signal, do not accept on
             # foreground alone (avoids opening the HDMI stream on splash/home).
@@ -1020,13 +1112,16 @@ class TunerManager:
 
             await asyncio.sleep(0.75)
 
-        # Final grace: accept if the app is at least foreground.
+        # Final grace: same-app switches may accept without PLAYING. After a
+        # deeplink relaunch that never played, prefer failure over splash.
+        if same_app_switch:
+            return True
+        if relaunched and not saw_playing:
+            return False
         if caps.current_app:
             app = await backend.current_app()
             if app and app in targets:
                 return True
-        if same_app_switch:
-            return True
         return False
 
     async def _effective_capabilities(self, backend: ControlBackend) -> Capabilities:

@@ -9,6 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-09-14
+
+### Added
+- **Deeplink relaunch**: if MediaSession playback never starts after a deeplink launch, re-send the same channel intent once after `deeplink_relaunch_seconds` (default 6; `0` = off). Recovers DirecTV (and similar) first tunes after a Google Stream / Android TV reboot when the app opens but the channel deeplink is dropped. Needs Notification access for playback detection. Options → **Deeplink relaunch (s)**.
+
+### Changed
+- **Stream during tune** (formerly App Play only) also starts the encoder while deeplink tunes wait for playback, so longer waits / one relaunch stay under Channels' ~30s connect window.
+- After a deeplink relaunch that never reaches PLAYING, the tune fails instead of accepting the splash screen as ready.
+
 ## [0.1.23] - 2026-09-07
 
 ### Changed
@@ -260,7 +269,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.24
 [0.1.23]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.23
 [0.1.22]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.22
 [0.1.21]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.21

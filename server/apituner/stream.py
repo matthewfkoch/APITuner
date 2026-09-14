@@ -52,9 +52,10 @@ async def _proxy_iter(
 ) -> AsyncIterator[bytes]:
     """Relay the encoder's MPEG-TS to the client, tracking bytes for lifecycle.
 
-    When ``lease.tune_task`` is set (stream_during_tune / App Play), bytes flow
-    immediately so Channels does not hit its ~30s connect timeout while D-pad
-    navigation runs. If the background tune fails, the proxy stops.
+    When ``lease.tune_task`` is set (stream_during_tune / App Play or deeplink
+    playback wait), bytes flow immediately so Channels does not hit its ~30s
+    connect timeout while D-pad navigation or deeplink relaunch runs. If the
+    background tune fails, the proxy stops.
     """
     url = lease.tuner.stream_endpoint
     # follow_redirects: some encoders 301/302 (trailing slash, http→https).

@@ -136,6 +136,13 @@ class SplitControlBackend(ControlBackend):
             return await self._launch.playback_state()
         return await self._keys.playback_state()
 
+    async def playback_snapshot(
+        self,
+    ) -> tuple[PlaybackState, Optional[str], Optional[str]]:
+        if self._launch.capabilities.playback_state:
+            return await self._launch.playback_snapshot()
+        return await self._keys.playback_snapshot()
+
     async def stop(self) -> None:
         await self._launch.stop()
 

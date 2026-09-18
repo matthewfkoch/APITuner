@@ -193,13 +193,26 @@ class HttpAgentBackend(ControlBackend):
         return data.get("packageName")
 
     async def playback_state(self) -> PlaybackState:
+        snap, _, _ = await self.playback_snapshot()
+        return snap
+
+    async def playback_snapshot(
+        self,
+    ) -> tuple[PlaybackState, Optional[str], Optional[str]]:
         try:
             data = await self._get("/api/playback")
         except BackendUnavailable:
-            return PlaybackState.UNKNOWN
-        if "playing" not in data:
-            return PlaybackState.UNKNOWN
-        return PlaybackState.PLAYING if data.get("playing") else PlaybackState.IDLE
+            return PlaybackState.UNKNOWN, None, None
+        if not isinstance(data, dict) or "playing" not in data:
+            return PlaybackState.UNKNOWN, None, None
+        ps = PlaybackState.PLAYING if data.get("playing") else PlaybackState.IDLE
+        pkg = data.get("package")
+        title = data.get("title")
+        return (
+            ps,
+            str(pkg) if pkg else None,
+            str(title) if title else None,
+        )
 
     async def stop(self) -> None:
         await self._post("/api/stop", {})

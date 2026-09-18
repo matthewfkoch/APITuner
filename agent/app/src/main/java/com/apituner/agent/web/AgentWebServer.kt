@@ -109,7 +109,7 @@ class AgentWebServer(
 
     private fun getDiagnostics(): Response {
         val version = AgentVersion.current(context)
-        val (playing, pkg) = playback.playbackState()
+        val snap = playback.snapshot()
         return json(
             mapOf(
                 "model" to Build.MODEL,
@@ -137,8 +137,10 @@ class AgentWebServer(
                     "hasPermission" to foreground.hasPermission(),
                 ),
                 "playback" to mapOf(
-                    "playing" to playing,
-                    "package" to pkg,
+                    "playing" to snap.playing,
+                    "package" to snap.packageName,
+                    "title" to snap.title,
+                    "state" to snap.state,
                     "hasPermission" to playback.hasPermission(),
                 ),
             )
@@ -153,11 +155,13 @@ class AgentWebServer(
     )
 
     private fun getPlayback(): Response {
-        val (playing, pkg) = playback.playbackState()
+        val snap = playback.snapshot()
         val result = HashMap<String, Any?>()
-        if (playing != null) result["playing"] = playing
-        result["package"] = pkg
+        if (snap.playing != null) result["playing"] = snap.playing
+        result["package"] = snap.packageName
         result["hasPermission"] = playback.hasPermission()
+        if (!snap.title.isNullOrBlank()) result["title"] = snap.title
+        if (!snap.state.isNullOrBlank()) result["state"] = snap.state
         return json(result)
     }
 

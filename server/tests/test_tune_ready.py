@@ -48,6 +48,9 @@ class StubBackend(ControlBackend):
     async def playback_state(self) -> PlaybackState:
         return self.playback
 
+    async def playback_snapshot(self):
+        return self.playback, self.current, getattr(self, "title", None)
+
     async def stop(self) -> None:
         return None
 
@@ -231,6 +234,102 @@ async def test_live_caps_disable_playback_wait(tmp_path):
     assert ready is True
     # Without live playback permission, foreground accept is immediate.
     assert time.monotonic() - launch_at < 2.0
+
+
+def test_title_looks_like_channel():
+    from apituner.tuner_manager import _title_looks_like_channel
+
+    assert _title_looks_like_channel("YES Network HD", "NBC-WNBC") is False
+    assert _title_looks_like_channel("WNBC", "NBC-WNBC") is True
+    assert _title_looks_like_channel("", "NBC-WNBC") is None
+    assert _title_looks_like_channel("Live TV", "NBC-WNBC") is None
+
+
+@pytest.mark.asyncio
+async def test_stale_directv_playing_does_not_ready_immediately(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "YES Network HD"
+
+    channel = Channel(
+        number=4,
+        name="NBC-WNBC",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/4",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=2.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=5.0,
+    )
+    launch_at = time.monotonic()
+    task = asyncio.create_task(
+        manager._wait_ready(
+            backend,
+            channel,
+            "com.att.tv",
+            options,
+            launch_at + 10.0,
+            prior_app="com.att.tv",
+            launch_at=launch_at,
+        )
+    )
+    await asyncio.sleep(0.9)
+    assert not task.done()
+    backend.playback = PlaybackState.IDLE
+    backend.title = None
+    await asyncio.sleep(0.9)
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "WNBC"
+    ready = await asyncio.wait_for(task, timeout=3.0)
+    assert ready is True
+    assert time.monotonic() - launch_at >= 1.5
+
+
+@pytest.mark.asyncio
+async def test_directv_wrong_title_does_not_ready(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "YES Network HD"
+
+    channel = Channel(
+        number=4,
+        name="NBC-WNBC",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/4",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=1.2,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.3,
+    )
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app="com.att.tv",
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is False
+    assert relaunches == 1
 
 
 @pytest.mark.asyncio

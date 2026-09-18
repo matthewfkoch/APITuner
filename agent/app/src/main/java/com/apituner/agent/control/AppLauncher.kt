@@ -112,7 +112,14 @@ class AppLauncher(val context: Context) {
             } else {
                 intent.setPackage(packageName)
             }
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // NEW_TASK alone often brings an already-running TV app to the
+            // foreground without delivering the new VIEW URI (DirecTV home /
+            // continue-watching). CLEAR_TOP|SINGLE_TOP sends onNewIntent.
+            intent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
             extras?.forEach { (k, v) -> intent.putExtra(k, v) }
 
             // Fall back to the plain launch intent if the explicit intent can't resolve.
@@ -120,7 +127,7 @@ class AppLauncher(val context: Context) {
                 return launchApp(packageName)
             }
             context.startActivity(intent)
-            LaunchResult(true, "launched")
+            LaunchResult(true, "launched CLEAR_TOP|SINGLE_TOP")
         } catch (e: Exception) {
             Log.e(tag, "launchAppWithIntent failed: ${e.message}", e)
             LaunchResult(false, e.message ?: "launch failed")

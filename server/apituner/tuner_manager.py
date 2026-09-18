@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -40,6 +41,56 @@ from .keys import key_requires_dpad, normalize_key_macro
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
 from .packages import package_candidates, package_try_order
 from .whos_watching import clear_whos_watching_prompt
+
+_STALE_PLAYBACK_PACKAGES = frozenset(
+    {
+        "com.att.tv",
+        "com.att.tv.openvideo",
+        "com.att.ngc",
+    }
+)
+_GENERIC_TITLE_TOKENS = frozenset(
+    {
+        "live",
+        "tv",
+        "hd",
+        "uhd",
+        "4k",
+        "video",
+        "directv",
+        "dtv",
+        "att",
+        "watch",
+        "playing",
+        "for",
+        "you",
+        "home",
+        "app",
+        "stream",
+        "the",
+        "and",
+        "network",
+    }
+)
+
+
+def _title_tokens(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) >= 3}
+
+
+def _title_looks_like_channel(title: Optional[str], channel_name: str) -> Optional[bool]:
+    """True if title overlaps the channel name, False if it looks like other content, None to ignore."""
+    if not title or not str(title).strip():
+        return None
+    title_toks = _title_tokens(title)
+    name_toks = _title_tokens(channel_name)
+    specific = title_toks - _GENERIC_TITLE_TOKENS
+    if not specific or not (name_toks - _GENERIC_TITLE_TOKENS):
+        return None
+    if specific & name_toks:
+        return True
+    return False
+
 
 logger = logging.getLogger(__name__)
 
@@ -1044,6 +1095,10 @@ class TunerManager:
         can_relaunch = relaunch is not None and relaunch_sec > 0
         relaunched = False
         saw_playing = False
+        seen_non_playing = False
+        stale_playing = bool(
+            same_app_switch and any(p in _STALE_PLAYBACK_PACKAGES for p in targets)
+        )
 
         # No readiness signal at all: fixed short delay then accept.
         if not use_playback and not caps.current_app:
@@ -1056,64 +1111,123 @@ class TunerManager:
             app = await backend.current_app()
             return bool(app and app in targets)
 
+        async def _snapshot() -> tuple[PlaybackState, Optional[str], Optional[str]]:
+            snap_fn = getattr(backend, "playback_snapshot", None)
+            if callable(snap_fn):
+                try:
+                    out = await snap_fn()
+                    if isinstance(out, tuple) and len(out) == 3:
+                        return out[0], out[1], out[2]
+                except Exception:  # noqa: BLE001
+                    pass
+            return await backend.playback_state(), None, None
+
+        async def _maybe_relaunch(reason: str) -> None:
+            nonlocal relaunched, non_playing_since, launch_at, seen_non_playing
+            if not can_relaunch or relaunched:
+                return
+            if loop.time() - launch_at < relaunch_sec:
+                return
+            if not await _foreground_in_targets():
+                return
+            try:
+                await relaunch()  # type: ignore[misc]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Deeplink relaunch failed: %s", exc)
+            relaunched = True
+            non_playing_since = loop.time()
+            launch_at = loop.time()
+            seen_non_playing = False
+            logger.info(
+                "Re-sent deeplink for channel %s (%s) (%s)",
+                channel.number,
+                channel.name,
+                reason,
+            )
+
         while loop.time() < deadline:
             if use_playback:
-                ps = await backend.playback_state()
+                ps, sess_pkg, sess_title = await _snapshot()
+                title_match = _title_looks_like_channel(sess_title, channel.name)
                 if ps == PlaybackState.PLAYING:
-                    saw_playing = True
-                    settle = max(0.0, float(options.ready_settle_seconds))
-                    if settle:
-                        await asyncio.sleep(min(settle, max(0.0, deadline - loop.time())))
-                    return True
+                    accept = False
+                    if title_match is False:
+                        logger.info(
+                            "Ignoring playback title %r while tuning %s",
+                            sess_title,
+                            channel.name,
+                        )
+                        await _maybe_relaunch("title_mismatch")
+                    elif stale_playing and not seen_non_playing:
+                        if title_match is True:
+                            accept = True
+                        elif not relaunched:
+                            await _maybe_relaunch("stale_playing")
+                        elif title_match is not False and loop.time() - launch_at >= 1.5:
+                            # No usable title after CLEAR_TOP relaunch — accept PLAYING.
+                            accept = True
+                    else:
+                        accept = True
+                    if accept:
+                        saw_playing = True
+                        settle = max(0.0, float(options.ready_settle_seconds))
+                        if settle:
+                            await asyncio.sleep(
+                                min(settle, max(0.0, deadline - loop.time()))
+                            )
+                        if sess_title:
+                            logger.info(
+                                "Playback ready for %s title=%r package=%s",
+                                channel.name,
+                                sess_title,
+                                sess_pkg,
+                            )
+                        return True
                 if ps in (PlaybackState.UNKNOWN, PlaybackState.IDLE):
+                    seen_non_playing = True
                     if can_relaunch:
                         if non_playing_since is None:
                             non_playing_since = loop.time()
-                        elapsed = loop.time() - non_playing_since
-                        if not relaunched and elapsed >= relaunch_sec:
-                            if await _foreground_in_targets():
-                                try:
-                                    await relaunch()  # type: ignore[misc]
-                                except Exception as exc:  # noqa: BLE001
-                                    logger.warning(
-                                        "Deeplink relaunch failed: %s", exc
-                                    )
-                                relaunched = True
-                                non_playing_since = loop.time()
-                                launch_at = loop.time()
+                        idle_elapsed = loop.time() - non_playing_since
+                        if not relaunched and idle_elapsed >= relaunch_sec:
+                            await _maybe_relaunch("idle")
                     elif ps == PlaybackState.UNKNOWN:
                         non_playing_since = None
                         if playback_unknown_since is None:
                             playback_unknown_since = loop.time()
                         elif loop.time() - playback_unknown_since > 3.0:
-                            use_playback = False  # signal never materialized
-                    else:  # IDLE, no relaunch
+                            use_playback = False
+                    else:
                         playback_unknown_since = None
                         if playback_idle_since is None:
                             playback_idle_since = loop.time()
                         elif loop.time() - playback_idle_since > 3.0:
-                            use_playback = False  # buffering; fall back
+                            use_playback = False
                 else:
                     playback_unknown_since = None
                     playback_idle_since = None
-                    # PAUSED etc.: keep non_playing timer so a brief PAUSE
-                    # does not postpone relaunch forever; only PLAYING clears it.
 
             # While still waiting on a usable playback signal, do not accept on
             # foreground alone (avoids opening the HDMI stream on splash/home).
             if not use_playback:
                 # In-app channel changes do not emit a fresh foreground event.
-                if same_app_switch and loop.time() - launch_at >= same_app_ready_delay:
+                # DirecTV leftover PLAYING must not fall through to this path.
+                if (
+                    same_app_switch
+                    and not stale_playing
+                    and loop.time() - launch_at >= same_app_ready_delay
+                ):
                     return True
-                if caps.current_app:
+                if caps.current_app and not stale_playing:
                     app = await backend.current_app()
                     if app and app in targets:
                         return True
 
             await asyncio.sleep(0.75)
 
-        # Final grace: same-app switches may accept without PLAYING. After a
-        # deeplink relaunch that never played, prefer failure over splash.
+        # DirecTV leftover PLAYING / continue-watching must not pass as ready.
+        if stale_playing and not saw_playing:
+            return False
         if same_app_switch:
             return True
         if relaunched and not saw_playing:

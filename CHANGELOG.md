@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-09-17
+
+### Added
+- Agent playback snapshot includes MediaSession **title** when the app exposes it.
+
+### Changed
+- Agent deeplink launches use `FLAG_ACTIVITY_CLEAR_TOP | SINGLE_TOP` so a running app receives the new VIEW URI instead of only coming to the foreground (DirecTV home / continue-watching).
+- DirecTV same-app tunes ignore leftover PLAYING until playback drops or a matching title appears; a YES/continue-watching session is not treated as NBC. Wrong titles trigger a deeplink relaunch. Needs Agent **0.1.25** and Notification access.
+- Agent APK **0.1.25** (`versionCode` 25). Install on each Streamer (dashboard **Update Agent**).
+
 ## [0.1.24] - 2026-09-14
 
 ### Added
@@ -269,7 +279,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.24...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.25...HEAD
+[0.1.25]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.25
 [0.1.24]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.24
 [0.1.23]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.23
 [0.1.22]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.22

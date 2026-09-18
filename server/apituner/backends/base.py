@@ -100,6 +100,12 @@ class ControlBackend(ABC):
     async def playback_state(self) -> PlaybackState:
         """Return the current media playback state."""
 
+    async def playback_snapshot(
+        self,
+    ) -> tuple[PlaybackState, Optional[str], Optional[str]]:
+        """Playback state plus optional session package and title."""
+        return await self.playback_state(), None, None
+
     @abstractmethod
     async def stop(self) -> None:
         """Stop playback / return to a neutral state (best effort)."""

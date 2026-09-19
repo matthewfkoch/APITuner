@@ -92,6 +92,19 @@ def _title_looks_like_channel(title: Optional[str], channel_name: str) -> Option
     return False
 
 
+def _titles_equivalent(left: Optional[str], right: Optional[str]) -> bool:
+    """True when two MediaSession titles are the same leftover show."""
+    if not left or not str(left).strip() or not right or not str(right).strip():
+        return False
+    if str(left).strip().lower() == str(right).strip().lower():
+        return True
+    left_toks = _title_tokens(left) - _GENERIC_TITLE_TOKENS
+    right_toks = _title_tokens(right) - _GENERIC_TITLE_TOKENS
+    if not left_toks or not right_toks:
+        return False
+    return left_toks <= right_toks or right_toks <= left_toks
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -792,6 +805,16 @@ class TunerManager:
             except Exception:  # noqa: BLE001
                 pass
 
+        leftover_title: Optional[str] = None
+        snap_fn = getattr(backend, "playback_snapshot", None)
+        if callable(snap_fn):
+            try:
+                _ps0, _pkg0, leftover_title = await snap_fn()
+                if leftover_title is not None:
+                    leftover_title = str(leftover_title).strip() or None
+            except Exception:  # noqa: BLE001
+                leftover_title = None
+
         chosen_pkg = await self._launch_with_package_fallbacks(
             backend,
             channel,
@@ -851,6 +874,7 @@ class TunerManager:
             prior_app=prior_app,
             launch_at=launch_at,
             relaunch=relaunch,
+            leftover_title=leftover_title,
         )
         if not ready:
             raise TuneFailed(f"channel {channel.number} not ready within timeout")
@@ -1069,6 +1093,7 @@ class TunerManager:
         prior_app: Optional[str] = None,
         launch_at: Optional[float] = None,
         relaunch: Optional[Callable[[], Awaitable[None]]] = None,
+        leftover_title: Optional[str] = None,
     ) -> bool:
         loop = asyncio.get_event_loop()
         caps = await self._effective_capabilities(backend)
@@ -1145,13 +1170,31 @@ class TunerManager:
                 reason,
             )
 
+        if leftover_title is not None:
+            leftover_title = str(leftover_title).strip() or None
+        if use_playback and leftover_title is None:
+            try:
+                _ps0, _pkg0, leftover_title = await _snapshot()
+                if leftover_title is not None:
+                    leftover_title = str(leftover_title).strip() or None
+            except Exception:  # noqa: BLE001
+                leftover_title = None
+
         while loop.time() < deadline:
             if use_playback:
                 ps, sess_pkg, sess_title = await _snapshot()
                 title_match = _title_looks_like_channel(sess_title, channel.name)
                 if ps == PlaybackState.PLAYING:
                     accept = False
-                    if title_match is False:
+                    still_leftover = _titles_equivalent(sess_title, leftover_title)
+                    title_changed = bool(
+                        leftover_title and sess_title and not still_leftover
+                    )
+                    if title_match is True or title_changed:
+                        # Channel-name overlap, or DirecTV show title changed
+                        # (Chicago Fire leftover → Golden Girls on MeTV).
+                        accept = True
+                    elif title_match is False:
                         logger.info(
                             "Ignoring playback title %r while tuning %s",
                             sess_title,
@@ -1159,11 +1202,9 @@ class TunerManager:
                         )
                         await _maybe_relaunch("title_mismatch")
                     elif stale_playing and not seen_non_playing:
-                        if title_match is True:
-                            accept = True
-                        elif not relaunched:
+                        if not relaunched:
                             await _maybe_relaunch("stale_playing")
-                        elif title_match is not False and loop.time() - launch_at >= 1.5:
+                        elif loop.time() - launch_at >= 1.5:
                             # No usable title after CLEAR_TOP relaunch — accept PLAYING.
                             accept = True
                     else:

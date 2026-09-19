@@ -237,12 +237,20 @@ async def test_live_caps_disable_playback_wait(tmp_path):
 
 
 def test_title_looks_like_channel():
-    from apituner.tuner_manager import _title_looks_like_channel
+    from apituner.tuner_manager import _title_looks_like_channel, _titles_equivalent
 
     assert _title_looks_like_channel("YES Network HD", "NBC-WNBC") is False
     assert _title_looks_like_channel("WNBC", "NBC-WNBC") is True
     assert _title_looks_like_channel("", "NBC-WNBC") is None
     assert _title_looks_like_channel("Live TV", "NBC-WNBC") is None
+    # DirecTV reports program titles, not call signs (community dump 0.1.25).
+    assert _title_looks_like_channel("The Golden Girls", "MeTV") is False
+    assert _title_looks_like_channel("Riders of the Purple Sage", "GRIT") is False
+    assert _title_looks_like_channel("Sherlock on Masterpiece", "PBS-WEDW") is False
+    assert _titles_equivalent("YES Network HD", "YES")
+    assert _titles_equivalent("Chicago Fire", "Chicago Fire")
+    assert not _titles_equivalent("Chicago Fire", "The Golden Girls")
+    assert not _titles_equivalent("Sherlock on Masterpiece", "Riders of the Purple Sage")
 
 
 @pytest.mark.asyncio
@@ -330,6 +338,111 @@ async def test_directv_wrong_title_does_not_ready(tmp_path):
     )
     assert ready is False
     assert relaunches == 1
+
+
+@pytest.mark.asyncio
+async def test_directv_program_title_change_is_ready(tmp_path):
+    """techpro2004 dump: leftover Chicago Fire, then Golden Girls while tuning MeTV."""
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "Chicago Fire"
+
+    channel = Channel(
+        number=77,
+        name="MeTV",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/77",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=3.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=5.0,
+    )
+    launch_at = time.monotonic()
+    task = asyncio.create_task(
+        manager._wait_ready(
+            backend,
+            channel,
+            "com.att.tv",
+            options,
+            launch_at + 10.0,
+            prior_app="com.att.tv",
+            launch_at=launch_at,
+            leftover_title="Chicago Fire",
+        )
+    )
+    await asyncio.sleep(0.4)
+    assert not task.done()
+    backend.title = "The Golden Girls"
+    ready = await asyncio.wait_for(task, timeout=3.0)
+    assert ready is True
+
+
+@pytest.mark.asyncio
+async def test_directv_pbs_and_grit_title_changes_are_ready(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "Joffrey Ballet: The Next Movement"
+
+    pbs = Channel(
+        number=49,
+        name="PBS-WEDW",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/49",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=3.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=5.0,
+    )
+    launch_at = time.monotonic()
+    task = asyncio.create_task(
+        manager._wait_ready(
+            backend,
+            pbs,
+            "com.att.tv",
+            options,
+            launch_at + 10.0,
+            prior_app="com.att.tv",
+            launch_at=launch_at,
+            leftover_title="Joffrey Ballet: The Next Movement",
+        )
+    )
+    await asyncio.sleep(0.3)
+    backend.title = "Sherlock on Masterpiece"
+    assert await asyncio.wait_for(task, timeout=3.0) is True
+
+    backend.title = "Sherlock on Masterpiece"
+    grit = Channel(
+        number=81,
+        name="GRIT",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/81",
+    )
+    launch_at = time.monotonic()
+    task = asyncio.create_task(
+        manager._wait_ready(
+            backend,
+            grit,
+            "com.att.tv",
+            options,
+            launch_at + 10.0,
+            prior_app="com.att.tv",
+            launch_at=launch_at,
+            leftover_title="Sherlock on Masterpiece",
+        )
+    )
+    await asyncio.sleep(0.3)
+    backend.title = "Riders of the Purple Sage"
+    assert await asyncio.wait_for(task, timeout=3.0) is True
 
 
 @pytest.mark.asyncio

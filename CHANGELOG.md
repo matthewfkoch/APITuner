@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-09-18
+
+### Fixed
+- DirecTV same-app tunes treat a **changed** MediaSession program title as ready (Chicago Fire leftover → Golden Girls on MeTV). 0.1.25 required the title to overlap the channel call sign, so correct playback timed out and `stream_during_tune` dropped the HDMI proxy. Unchanged leftover titles (YES while tuning NBC) are still rejected. Server only — Agent **0.1.25** is unchanged.
+
 ## [0.1.25] - 2026-09-17
 
 ### Added
@@ -279,7 +284,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.25...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.26...HEAD
+[0.1.26]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.26
 [0.1.25]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.25
 [0.1.24]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.24
 [0.1.23]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.23

@@ -1615,7 +1615,7 @@ const OPTION_FIELDS = [
     { value: "any", label: "No preference" },
   ], "When several tuners can run App Play, prefer this path"],
   ["wait_for_playback", "Wait for playback signal", "bool", null, "Wait until playback is detected before accepting the tune"],
-  ["deeplink_relaunch_seconds", "Deeplink relaunch (s)", "number", null, "If playback never starts, wait this long then re-send the channel intent once (0 = off). Helps DirecTV after device reboot. Needs Notification access."],
+  ["deeplink_relaunch_seconds", "Deeplink relaunch (s)", "number", null, "If playback never starts, wait this long then re-send the channel intent (DirecTV up to twice; 0 = off). Cold start retries after 2s. Helps after device reboot. Needs Notification access."],
   ["ready_settle_seconds", "Ready settle (s)", "number", null, "Extra wait after playback before opening the HDMI stream"],
   ["stop_on_release", "Stop app on release", "bool", null, "Send Home when the stream ends"],
   ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send Home on release"],

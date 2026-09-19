@@ -70,6 +70,20 @@ _GENERIC_TITLE_TOKENS = frozenset(
         "the",
         "and",
         "network",
+        "unknown",
+        "untitled",
+        "loading",
+        "buffering",
+    }
+)
+_PLACEHOLDER_TITLES = frozenset(
+    {
+        "unknown title",
+        "unknown",
+        "untitled",
+        "null",
+        "none",
+        "n/a",
     }
 )
 
@@ -78,9 +92,16 @@ def _title_tokens(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) >= 3}
 
 
+def _title_is_placeholder(title: Optional[str]) -> bool:
+    """True for empty / splash MediaSession titles (DirecTV 'Unknown Title')."""
+    if not title or not str(title).strip():
+        return True
+    return str(title).strip().lower() in _PLACEHOLDER_TITLES
+
+
 def _title_looks_like_channel(title: Optional[str], channel_name: str) -> Optional[bool]:
     """True if title overlaps the channel name, False if it looks like other content, None to ignore."""
-    if not title or not str(title).strip():
+    if _title_is_placeholder(title):
         return None
     title_toks = _title_tokens(title)
     name_toks = _title_tokens(channel_name)
@@ -103,6 +124,15 @@ def _titles_equivalent(left: Optional[str], right: Optional[str]) -> bool:
     if not left_toks or not right_toks:
         return False
     return left_toks <= right_toks or right_toks <= left_toks
+
+
+async def _backend_launch(backend: ControlBackend, **kwargs) -> None:
+    """Call ``launch``, dropping ``clear_task`` on backends that lack the flag."""
+    try:
+        await backend.launch(**kwargs)
+    except TypeError:
+        kwargs.pop("clear_task", None)
+        await backend.launch(**kwargs)
 
 
 logger = logging.getLogger(__name__)
@@ -322,17 +352,20 @@ class TunerManager:
         component: Optional[str] = None,
         action: Optional[str] = None,
         extras: Optional[str] = None,
+        clear_task: bool = False,
     ) -> str:
         """Try each package candidate until launch succeeds."""
         errors: list[str] = []
         for pkg in packages:
             try:
-                await backend.launch(
+                await _backend_launch(
+                    backend,
                     package=pkg,
                     deeplink=deeplink,
                     component=component,
                     action=action,
                     extras=extras,
+                    clear_task=clear_task,
                 )
                 if pkg != packages[0]:
                     logger.info(
@@ -815,6 +848,13 @@ class TunerManager:
             except Exception:  # noqa: BLE001
                 leftover_title = None
 
+        stale_pkg = any(p in _STALE_PLAYBACK_PACKAGES for p in fallbacks)
+        cold_start = not (
+            prior_app is not None
+            and prior_app in set(fallbacks)
+            and bool(launch_url)
+        )
+
         chosen_pkg = await self._launch_with_package_fallbacks(
             backend,
             channel,
@@ -823,6 +863,7 @@ class TunerManager:
             component=channel.component,
             action=channel.action,
             extras=channel.extra_string,
+            clear_task=stale_pkg and cold_start,
         )
         launch_at = asyncio.get_event_loop().time()
 
@@ -850,12 +891,14 @@ class TunerManager:
                 channel.name,
                 tuner.name,
             )
-            await backend.launch(
+            await _backend_launch(
+                backend,
                 package=chosen_pkg,
                 deeplink=launch_url or None,
                 component=channel.component,
                 action=channel.action,
                 extras=channel.extra_string,
+                clear_task=stale_pkg,
             )
 
         relaunch: Optional[Callable[[], Awaitable[None]]] = None
@@ -1118,12 +1161,16 @@ class TunerManager:
         non_playing_since: Optional[float] = None
         relaunch_sec = float(options.deeplink_relaunch_seconds or 0.0)
         can_relaunch = relaunch is not None and relaunch_sec > 0
+        relaunch_count = 0
+        stale_pkg = any(p in _STALE_PLAYBACK_PACKAGES for p in targets)
+        max_relaunches = 2 if stale_pkg else 1
+        first_relaunch_sec = (
+            min(2.0, relaunch_sec) if not same_app_switch else relaunch_sec
+        )
         relaunched = False
         saw_playing = False
         seen_non_playing = False
-        stale_playing = bool(
-            same_app_switch and any(p in _STALE_PLAYBACK_PACKAGES for p in targets)
-        )
+        stale_playing = bool(same_app_switch and stale_pkg)
 
         # No readiness signal at all: fixed short delay then accept.
         if not use_playback and not caps.current_app:
@@ -1148,26 +1195,36 @@ class TunerManager:
             return await backend.playback_state(), None, None
 
         async def _maybe_relaunch(reason: str) -> None:
-            nonlocal relaunched, non_playing_since, launch_at, seen_non_playing
-            if not can_relaunch or relaunched:
+            nonlocal relaunched, relaunch_count, non_playing_since, launch_at, seen_non_playing
+            if not can_relaunch or relaunch_count >= max_relaunches:
                 return
-            if loop.time() - launch_at < relaunch_sec:
+            # Splash / "Unknown Title" is still loading — use the full interval
+            # so a 2s cold-start retry does not kill a working first tune.
+            wait = relaunch_sec if reason == "generic_title" else (
+                first_relaunch_sec if relaunch_count == 0 else relaunch_sec
+            )
+            if loop.time() - launch_at < wait:
                 return
-            if not await _foreground_in_targets():
+            # DirecTV leftover PLAYING can show while Usage Access still
+            # reports the launcher; still re-send the channel intent.
+            if not stale_pkg and not await _foreground_in_targets():
                 return
             try:
                 await relaunch()  # type: ignore[misc]
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Deeplink relaunch failed: %s", exc)
+            relaunch_count += 1
             relaunched = True
             non_playing_since = loop.time()
             launch_at = loop.time()
             seen_non_playing = False
             logger.info(
-                "Re-sent deeplink for channel %s (%s) (%s)",
+                "Re-sent deeplink for channel %s (%s) (%s, %s/%s)",
                 channel.number,
                 channel.name,
                 reason,
+                relaunch_count,
+                max_relaunches,
             )
 
         if leftover_title is not None:
@@ -1186,9 +1243,21 @@ class TunerManager:
                 title_match = _title_looks_like_channel(sess_title, channel.name)
                 if ps == PlaybackState.PLAYING:
                     accept = False
+                    # Remember splash / continue-watching so a later show
+                    # change counts (Unknown Title → Funny You Should Ask).
+                    if (
+                        leftover_title is None
+                        and sess_title
+                        and title_match is not True
+                        and (stale_pkg or relaunch_count > 0)
+                    ):
+                        leftover_title = str(sess_title).strip() or None
                     still_leftover = _titles_equivalent(sess_title, leftover_title)
                     title_changed = bool(
-                        leftover_title and sess_title and not still_leftover
+                        leftover_title
+                        and sess_title
+                        and not still_leftover
+                        and not _title_is_placeholder(sess_title)
                     )
                     if title_match is True or title_changed:
                         # Channel-name overlap, or DirecTV show title changed
@@ -1202,11 +1271,14 @@ class TunerManager:
                         )
                         await _maybe_relaunch("title_mismatch")
                     elif stale_playing and not seen_non_playing:
-                        if not relaunched:
+                        if relaunch_count < max_relaunches:
                             await _maybe_relaunch("stale_playing")
                         elif loop.time() - launch_at >= 1.5:
-                            # No usable title after CLEAR_TOP relaunch — accept PLAYING.
+                            # No usable title after CLEAR_TASK relaunch — accept PLAYING.
                             accept = True
+                    elif stale_pkg:
+                        # "Unknown Title" / empty session: wait for a real show.
+                        await _maybe_relaunch("generic_title")
                     else:
                         accept = True
                     if accept:
@@ -1230,7 +1302,10 @@ class TunerManager:
                         if non_playing_since is None:
                             non_playing_since = loop.time()
                         idle_elapsed = loop.time() - non_playing_since
-                        if not relaunched and idle_elapsed >= relaunch_sec:
+                        wait = (
+                            first_relaunch_sec if relaunch_count == 0 else relaunch_sec
+                        )
+                        if relaunch_count < max_relaunches and idle_elapsed >= wait:
                             await _maybe_relaunch("idle")
                     elif ps == PlaybackState.UNKNOWN:
                         non_playing_since = None
@@ -1264,10 +1339,19 @@ class TunerManager:
                     if app and app in targets:
                         return True
 
-            await asyncio.sleep(0.75)
+            poll = 0.75
+            if can_relaunch and relaunch_count < max_relaunches:
+                wait = first_relaunch_sec if relaunch_count == 0 else relaunch_sec
+                due_in = wait - (loop.time() - launch_at)
+                if due_in > 0:
+                    poll = min(poll, max(0.05, due_in))
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(poll, remaining))
 
-        # DirecTV leftover PLAYING / continue-watching must not pass as ready.
-        if stale_playing and not saw_playing:
+        # DirecTV leftover PLAYING / continue-watching / splash must not pass.
+        if stale_pkg and not saw_playing:
             return False
         if same_app_switch:
             return True

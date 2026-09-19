@@ -191,7 +191,10 @@ class AgentWebServer(
             }
         }
 
-        val result = appLauncher.launchAppWithIntent(pkg, action, data, component, extras)
+        val clearTask = obj.get("clearTask")?.asBoolean == true
+        val result = appLauncher.launchAppWithIntent(
+            pkg, action, data, component, extras, clearTask,
+        )
         return json(mapOf("success" to result.success, "message" to result.message))
     }
 

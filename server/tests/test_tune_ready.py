@@ -247,6 +247,7 @@ def test_title_looks_like_channel():
     assert _title_looks_like_channel("The Golden Girls", "MeTV") is False
     assert _title_looks_like_channel("Riders of the Purple Sage", "GRIT") is False
     assert _title_looks_like_channel("Sherlock on Masterpiece", "PBS-WEDW") is False
+    assert _title_looks_like_channel("Unknown Title", "Cozi TV") is None
     assert _titles_equivalent("YES Network HD", "YES")
     assert _titles_equivalent("Chicago Fire", "Chicago Fire")
     assert not _titles_equivalent("Chicago Fire", "The Golden Girls")
@@ -337,7 +338,7 @@ async def test_directv_wrong_title_does_not_ready(tmp_path):
         relaunch=_relaunch,
     )
     assert ready is False
-    assert relaunches == 1
+    assert relaunches == 2
 
 
 @pytest.mark.asyncio
@@ -446,6 +447,228 @@ async def test_directv_pbs_and_grit_title_changes_are_ready(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_directv_idle_then_continue_watching_second_relaunch(tmp_path):
+    """First-boot dump: idle relaunch, Roseanne leftover, second relaunch, then GRIT."""
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+        backend.playback = PlaybackState.PLAYING
+        if relaunches == 1:
+            backend.title = "Roseanne"
+        else:
+            backend.title = "Riders of the Purple Sage"
+
+    channel = Channel(
+        number=81,
+        name="GRIT",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/81",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=10.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.3,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + 10.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+        leftover_title=None,
+    )
+    assert ready is True
+    assert relaunches == 2
+
+
+@pytest.mark.asyncio
+async def test_yttv_still_relaunches_once(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.google.android.youtube.tvunplugged"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=36,
+        name="ESPN",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/example",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=1.2,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.3,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is False
+    assert relaunches == 1
+
+
+@pytest.mark.asyncio
+async def test_directv_unknown_title_then_show_is_ready(tmp_path):
+    """First-boot dump: Unknown Title splash, then Cozi's actual program."""
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "Unknown Title"
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=100,
+        name="Cozi TV",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/100",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=10.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=5.0,
+    )
+    launch_at = time.monotonic()
+    task = asyncio.create_task(
+        manager._wait_ready(
+            backend,
+            channel,
+            "com.att.tv",
+            options,
+            launch_at + 10.0,
+            prior_app=None,
+            launch_at=launch_at,
+            relaunch=_relaunch,
+            leftover_title=None,
+        )
+    )
+    await asyncio.sleep(0.4)
+    assert not task.done()
+    backend.title = "Funny You Should Ask"
+    assert await asyncio.wait_for(task, timeout=3.0) is True
+    assert relaunches == 0
+
+
+@pytest.mark.asyncio
+async def test_directv_unknown_title_does_not_fast_relaunch(tmp_path):
+    """Cold-start 2s retry must not fire on splash titles (Cozi succeeded at ~3s)."""
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "Unknown Title"
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=100,
+        name="Cozi TV",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/100",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=3.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=5.0,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + 3.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is False
+    assert relaunches == 0
+
+
+@pytest.mark.asyncio
+async def test_directv_stuck_leftover_gets_second_relaunch(tmp_path):
+    """First-boot dump: Red Tomahawk stuck on MeTV until a second relaunch."""
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "Red Tomahawk"
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+        if relaunches >= 2:
+            backend.title = "Alfred Hitchcock Presents"
+
+    channel = Channel(
+        number=77,
+        name="MeTV",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/77",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=10.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.3,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + 10.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+        leftover_title="Red Tomahawk",
+    )
+    assert ready is True
+    assert relaunches == 2
+
+
+@pytest.mark.asyncio
 async def test_wait_ready_relaunches_once_then_plays(tmp_path):
     store = ConfigStore(data_dir=tmp_path)
     manager = TunerManager(store)
@@ -458,6 +681,7 @@ async def test_wait_ready_relaunches_once_then_plays(tmp_path):
         nonlocal relaunches
         relaunches += 1
         backend.playback = PlaybackState.PLAYING
+        backend.title = "MLB"
 
     channel = Channel(
         number=213,
@@ -494,6 +718,7 @@ async def test_wait_ready_playing_before_relaunch_skips_retry(tmp_path):
     backend = StubBackend()
     backend.current = "com.att.tv"
     backend.playback = PlaybackState.PLAYING
+    backend.title = "MLB"
     relaunches = 0
 
     async def _relaunch() -> None:
@@ -607,7 +832,7 @@ async def test_wait_ready_after_relaunch_never_playing_fails(tmp_path):
         relaunch=_relaunch,
     )
     assert ready is False
-    assert relaunches == 1
+    assert relaunches == 2
 
 
 @pytest.mark.asyncio
@@ -621,12 +846,22 @@ async def test_deeplink_tune_relaunches_via_backend_launch(tmp_path):
             self.launches: list[tuple] = []
             self.current = "com.android.launcher"
 
-        async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
-            self.launches.append((package, deeplink))
+        async def launch(
+            self,
+            *,
+            package,
+            deeplink=None,
+            component=None,
+            action=None,
+            extras=None,
+            clear_task=False,
+        ):
+            self.launches.append((package, deeplink, clear_task))
             self.current = package
             # First launch stays IDLE; second starts playback.
             if len(self.launches) >= 2:
                 self.playback = PlaybackState.PLAYING
+                self.title = "MLB"
             else:
                 self.playback = PlaybackState.IDLE
 
@@ -669,6 +904,8 @@ async def test_deeplink_tune_relaunches_via_backend_launch(tmp_path):
     assert len(backend.launches) == 2
     assert backend.launches[0][1] == "https://stream.directv.com/watch/213"
     assert backend.launches[1][1] == "https://stream.directv.com/watch/213"
+    assert backend.launches[0][2] is True
+    assert backend.launches[1][2] is True
     await manager.release(lease)
 
 
@@ -726,4 +963,4 @@ async def test_deeplink_tune_relaunch_timeout_raises(tmp_path):
 
     with pytest.raises(TuneFailed):
         await manager.lease(store.config.channels[0])
-    assert backend.launches == 2
+    assert backend.launches == 3

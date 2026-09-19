@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-09-19
+
+### Changed
+- DirecTV / similar apps: re-send the channel deeplink **up to twice** if playback stays idle or on a leftover show (continue-watching after a dropped first intent). Cold start (app not already open) retries after 2s instead of 6s.
+- Agent deeplink relaunch / cold start can use `FLAG_ACTIVITY_CLEAR_TASK` so DirecTV does not stay on continue-watching. Needs **Agent 0.1.27**. Older Agents still get the second relaunch.
+- DirecTV splash title `Unknown Title` is not treated as ready; a later real show title counts as a change (so a 2s retry does not interrupt a cold start that is about to work).
+- Agent APK **0.1.27** (`versionCode` 27). Install on each Streamer (dashboard **Update Agent**).
+
 ## [0.1.26] - 2026-09-18
 
 ### Fixed
@@ -284,7 +292,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.26...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.27...HEAD
+[0.1.27]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.27
 [0.1.26]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.26
 [0.1.25]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.25
 [0.1.24]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.24

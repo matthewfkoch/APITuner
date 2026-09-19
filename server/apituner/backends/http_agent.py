@@ -136,6 +136,7 @@ class HttpAgentBackend(ControlBackend):
         component: Optional[str] = None,
         action: Optional[str] = None,
         extras: Optional[str] = None,
+        clear_task: bool = False,
     ) -> None:
         # Package-only open (App Play adbtuner_open_app): use launcher intent, not VIEW.
         needs_intent = bool(
@@ -169,6 +170,8 @@ class HttpAgentBackend(ControlBackend):
             payload["component"] = component
         if extras:
             payload["extra_string"] = extras
+        if clear_task:
+            payload["clearTask"] = True
         data = await self._post("/api/launch-intent", payload)
         # Agent returns HTTP 200 with success:false when the intent cannot start.
         if data.get("success") is False:

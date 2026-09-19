@@ -251,6 +251,10 @@ class SlowDeeplinkBackend(ControlBackend):
     async def playback_state(self) -> PlaybackState:
         return PlaybackState.PLAYING if self._playing else PlaybackState.IDLE
 
+    async def playback_snapshot(self):
+        playing = PlaybackState.PLAYING if self._playing else PlaybackState.IDLE
+        return playing, self.current, "MLB" if self._playing else None
+
     async def stop(self) -> None:
         return None
 

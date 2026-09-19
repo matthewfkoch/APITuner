@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -54,6 +56,24 @@ async def test_launch_deeplink_uses_launch_intent():
         action="android.intent.action.VIEW",
     )
     assert paths == ["/api/launch-intent"]
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_launch_deeplink_sends_clear_task():
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content.decode()))
+        return httpx.Response(200, json={"success": True, "message": "launched"})
+
+    backend = _backend_with_transport(handler)
+    await backend.launch(
+        package="com.att.tv",
+        deeplink="https://stream.directv.com/watch/81",
+        clear_task=True,
+    )
+    assert bodies[0].get("clearTask") is True
     await backend.close()
 
 

@@ -101,6 +101,7 @@ class AppLauncher(val context: Context) {
         data: String?,
         component: String?,
         extras: Map<String, String>?,
+        clearTask: Boolean = false,
     ): LaunchResult {
         return try {
             val intent = Intent(action ?: Intent.ACTION_VIEW)
@@ -115,10 +116,15 @@ class AppLauncher(val context: Context) {
             // NEW_TASK alone often brings an already-running TV app to the
             // foreground without delivering the new VIEW URI (DirecTV home /
             // continue-watching). CLEAR_TOP|SINGLE_TOP sends onNewIntent.
+            // CLEAR_TASK (relaunch / cold start) drops continue-watching.
             intent.addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                if (clearTask) {
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                } else {
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
             )
             extras?.forEach { (k, v) -> intent.putExtra(k, v) }
 
@@ -127,7 +133,10 @@ class AppLauncher(val context: Context) {
                 return launchApp(packageName)
             }
             context.startActivity(intent)
-            LaunchResult(true, "launched CLEAR_TOP|SINGLE_TOP")
+            LaunchResult(
+                true,
+                if (clearTask) "launched NEW_TASK|CLEAR_TASK" else "launched CLEAR_TOP|SINGLE_TOP",
+            )
         } catch (e: Exception) {
             Log.e(tag, "launchAppWithIntent failed: ${e.message}", e)
             LaunchResult(false, e.message ?: "launch failed")

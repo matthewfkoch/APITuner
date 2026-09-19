@@ -97,6 +97,7 @@ class SplitControlBackend(ControlBackend):
         component: Optional[str] = None,
         action: Optional[str] = None,
         extras: Optional[str] = None,
+        clear_task: bool = False,
     ) -> None:
         package_only = _is_package_only_launch(
             deeplink=deeplink, component=component, action=action, extras=extras
@@ -115,13 +116,19 @@ class SplitControlBackend(ControlBackend):
                 await self._keys.launch(package=package)
                 return
 
-        await self._launch.launch(
+        kwargs = dict(
             package=package,
             deeplink=deeplink,
             component=component,
             action=action,
             extras=extras,
+            clear_task=clear_task,
         )
+        try:
+            await self._launch.launch(**kwargs)
+        except TypeError:
+            kwargs.pop("clear_task", None)
+            await self._launch.launch(**kwargs)
 
     async def send_key(self, key: str) -> None:
         await self._keys.send_key(key)

@@ -49,6 +49,12 @@ _STALE_PLAYBACK_PACKAGES = frozenset(
         "com.att.ngc",
     }
 )
+# After two idle relaunches DirecTV can still sit on splash with no
+# MediaSession. stream_during_tune already opened HDMI, so keep waiting
+# instead of failing at 30s and killing the proxy.
+_STALE_SPLASH_GRACE_SECONDS = 45.0
+_STALE_SPLASH_GRACE_MIN_TIMEOUT = 20.0
+_HOME_BEFORE_DEEPLINK_SECONDS = 0.8
 _GENERIC_TITLE_TOKENS = frozenset(
     {
         "live",
@@ -133,6 +139,16 @@ async def _backend_launch(backend: ControlBackend, **kwargs) -> None:
     except TypeError:
         kwargs.pop("clear_task", None)
         await backend.launch(**kwargs)
+
+
+async def _home_off_splash(backend: ControlBackend) -> None:
+    """Best-effort HOME so a stuck splash does not swallow the next VIEW intent."""
+    try:
+        await backend.stop()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("HOME before deeplink failed: %s", exc)
+        return
+    await asyncio.sleep(_HOME_BEFORE_DEEPLINK_SECONDS)
 
 
 logger = logging.getLogger(__name__)
@@ -839,14 +855,16 @@ class TunerManager:
                 pass
 
         leftover_title: Optional[str] = None
+        leftover_state: Optional[PlaybackState] = None
         snap_fn = getattr(backend, "playback_snapshot", None)
         if callable(snap_fn):
             try:
-                _ps0, _pkg0, leftover_title = await snap_fn()
+                leftover_state, _pkg0, leftover_title = await snap_fn()
                 if leftover_title is not None:
                     leftover_title = str(leftover_title).strip() or None
             except Exception:  # noqa: BLE001
                 leftover_title = None
+                leftover_state = None
 
         stale_pkg = any(p in _STALE_PLAYBACK_PACKAGES for p in fallbacks)
         cold_start = not (
@@ -854,6 +872,23 @@ class TunerManager:
             and prior_app in set(fallbacks)
             and bool(launch_url)
         )
+        # App already open on splash (no MediaSession): HOME then treat as
+        # cold start so the VIEW intent is not delivered onto the splash.
+        stuck_splash = (
+            stale_pkg
+            and prior_app is not None
+            and prior_app in set(fallbacks)
+            and leftover_state != PlaybackState.PLAYING
+        )
+        if stuck_splash:
+            logger.info(
+                "HOME before deeplink on %s — %s open but not playing",
+                tuner.name,
+                prior_app,
+            )
+            await _home_off_splash(backend)
+            cold_start = True
+            prior_app = None
 
         chosen_pkg = await self._launch_with_package_fallbacks(
             backend,
@@ -891,6 +926,8 @@ class TunerManager:
                 channel.name,
                 tuner.name,
             )
+            if stale_pkg:
+                await _home_off_splash(backend)
             await _backend_launch(
                 backend,
                 package=chosen_pkg,
@@ -1164,6 +1201,9 @@ class TunerManager:
         relaunch_count = 0
         stale_pkg = any(p in _STALE_PLAYBACK_PACKAGES for p in targets)
         max_relaunches = 2 if stale_pkg else 1
+        splash_extended = False
+        last_ps: Optional[PlaybackState] = None
+        last_title: Optional[str] = None
         first_relaunch_sec = (
             min(2.0, relaunch_sec) if not same_app_switch else relaunch_sec
         )
@@ -1229,17 +1269,21 @@ class TunerManager:
 
         if leftover_title is not None:
             leftover_title = str(leftover_title).strip() or None
+        had_leftover = bool(leftover_title)
         if use_playback and leftover_title is None:
             try:
                 _ps0, _pkg0, leftover_title = await _snapshot()
                 if leftover_title is not None:
                     leftover_title = str(leftover_title).strip() or None
+                if _ps0 == PlaybackState.PLAYING and leftover_title:
+                    had_leftover = True
             except Exception:  # noqa: BLE001
                 leftover_title = None
 
         while loop.time() < deadline:
             if use_playback:
                 ps, sess_pkg, sess_title = await _snapshot()
+                last_ps, last_title = ps, sess_title
                 title_match = _title_looks_like_channel(sess_title, channel.name)
                 if ps == PlaybackState.PLAYING:
                     accept = False
@@ -1264,12 +1308,22 @@ class TunerManager:
                         # (Chicago Fire leftover → Golden Girls on MeTV).
                         accept = True
                     elif title_match is False:
-                        logger.info(
-                            "Ignoring playback title %r while tuning %s",
-                            sess_title,
-                            channel.name,
-                        )
-                        await _maybe_relaunch("title_mismatch")
+                        if (
+                            stale_pkg
+                            and relaunch_count >= max_relaunches
+                            and not had_leftover
+                        ):
+                            # Idle splash with no pre-launch leftover
+                            # session: after two retries, take the show
+                            # that finally started (not the call sign).
+                            accept = True
+                        else:
+                            logger.info(
+                                "Ignoring playback title %r while tuning %s",
+                                sess_title,
+                                channel.name,
+                            )
+                            await _maybe_relaunch("title_mismatch")
                     elif stale_playing and not seen_non_playing:
                         if relaunch_count < max_relaunches:
                             await _maybe_relaunch("stale_playing")
@@ -1307,6 +1361,22 @@ class TunerManager:
                         )
                         if relaunch_count < max_relaunches and idle_elapsed >= wait:
                             await _maybe_relaunch("idle")
+                        if (
+                            stale_pkg
+                            and relaunch_count >= max_relaunches
+                            and not splash_extended
+                            and float(options.tune_timeout_seconds or 0)
+                            >= _STALE_SPLASH_GRACE_MIN_TIMEOUT
+                        ):
+                            extra = _STALE_SPLASH_GRACE_SECONDS
+                            deadline = max(deadline, loop.time() + extra)
+                            splash_extended = True
+                            logger.info(
+                                "Extending splash wait for %s by %.0fs after %s idle relaunches",
+                                channel.name,
+                                extra,
+                                relaunch_count,
+                            )
                     elif ps == PlaybackState.UNKNOWN:
                         non_playing_since = None
                         if playback_unknown_since is None:
@@ -1345,6 +1415,8 @@ class TunerManager:
                 due_in = wait - (loop.time() - launch_at)
                 if due_in > 0:
                     poll = min(poll, max(0.05, due_in))
+            elif splash_extended:
+                poll = min(poll, 0.4)
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
@@ -1352,6 +1424,15 @@ class TunerManager:
 
         # DirecTV leftover PLAYING / continue-watching / splash must not pass.
         if stale_pkg and not saw_playing:
+            logger.warning(
+                "Tune timeout for %s (%s) playback=%s title=%r relaunches=%s splash_extended=%s",
+                channel.number,
+                channel.name,
+                last_ps,
+                last_title,
+                relaunch_count,
+                splash_extended,
+            )
             return False
         if same_app_switch:
             return True

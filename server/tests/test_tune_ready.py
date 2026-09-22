@@ -836,14 +836,22 @@ async def test_wait_ready_after_relaunch_never_playing_fails(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_deeplink_tune_relaunches_via_backend_launch(tmp_path):
+async def test_deeplink_tune_relaunches_via_backend_launch(tmp_path, monkeypatch):
     """Full deeplink path: second launch after IDLE, then PLAYING."""
+    from apituner import tuner_manager as tm
     from apituner.models import ControlConfig, Tuner
+
+    monkeypatch.setattr(tm, "_HOME_BEFORE_DEEPLINK_SECONDS", 0.0)
 
     class CountingBackend(StubBackend):
         def __init__(self) -> None:
             super().__init__()
             self.launches: list[tuple] = []
+            self.homes = 0
+            self.current = "com.android.launcher"
+
+        async def stop(self) -> None:
+            self.homes += 1
             self.current = "com.android.launcher"
 
         async def launch(
@@ -906,13 +914,17 @@ async def test_deeplink_tune_relaunches_via_backend_launch(tmp_path):
     assert backend.launches[1][1] == "https://stream.directv.com/watch/213"
     assert backend.launches[0][2] is True
     assert backend.launches[1][2] is True
+    assert backend.homes >= 1
     await manager.release(lease)
 
 
 @pytest.mark.asyncio
-async def test_deeplink_tune_relaunch_timeout_raises(tmp_path):
+async def test_deeplink_tune_relaunch_timeout_raises(tmp_path, monkeypatch):
+    from apituner import tuner_manager as tm
     from apituner.models import ControlConfig, Tuner
     from apituner.tuner_manager import TuneFailed
+
+    monkeypatch.setattr(tm, "_HOME_BEFORE_DEEPLINK_SECONDS", 0.0)
 
     class IdleBackend(StubBackend):
         def __init__(self) -> None:
@@ -936,7 +948,7 @@ async def test_deeplink_tune_relaunch_timeout_raises(tmp_path):
         stream_during_tune=False,
         ready_settle_seconds=0.0,
         deeplink_relaunch_seconds=0.3,
-        tune_timeout_seconds=1.0,
+        tune_timeout_seconds=1.2,
         retry_on_other_tuner=False,
     )
     store.config.tuners = [
@@ -964,3 +976,250 @@ async def test_deeplink_tune_relaunch_timeout_raises(tmp_path):
     with pytest.raises(TuneFailed):
         await manager.lease(store.config.channels[0])
     assert backend.launches == 3
+
+
+@pytest.mark.asyncio
+async def test_deeplink_tune_homes_stuck_splash_before_first_launch(tmp_path, monkeypatch):
+    """DirecTV already open on splash: HOME, then CLEAR_TASK deeplink."""
+    from apituner import tuner_manager as tm
+    from apituner.models import ControlConfig, Tuner
+
+    monkeypatch.setattr(tm, "_HOME_BEFORE_DEEPLINK_SECONDS", 0.0)
+
+    class SplashBackend(StubBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.homes = 0
+            self.launches: list[bool] = []
+            self.current = "com.att.tv"
+            self.playback = PlaybackState.IDLE
+
+        async def stop(self) -> None:
+            self.homes += 1
+            self.current = "com.android.launcher"
+
+        async def launch(
+            self,
+            *,
+            package,
+            deeplink=None,
+            component=None,
+            action=None,
+            extras=None,
+            clear_task=False,
+        ):
+            self.launches.append(clear_task)
+            self.current = package
+            self.playback = PlaybackState.PLAYING
+            self.title = "Cozi TV"
+
+        async def get_info(self):
+            from apituner.backends.base import DeviceInfo
+
+            return DeviceInfo(packages=["com.att.tv"])
+
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.options = GlobalOptions(
+        wait_for_playback=True,
+        stream_during_tune=False,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=6.0,
+        tune_timeout_seconds=5.0,
+    )
+    store.config.tuners = [
+        Tuner(
+            id="t1",
+            name="Stream",
+            control=ControlConfig(type="http_agent", host="192.0.2.1"),
+            stream_endpoint="http://192.0.2.2/s",
+        )
+    ]
+    store.config.channels = [
+        Channel(
+            number=80,
+            name="Cozi TV",
+            package_name="com.att.tv",
+            url="https://stream.directv.com/watch/80",
+        )
+    ]
+    store.save()
+
+    manager = TunerManager(store)
+    backend = SplashBackend()
+    manager._backends["t1"] = backend
+
+    lease = await manager.lease(store.config.channels[0])
+    assert backend.homes == 1
+    assert backend.launches == [True]
+    await manager.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_deeplink_tune_playing_same_app_does_not_home_first(tmp_path, monkeypatch):
+    """Warm DirecTV already PLAYING should not HOME before the first VIEW."""
+    from apituner import tuner_manager as tm
+    from apituner.models import ControlConfig, Tuner
+
+    monkeypatch.setattr(tm, "_HOME_BEFORE_DEEPLINK_SECONDS", 0.0)
+
+    class WarmBackend(StubBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.homes = 0
+            self.launches = 0
+            self.current = "com.att.tv"
+            self.playback = PlaybackState.PLAYING
+            self.title = "Chicago Fire"
+
+        async def stop(self) -> None:
+            self.homes += 1
+
+        async def launch(
+            self,
+            *,
+            package,
+            deeplink=None,
+            component=None,
+            action=None,
+            extras=None,
+            clear_task=False,
+        ):
+            self.launches += 1
+            self.current = package
+            self.title = "The Golden Girls"
+
+        async def get_info(self):
+            from apituner.backends.base import DeviceInfo
+
+            return DeviceInfo(packages=["com.att.tv"])
+
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.options = GlobalOptions(
+        wait_for_playback=True,
+        stream_during_tune=False,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=6.0,
+        tune_timeout_seconds=5.0,
+    )
+    store.config.tuners = [
+        Tuner(
+            id="t1",
+            name="Stream",
+            control=ControlConfig(type="http_agent", host="192.0.2.1"),
+            stream_endpoint="http://192.0.2.2/s",
+        )
+    ]
+    store.config.channels = [
+        Channel(
+            number=77,
+            name="MeTV",
+            package_name="com.att.tv",
+            url="https://stream.directv.com/watch/77",
+        )
+    ]
+    store.save()
+
+    manager = TunerManager(store)
+    backend = WarmBackend()
+    manager._backends["t1"] = backend
+
+    lease = await manager.lease(store.config.channels[0])
+    assert backend.homes == 0
+    assert backend.launches == 1
+    await manager.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_extends_idle_splash_then_plays(tmp_path, monkeypatch):
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_STALE_SPLASH_GRACE_SECONDS", 0.8)
+    monkeypatch.setattr(tm, "_STALE_SPLASH_GRACE_MIN_TIMEOUT", 0.4)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    async def _snap():
+        if relaunches >= 2 and time.monotonic() - launch_at > 0.6:
+            backend.playback = PlaybackState.PLAYING
+            backend.title = "Funny You Should Ask"
+        return backend.playback, backend.current, getattr(backend, "title", None)
+
+    backend.playback_snapshot = _snap  # type: ignore[method-assign]
+
+    channel = Channel(
+        number=80,
+        name="Cozi TV",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/80",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=0.5,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.12,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert relaunches == 2
+    assert time.monotonic() - launch_at >= 0.5
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_does_not_extend_leftover_playing(tmp_path, monkeypatch):
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_STALE_SPLASH_GRACE_SECONDS", 2.0)
+    monkeypatch.setattr(tm, "_STALE_SPLASH_GRACE_MIN_TIMEOUT", 0.3)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "YES Network"
+
+    channel = Channel(
+        number=4,
+        name="NBC-WNBC",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/4",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=0.45,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.15,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app="com.att.tv",
+        launch_at=launch_at,
+        leftover_title="YES Network",
+        relaunch=lambda: asyncio.sleep(0),
+    )
+    assert ready is False
+    assert time.monotonic() - launch_at < 1.2

@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-09-21
+
+### Changed
+- DirecTV splash that never reports MediaSession: HOME off the stuck app before the first deeplink (when the app is already open but idle) and before each relaunch, then send `CLEAR_TASK`. After two idle relaunches, keep waiting **45s** instead of failing at 30s and killing the HDMI proxy (`stream_during_tune`). If a show finally starts after those retries (and there was no leftover PLAYING session), accept it even when the title is not the call sign. Leftover PLAYING (YES while tuning NBC) still fails at the normal timeout. Server only — Agent **0.1.27** is unchanged.
+
 ## [0.1.27] - 2026-09-19
 
 ### Changed
@@ -292,7 +297,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.27...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.28...HEAD
+[0.1.28]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.28
 [0.1.27]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.27
 [0.1.26]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.26
 [0.1.25]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.25

@@ -43,8 +43,16 @@ class HttpAgentBackend(ControlBackend):
         headers = {}
         if tuner.control.token:
             headers["X-Auth-Token"] = tuner.control.token
+        # Keep-alive off. Agent builds through 0.1.27 leave an unread POST body
+        # on the NanoHTTPD socket (/api/stop, and any 401/404). The next request
+        # on that socket is parsed as "HTTP verb {}POST". A fresh connection
+        # cannot see those leftover bytes. The current Agent also reads every
+        # POST body up front; this still protects devices that have not updated.
         self._client = httpx.AsyncClient(
-            base_url=self._base_url, headers=headers, timeout=request_timeout
+            base_url=self._base_url,
+            headers=headers,
+            timeout=request_timeout,
+            limits=httpx.Limits(max_keepalive_connections=0),
         )
 
     async def connect(self) -> None:
@@ -66,9 +74,18 @@ class HttpAgentBackend(ControlBackend):
                 + (f": {detail}" if detail else "")
             )
 
-    async def _post(self, path: str, json: Optional[dict] = None) -> dict[str, Any]:
+    async def _post(
+        self,
+        path: str,
+        json: Optional[dict] = None,
+        *,
+        content: Optional[bytes] = None,
+    ) -> dict[str, Any]:
         try:
-            resp = await self._client.post(path, json=json or {})
+            if content is not None:
+                resp = await self._client.post(path, content=content)
+            else:
+                resp = await self._client.post(path, json=json or {})
         except httpx.HTTPError as exc:
             raise BackendUnavailable(f"Agent request failed: {exc}") from exc
         self._check_response(resp, path)
@@ -218,7 +235,29 @@ class HttpAgentBackend(ControlBackend):
         )
 
     async def stop(self) -> None:
-        await self._post("/api/stop", {})
+        # Empty body on purpose. NanoHTTPD only discards a POST body when the
+        # handler calls parseBody. Agent builds through 0.1.27 do not do that
+        # for /api/stop, and httpx keeps the connection. A "{}" body is then
+        # glued onto the next request line ("HTTP verb {}POST unhandled"),
+        # so the deeplink after HOME never launches and the TV stays on the
+        # launcher. Content-Length: 0 leaves nothing for that bug to prepend.
+        await self._post("/api/stop", content=b"")
+
+    async def agent_permissions(self) -> Optional[dict[str, bool]]:
+        """Special-access flags from /api/diagnostics, or None if unavailable."""
+        try:
+            data = await self._get("/api/diagnostics")
+        except BackendUnavailable:
+            return None
+        perms = data.get("permissions") if isinstance(data, dict) else None
+        if not isinstance(perms, dict) or not perms:
+            return None
+        return {
+            "overlay": bool(perms.get("overlay")),
+            "usage": bool(perms.get("usage")),
+            "notification": bool(perms.get("notification")),
+            "accessibility": bool(perms.get("accessibility")),
+        }
 
     async def upload_apk(self, apk_path: str | Path) -> dict[str, Any]:
         """POST a local APK to the Agent's /api/upload-apk (opens Install dialog)."""

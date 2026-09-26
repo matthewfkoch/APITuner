@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from apituner.adb_grant import GrantResult
+from apituner.adb_grant import AdbGrantError, GrantResult
 from apituner.auto_pair import AutoPairResult
+from apituner.backends.http_agent import HttpAgentBackend
 from apituner.config import ConfigStore
 from apituner.models import Channel, ControlConfig, Tuner
 
@@ -270,3 +271,68 @@ def test_grant_permissions_accepts_adb_tuner(
     assert r.status_code == 200
     assert r.json()["success"] is True
     assert seen == {"host": "192.0.2.13", "adb_port": 5555}
+
+
+def test_grant_skips_adb_when_agent_already_has_access(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    async def fake_perms(_self):
+        return {
+            "overlay": True,
+            "usage": True,
+            "notification": True,
+            "accessibility": True,
+        }
+
+    async def fake_grant(host: str, *, adb_port: int = 5555) -> GrantResult:
+        raise AssertionError("ADB should not run when the Agent already has access")
+
+    monkeypatch.setattr(HttpAgentBackend, "agent_permissions", fake_perms)
+    monkeypatch.setattr("apituner.main.grant_agent_permissions", fake_grant)
+    r = client.post("/api/tuners/agent1/grant-permissions", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["skipped_adb"] is True
+    assert "already has" in body["message"]
+
+
+def test_grant_adb_error_is_success_when_required_access_already_granted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    async def fake_perms(_self):
+        return {
+            "overlay": True,
+            "usage": True,
+            "notification": True,
+            "accessibility": False,
+        }
+
+    async def fake_grant(host: str, *, adb_port: int = 5555) -> GrantResult:
+        raise AdbGrantError("Could not connect to 192.0.2.12:5555")
+
+    monkeypatch.setattr(HttpAgentBackend, "agent_permissions", fake_perms)
+    monkeypatch.setattr("apituner.main.grant_agent_permissions", fake_grant)
+    r = client.post("/api/tuners/agent1/grant-permissions", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["accessibility"] is False
+    assert body["skipped_adb"] is False
+    assert "5555" in body["message"]
+
+
+def test_grant_unexpected_error_is_502_not_500(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    async def fake_perms(_self):
+        return None
+
+    async def fake_grant(host: str, *, adb_port: int = 5555) -> GrantResult:
+        raise RuntimeError("adb exploded")
+
+    monkeypatch.setattr(HttpAgentBackend, "agent_permissions", fake_perms)
+    monkeypatch.setattr("apituner.main.grant_agent_permissions", fake_grant)
+    r = client.post("/api/tuners/agent1/grant-permissions", json={})
+    assert r.status_code == 502
+    assert "adb exploded" in r.json()["detail"]

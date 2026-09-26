@@ -33,33 +33,72 @@ class AgentWebServer(
     private val playback = PlaybackDetector(context)
 
     override fun serve(session: IHTTPSession): Response {
+        // NanoHTTPD keep-alive does not discard an unread body. Any POST/PUT
+        // we return before parseBody (401, 404, /api/stop) glues those bytes
+        // onto the next request line ("HTTP verb {}POST unhandled").
+        val posted = HashMap<String, String>()
+        if (session.method == Method.POST || session.method == Method.PUT) {
+            try {
+                session.parseBody(posted)
+            } catch (e: Exception) {
+                Log.w(tag, "parseBody failed: ${e.message}")
+                val resp = json(
+                    mapOf("success" to false, "message" to "Bad request body: ${e.message}"),
+                    Response.Status.BAD_REQUEST,
+                )
+                resp.closeConnection(true)
+                return resp
+            }
+        }
         return try {
-            val uri = session.uri
-            val method = session.method
-
-            if (uri.startsWith("/api/") && !authorized(session)) {
-                return json(mapOf("success" to false, "message" to "Unauthorized"), Response.Status.UNAUTHORIZED)
-            }
-
-            when {
-                uri == "/" -> statusPage()
-                uri == "/api/health" && method == Method.GET -> json(mapOf("success" to true, "message" to "APITuner Agent running"))
-                uri == "/api/apps" && method == Method.GET -> getApps()
-                uri == "/api/info" && method == Method.GET -> getInfo()
-                uri == "/api/diagnostics" && method == Method.GET -> getDiagnostics()
-                uri == "/api/foreground" && method == Method.GET -> getForeground()
-                uri == "/api/playback" && method == Method.GET -> getPlayback()
-                uri == "/api/launch" && method == Method.POST -> launch(session)
-                uri == "/api/launch-intent" && method == Method.POST -> launchIntent(session)
-                uri == "/api/stop" && method == Method.POST -> handleStop()
-                uri == "/api/key" && method == Method.POST -> key(session)
-                uri == "/api/uninstall" && method == Method.POST -> uninstall(session)
-                uri == "/api/upload-apk" && method == Method.POST -> uploadApk(session)
-                else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
-            }
+            dispatch(session, posted)
         } catch (e: Exception) {
             Log.e(tag, "serve error: ${e.message}", e)
             json(mapOf("success" to false, "message" to "Server error: ${e.message}"))
+        }
+    }
+
+    private fun dispatch(session: IHTTPSession, posted: Map<String, String>): Response {
+        val uri = session.uri
+        val method = session.method
+
+        if (uri.startsWith("/api/") && !authorized(session)) {
+            discardTempFiles(posted)
+            return json(mapOf("success" to false, "message" to "Unauthorized"), Response.Status.UNAUTHORIZED)
+        }
+
+        return when {
+            uri == "/" -> statusPage()
+            uri == "/api/health" && method == Method.GET -> json(mapOf("success" to true, "message" to "APITuner Agent running"))
+            uri == "/api/apps" && method == Method.GET -> getApps()
+            uri == "/api/info" && method == Method.GET -> getInfo()
+            uri == "/api/diagnostics" && method == Method.GET -> getDiagnostics()
+            uri == "/api/foreground" && method == Method.GET -> getForeground()
+            uri == "/api/playback" && method == Method.GET -> getPlayback()
+            uri == "/api/launch" && method == Method.POST -> launch(posted)
+            uri == "/api/launch-intent" && method == Method.POST -> launchIntent(posted)
+            uri == "/api/stop" && method == Method.POST -> handleStop()
+            uri == "/api/key" && method == Method.POST -> key(posted)
+            uri == "/api/uninstall" && method == Method.POST -> uninstall(posted)
+            uri == "/api/upload-apk" && method == Method.POST -> uploadApk(posted)
+            else -> {
+                discardTempFiles(posted)
+                newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
+            }
+        }
+    }
+
+    /** Drop multipart temp files when the request is rejected before upload. */
+    private fun discardTempFiles(posted: Map<String, String>) {
+        for ((key, value) in posted) {
+            if (key == "postData" || value.isEmpty()) continue
+            val file = File(value)
+            if (file.isFile) {
+                try {
+                    file.delete()
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
@@ -70,10 +109,8 @@ class AgentWebServer(
         return provided == token
     }
 
-    private fun body(session: IHTTPSession): JsonObject {
-        val map = HashMap<String, String>()
-        session.parseBody(map)
-        val data = map["postData"] ?: "{}"
+    private fun body(posted: Map<String, String>): JsonObject {
+        val data = posted["postData"] ?: "{}"
         return try {
             gson.fromJson(data, JsonObject::class.java) ?: JsonObject()
         } catch (e: Exception) {
@@ -165,15 +202,15 @@ class AgentWebServer(
         return json(result)
     }
 
-    private fun launch(session: IHTTPSession): Response {
-        val pkg = body(session).get("packageName")?.asString
+    private fun launch(posted: Map<String, String>): Response {
+        val pkg = body(posted).get("packageName")?.asString
         if (pkg.isNullOrEmpty()) return json(mapOf("success" to false, "message" to "packageName required"))
         val result = appLauncher.launchApp(pkg)
         return json(mapOf("success" to result.success, "message" to result.message))
     }
 
-    private fun launchIntent(session: IHTTPSession): Response {
-        val obj = body(session)
+    private fun launchIntent(posted: Map<String, String>): Response {
+        val obj = body(posted)
         val pkg = obj.get("packageName")?.asString
         if (pkg.isNullOrEmpty()) return json(mapOf("success" to false, "message" to "packageName required"))
         val action = obj.get("action")?.asString
@@ -203,8 +240,8 @@ class AgentWebServer(
         return json(mapOf("success" to ok, "message" to "sent HOME"))
     }
 
-    private fun key(session: IHTTPSession): Response {
-        val key = body(session).get("key")?.asString
+    private fun key(posted: Map<String, String>): Response {
+        val key = body(posted).get("key")?.asString
         if (key.isNullOrEmpty()) return json(mapOf("success" to false, "message" to "key required"))
         val svc = KeyAccessibilityService.instance
             ?: return json(mapOf("success" to false, "message" to "Accessibility service not enabled"))
@@ -212,19 +249,17 @@ class AgentWebServer(
         return json(mapOf("success" to ok, "message" to if (ok) "sent $key" else "unsupported key $key"))
     }
 
-    private fun uninstall(session: IHTTPSession): Response {
-        val pkg = body(session).get("packageName")?.asString
+    private fun uninstall(posted: Map<String, String>): Response {
+        val pkg = body(posted).get("packageName")?.asString
         if (pkg.isNullOrEmpty()) return json(mapOf("success" to false, "message" to "packageName required"))
         val ok = appLauncher.uninstallApp(pkg)
         return json(mapOf("success" to ok, "message" to if (ok) "uninstall dialog opened" else "failed"))
     }
 
-    private fun uploadApk(session: IHTTPSession): Response {
+    private fun uploadApk(posted: Map<String, String>): Response {
         var apkFile: File? = null
         return try {
-            val files = HashMap<String, String>()
-            session.parseBody(files)
-            val temp = files["file"] ?: return json(mapOf("success" to false, "message" to "No file uploaded"))
+            val temp = posted["file"] ?: return json(mapOf("success" to false, "message" to "No file uploaded"))
             val apkDir = File(context.cacheDir, "apk").apply { if (!exists()) mkdirs() }
             apkFile = File(apkDir, "uploaded_${System.currentTimeMillis()}.apk")
             File(temp).copyTo(apkFile!!, overwrite = true)

@@ -78,6 +78,12 @@ const CAP_DEFS = {
 };
 
 // ---- UI utilities ----
+function looksLikeFireTv(info) {
+  if (!info) return false;
+  const text = `${info.manufacturer || ""} ${info.model || ""}`.toLowerCase();
+  return text.includes("amazon") || text.includes("fire") || /\baft[a-z0-9]*/.test(text);
+}
+
 function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
 function toast(msg, isErr, ms) {
   const t = document.getElementById("toast");
@@ -111,7 +117,10 @@ document.querySelectorAll(".nav-item").forEach((tab) => {
     if (tab.dataset.tab === "channels") loadChannels();
     if (tab.dataset.tab === "configurations") loadConfigurations();
     if (tab.dataset.tab === "tuners") loadTuners();
-    else stopAllPreviews();
+    else {
+      stopTunerErrorPolling();
+      stopAllPreviews();
+    }
     if (tab.dataset.tab === "options") loadOptions();
   });
 });
@@ -442,14 +451,15 @@ async function loadTuners() {
       : keysType === "adb" ? "ADB keys"
       : null;
     const isAgent = t.control.type === "http_agent";
-    // Fire setup: grant Agent special-access via network ADB (Agent primary, or
-    // Network ADB tuner that still has the Agent APK installed).
-    const showGrantPerms = isAgent || t.control.type === "adb";
+    const isAdb = t.control.type === "adb";
+    // ADB tuners are the Fire fallback. Agent cards reveal the button only
+    // after the device identifies as Fire TV — Google TV grants in the Agent app.
+    const showGrantPerms = isAgent || isAdb;
     const needsKeysWarn = isAgent && !keysType && catalogNeedsDpadKeys;
     const needsPair =
       t.control.type === "androidtv_remote" || t.control.type === "firetv_rest"
       || keysType === "androidtv_remote" || keysType === "firetv_rest";
-    const card = el(`<article class="card"></article>`);
+    const card = el(`<article class="card" data-tuner-id="${escapeAttr(t.id)}"></article>`);
     card.innerHTML = `
       <div class="card-head">
         <div>
@@ -470,6 +480,10 @@ async function loadTuners() {
       ${needsKeysWarn ? `<div class="card-callout-warn">Set Keys / D-pad on this Agent tuner, then Pair — needed for Max, App Play, and D-pad macros.</div>` : ""}
       <div class="card-meta">
         <div class="card-row"><span class="label">Encoder</span><span class="value mono">${escapeHtml(t.stream_endpoint)}</span></div>
+        <div class="card-row hidden" data-last-error>
+          <span class="label">Last error</span>
+          <span class="value"><span class="badge off" data-last-error-text></span></span>
+        </div>
       </div>
       <div class="cap-section">
         <div class="cap-label">Capabilities</div>
@@ -478,7 +492,7 @@ async function loadTuners() {
       <div class="card-actions">
         <button class="btn btn-sm btn-primary" data-act="preview" title="Preview the encoder stream">Preview</button>
         <button class="btn btn-sm btn-secondary" data-act="health" title="Check whether the device is reachable">Recheck connection</button>
-        ${showGrantPerms ? `<button class="btn btn-sm btn-secondary" data-act="grant-perms" title="One-time Fire TV permission grant over ADB">Grant permissions (ADB)</button>` : ""}
+        ${showGrantPerms ? `<button class="btn btn-sm btn-secondary ${isAdb ? "" : "hidden"}" data-act="grant-perms" title="One-time Fire TV permission grant over ADB">Grant permissions (ADB)</button>` : ""}
         ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Install the latest Agent APK on the TV">Update Agent</button>` : ""}
         ${needsPair ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
         <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
@@ -501,6 +515,7 @@ async function loadTuners() {
       card.classList.toggle("card-offline", !online);
     };
     const applyAgentVersion = (info) => {
+      if (grantBtn && isAgent) grantBtn.classList.toggle("hidden", !looksLikeFireTv(info));
       if (!versionBadge) return;
       const code = info && info.version_code != null ? Number(info.version_code) : null;
       const name = info && info.version_name ? String(info.version_name) : null;
@@ -545,6 +560,7 @@ async function loadTuners() {
           versionBadge.className = "badge muted";
           versionBadge.textContent = "Agent …";
           if (updateBtn) updateBtn.classList.add("hidden");
+          if (grantBtn && isAgent) grantBtn.classList.add("hidden");
         }
       } catch (err) {
         setHealth(false);
@@ -609,6 +625,38 @@ async function loadTuners() {
     list.appendChild(card);
     runHealthCheck();
   }
+  refreshTunerErrors();
+  startTunerErrorPolling();
+}
+
+let tunerErrorTimer = null;
+function stopTunerErrorPolling() {
+  if (tunerErrorTimer) {
+    clearInterval(tunerErrorTimer);
+    tunerErrorTimer = null;
+  }
+}
+function startTunerErrorPolling() {
+  stopTunerErrorPolling();
+  tunerErrorTimer = setInterval(refreshTunerErrors, 5000);
+}
+async function refreshTunerErrors() {
+  let data;
+  try {
+    data = await api.get("/api/status");
+  } catch (_) {
+    return;
+  }
+  const byId = {};
+  for (const row of data.tuners || []) byId[row.id] = row.last_error || "";
+  document.querySelectorAll("#tuner-list [data-tuner-id]").forEach((card) => {
+    const err = byId[card.dataset.tunerId] || "";
+    const row = card.querySelector("[data-last-error]");
+    const text = card.querySelector("[data-last-error-text]");
+    if (!row || !text) return;
+    text.textContent = err;
+    row.classList.toggle("hidden", !err);
+  });
 }
 
 /** Cleanup for the open preview modal stream. */
@@ -749,9 +797,14 @@ function renderCapabilityBadges(container, backendType, keysType) {
   container.innerHTML = "";
   const defs = [...(CAP_DEFS[backendType] || [])];
   if (keysType && keysType !== backendType) {
+    const sendKeys = defs.find((def) => def.cap === "keys");
+    if (sendKeys) {
+      sendKeys.hint = "Arrows, Enter, Home, and Back from Keys / D-pad. Pair that backend if this stays off.";
+      sendKeys.plane = "keys";
+    }
     const keyDefs = CAP_DEFS[keysType] || [];
     keyDefs.forEach((def) => {
-      if (def.label.includes("D-pad") || def.label === "Force-stop") {
+      if (def.label === "Force-stop") {
         defs.push({ ...def, label: def.label + " (keys)", hint: def.hint + " Uses Keys / D-pad." });
       }
     });
@@ -759,6 +812,7 @@ function renderCapabilityBadges(container, backendType, keysType) {
   defs.forEach((def) => {
     const badge = el(`<span class="badge cap-badge accent" title="${escapeAttr(def.hint)}">${escapeHtml(def.label)}</span>`);
     if (def.cap) badge.dataset.cap = def.cap;
+    if (def.plane) badge.dataset.plane = def.plane;
     if (def.always) badge.dataset.always = "1";
     container.appendChild(badge);
   });
@@ -773,10 +827,20 @@ async function refreshCapabilityStatus(container, tuner) {
     badges.forEach((badge) => {
       const key = badge.dataset.cap;
       const on = !!caps[key];
+      const optionalSendKeys = !on
+        && key === "keys"
+        && badge.dataset.plane !== "keys"
+        && !catalogNeedsDpadKeys;
       badge.classList.remove("accent", "on", "off", "muted");
-      badge.classList.add("cap-badge", on ? "on" : "off");
+      badge.classList.add("cap-badge", optionalSendKeys ? "muted" : (on ? "on" : "off"));
       const baseHint = badge.getAttribute("title") || "";
-      const status = on ? "Active on this device." : "Not available — grant the permission on the device or check the Agent app.";
+      const status = on
+        ? "Active on this device."
+        : (optionalSendKeys
+          ? "Optional. Deeplink tunes do not need Accessibility."
+          : (badge.dataset.plane === "keys"
+            ? "Pair Keys / D-pad on this tuner."
+            : "Not available — grant the permission on the device or check the Agent app."));
       badge.setAttribute("title", `${baseHint} ${status}`);
     });
   } catch {

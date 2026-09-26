@@ -8,7 +8,41 @@ import pytest
 from apituner.backends.base import Capabilities, ControlBackend, PlaybackState
 from apituner.config import ConfigStore
 from apituner.models import Channel, GlobalOptions
-from apituner.tuner_manager import TunerManager
+from apituner.tuner_manager import TunerManager, tune_not_ready_message
+
+
+def test_tune_not_ready_message_points_at_the_cause():
+    idle = tune_not_ready_message(
+        number="77",
+        name="MeTV",
+        playback=PlaybackState.IDLE,
+        title=None,
+        relaunches=2,
+        splash_extended=True,
+    )
+    assert "playback=IDLE" in idle
+    assert "Notification access is working" in idle
+
+    unknown = tune_not_ready_message(
+        number="77",
+        name="MeTV",
+        playback=PlaybackState.UNKNOWN,
+        title=None,
+        relaunches=0,
+    )
+    assert "Notification access" in unknown
+
+    verb = tune_not_ready_message(
+        number="77",
+        name="MeTV",
+        playback=PlaybackState.IDLE,
+        title=None,
+        relaunches=2,
+        relaunch_error="HTTP verb {}POST unhandled",
+    )
+    assert "Android home screen" not in verb
+    assert "malformed HTTP verb" in verb
+    assert "Update the APITuner server" in verb
 
 
 class StubBackend(ControlBackend):
@@ -833,6 +867,55 @@ async def test_wait_ready_after_relaunch_never_playing_fails(tmp_path):
     )
     assert ready is False
     assert relaunches == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_relaunch_does_not_extend_splash_wait(tmp_path, monkeypatch):
+    """A launch that throws after HOME must not add the 45s splash grace."""
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_STALE_SPLASH_GRACE_SECONDS", 1.5)
+    monkeypatch.setattr(tm, "_STALE_SPLASH_GRACE_MIN_TIMEOUT", 0.0)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+        raise RuntimeError("HTTP verb {}POST unhandled")
+
+    channel = Channel(
+        number=77,
+        name="MeTV",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/77",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=0.9,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.2,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.att.tv",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    elapsed = time.monotonic() - launch_at
+    assert ready is False
+    assert relaunches == 2
+    assert elapsed < 1.6
 
 
 @pytest.mark.asyncio

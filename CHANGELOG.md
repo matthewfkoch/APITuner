@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-09-26
+
+### Fixed
+- DirecTV (and any deeplink) relaunch no longer dumps the TV on the Android home screen. `POST /api/stop` was sent as `{}`; Agent **0.1.27** never reads that body, and NanoHTTPD then parses the next launch as `HTTP verb {}POST`. Stop is now an empty body, and the Agent client does not reuse keep-alive connections, so a leftover body cannot prefix the next request. Works with Agent **0.1.27** already installed. Agent **0.1.29** (`versionCode` 29) also reads every POST body before routing (401, 404, and `/api/stop` included).
+- A relaunch that fails after HOME is no longer logged as "Re-sent" and no longer adds the extra 45s splash wait while the TV sits on the launcher.
+- **Grant permissions (ADB)** on a second click no longer returns an internal server error when the Agent already has overlay, usage, and notification access (Google TV Streamer with network ADB port 5555 closed). Accessibility still off is reported in the message; Fire TV still tries ADB when it is missing.
+- Hybrid Agent + Android TV Remote: the **Send keys** badge follows the paired remote (not Agent Accessibility). Foreground detection uses the remote when the Agent has no current app. Playback stays on the Agent.
+- Tuner cards: **Grant permissions (ADB)** appears for Fire TV and Network ADB, not for Google TV. **Send keys** stays muted when Accessibility is off and the channel list does not need D-pad. The last tune error is shown on the card.
+- Diagnostics `recent_logs` omit successful Agent playback/info/health polls so a tune failure is not pushed out of the download. A tune timeout now says what playback did and what to check (notification access, overlay, or a deeplink rejected after HOME).
+
 ## [0.1.28] - 2026-09-21
 
 ### Changed
@@ -297,7 +307,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.28...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.29...HEAD
+[0.1.29]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.29
 [0.1.28]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.28
 [0.1.27]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.27
 [0.1.26]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.26

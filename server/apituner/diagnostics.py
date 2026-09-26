@@ -127,6 +127,7 @@ async def build_diagnostics(
         "notes": [
             "Tokens are redacted. LAN IPs and encoder URLs may be present.",
             "Channel deeplink lineup is omitted.",
+            "Successful Agent playback/info/health polls are omitted so tune errors stay in recent_logs.",
             "Share this file when asking for help on the Channels community forum.",
         ],
     }

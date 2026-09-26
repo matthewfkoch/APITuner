@@ -166,6 +166,52 @@ class TuneFailed(Exception):
     """The device failed to reach a playable state in time."""
 
 
+def tune_not_ready_message(
+    *,
+    number: str,
+    name: str,
+    playback: Optional[PlaybackState],
+    title: Optional[str],
+    relaunches: int,
+    relaunch_error: Optional[str] = None,
+    splash_extended: bool = False,
+) -> str:
+    """One line for the tuner card and diagnostics: what failed, and what to check."""
+    state = playback.name if isinstance(playback, PlaybackState) else "UNKNOWN"
+    detail = f"playback={state}, relaunches={relaunches}"
+    if splash_extended:
+        detail += ", splash wait extended"
+    if title:
+        detail += f", title={title!r}"
+    head = f"channel {number} ({name}) not ready within timeout ({detail})"
+    err = (relaunch_error or "").strip()
+    if err:
+        if "HTTP verb" in err or "{}POST" in err:
+            why = (
+                "HOME ran, then the Agent rejected the next deeplink "
+                "(malformed HTTP verb). Update the APITuner server."
+            )
+        else:
+            why = (
+                "HOME ran, then the deeplink failed, so the TV may be on "
+                f"the Android home screen. {err}"
+            )
+        return f"{head}. {why}"
+    if playback == PlaybackState.UNKNOWN:
+        return (
+            f"{head}. Playback was unknown. On an Agent tuner grant "
+            "Notification access. Android TV Remote only sees Cast playback, "
+            "which apps like DirecTV do not report."
+        )
+    if playback == PlaybackState.IDLE:
+        return (
+            f"{head}. Notification access is working, but the channel never "
+            "started playing. Check that the app is installed and overlay "
+            "permission is granted."
+        )
+    return f"{head}."
+
+
 def _new_tune_id() -> str:
     return uuid.uuid4().hex[:10]
 
@@ -945,6 +991,7 @@ class TunerManager:
         ):
             relaunch = _relaunch_deeplink
 
+        not_ready: list[str] = []
         ready = await self._wait_ready(
             backend,
             channel,
@@ -955,9 +1002,14 @@ class TunerManager:
             launch_at=launch_at,
             relaunch=relaunch,
             leftover_title=leftover_title,
+            failure=not_ready,
         )
         if not ready:
-            raise TuneFailed(f"channel {channel.number} not ready within timeout")
+            raise TuneFailed(
+                not_ready[0]
+                if not_ready
+                else f"channel {channel.number} not ready within timeout"
+            )
 
         if overlay is not None and overlay.global_options.check_for_and_clear_whos_watching_prompts:
             await self._clear_whos_watching(tuner, cmd_backend)
@@ -1174,6 +1226,7 @@ class TunerManager:
         launch_at: Optional[float] = None,
         relaunch: Optional[Callable[[], Awaitable[None]]] = None,
         leftover_title: Optional[str] = None,
+        failure: Optional[list[str]] = None,
     ) -> bool:
         loop = asyncio.get_event_loop()
         caps = await self._effective_capabilities(backend)
@@ -1208,6 +1261,8 @@ class TunerManager:
             min(2.0, relaunch_sec) if not same_app_switch else relaunch_sec
         )
         relaunched = False
+        last_relaunch_ok = False
+        last_relaunch_error: Optional[str] = None
         saw_playing = False
         seen_non_playing = False
         stale_playing = bool(same_app_switch and stale_pkg)
@@ -1234,8 +1289,24 @@ class TunerManager:
                     pass
             return await backend.playback_state(), None, None
 
+        def _not_ready() -> bool:
+            message = tune_not_ready_message(
+                number=str(channel.number),
+                name=channel.name,
+                playback=last_ps,
+                title=last_title,
+                relaunches=relaunch_count,
+                relaunch_error=last_relaunch_error,
+                splash_extended=splash_extended,
+            )
+            logger.warning("%s", message)
+            if failure is not None:
+                failure[:] = [message]
+            return False
+
         async def _maybe_relaunch(reason: str) -> None:
             nonlocal relaunched, relaunch_count, non_playing_since, launch_at, seen_non_playing
+            nonlocal last_relaunch_ok, last_relaunch_error
             if not can_relaunch or relaunch_count >= max_relaunches:
                 return
             # Splash / "Unknown Title" is still loading — use the full interval
@@ -1252,9 +1323,26 @@ class TunerManager:
             try:
                 await relaunch()  # type: ignore[misc]
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Deeplink relaunch failed: %s", exc)
+                # HOME may already have run inside the relaunch. Count the
+                # attempt so we don't hammer it, but do not treat it as a
+                # delivered deeplink — that extended the splash wait while
+                # the TV sat on the launcher ("HTTP verb {}POST").
+                last_relaunch_error = str(exc)
+                logger.warning(
+                    "Deeplink relaunch failed for %s (%s) after HOME: %s. "
+                    "The TV may be on the Android home screen.",
+                    channel.number,
+                    channel.name,
+                    exc,
+                )
+                relaunch_count += 1
+                relaunched = True
+                last_relaunch_ok = False
+                launch_at = loop.time()
+                return
             relaunch_count += 1
             relaunched = True
+            last_relaunch_ok = True
             non_playing_since = loop.time()
             launch_at = loop.time()
             seen_non_playing = False
@@ -1363,6 +1451,7 @@ class TunerManager:
                             await _maybe_relaunch("idle")
                         if (
                             stale_pkg
+                            and last_relaunch_ok
                             and relaunch_count >= max_relaunches
                             and not splash_extended
                             and float(options.tune_timeout_seconds or 0)
@@ -1424,25 +1513,16 @@ class TunerManager:
 
         # DirecTV leftover PLAYING / continue-watching / splash must not pass.
         if stale_pkg and not saw_playing:
-            logger.warning(
-                "Tune timeout for %s (%s) playback=%s title=%r relaunches=%s splash_extended=%s",
-                channel.number,
-                channel.name,
-                last_ps,
-                last_title,
-                relaunch_count,
-                splash_extended,
-            )
-            return False
+            return _not_ready()
         if same_app_switch:
             return True
         if relaunched and not saw_playing:
-            return False
+            return _not_ready()
         if caps.current_app:
             app = await backend.current_app()
             if app and app in targets:
                 return True
-        return False
+        return _not_ready()
 
     async def _effective_capabilities(self, backend: ControlBackend) -> Capabilities:
         """Prefer live Agent permission flags when available; merge hybrid keys."""

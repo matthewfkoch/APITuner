@@ -272,7 +272,9 @@ async def tuner_info(tuner_id: str, request: Request) -> dict:
     info = await manager.refresh_info(tuner_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Tuner not found or unreachable")
-    backend = manager.get_backend(tuner)
+    # Hybrid tuners: capabilities include the paired Keys / D-pad plane.
+    # Device info above stays on the Agent (model, packages, version).
+    backend = manager.get_command_backend(tuner)
     capabilities: dict[str, bool] = {}
     if hasattr(backend, "get_live_capabilities"):
         try:
@@ -799,6 +801,59 @@ async def agent_latest(force: bool = False) -> dict[str, Any]:
     return latest.to_dict()
 
 
+def _required_permissions(perms: dict[str, bool] | None) -> bool:
+    if not perms:
+        return False
+    return bool(perms.get("overlay") and perms.get("usage") and perms.get("notification"))
+
+
+def _already_granted_payload(
+    perms: dict[str, bool],
+    *,
+    adb_detail: str | None = None,
+    skipped_adb: bool = True,
+) -> dict[str, Any]:
+    accessibility = bool(perms.get("accessibility"))
+    message = "Agent already has overlay, usage, and notification access."
+    if accessibility:
+        message += " Accessibility is enabled too."
+    elif adb_detail:
+        message += (
+            " Accessibility is still off (only needed for BACK/HOME/RECENTS). "
+            "On Google TV enable it in the Agent app. On Fire TV, network ADB "
+            f"port 5555 has to be reachable to bind it. ADB: {adb_detail}"
+        )
+    else:
+        message += (
+            " Accessibility is still off (only needed for BACK/HOME/RECENTS). "
+            "On Google TV enable it in the Agent app."
+        )
+    return {
+        "success": True,
+        "overlay": True,
+        "usage": True,
+        "notification": True,
+        "accessibility": accessibility,
+        "skipped_adb": skipped_adb,
+        "message": message,
+    }
+
+
+async def _agent_permissions(
+    request: Request, tuner: Tuner
+) -> dict[str, bool] | None:
+    if tuner.control.type != "http_agent":
+        return None
+    backend = _manager(request).get_backend(tuner)
+    if not isinstance(backend, HttpAgentBackend):
+        return None
+    try:
+        return await backend.agent_permissions()
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not read Agent permissions for %s", tuner.name, exc_info=True)
+        return None
+
+
 @app.post("/api/tuners/{tuner_id}/grant-permissions")
 async def grant_tuner_permissions(tuner_id: str, request: Request) -> dict:
     """One-time Agent permission grant via network ADB (Fire TV setup).
@@ -826,10 +881,35 @@ async def grant_tuner_permissions(tuner_id: str, request: Request) -> dict:
         adb_port = tuner.control.port or 5555
     else:
         adb_port = 5555
+
+    already = await _agent_permissions(request, tuner)
+    # Required special-access is already on the device (typical after granting
+    # in the Agent UI on Google TV). Don't fail the button just because
+    # network ADB :5555 is down — that was a 500/502 on a second click.
+    if (
+        already is not None
+        and _required_permissions(already)
+        and already.get("accessibility")
+    ):
+        return _already_granted_payload(already)
+
     try:
         result = await grant_agent_permissions(host, adb_port=adb_port)
     except AdbGrantError as exc:
+        if already is not None and _required_permissions(already):
+            return _already_granted_payload(
+                already, adb_detail=str(exc), skipped_adb=False
+            )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Permission grant failed for %s", tuner_id)
+        if already is not None and _required_permissions(already):
+            return _already_granted_payload(
+                already, adb_detail=str(exc), skipped_adb=False
+            )
+        raise HTTPException(
+            status_code=502, detail=f"Permission grant failed: {exc}"
+        ) from exc
     await _manager(request).refresh_info(tuner_id)
     payload = result.to_dict()
     payload["message"] = (

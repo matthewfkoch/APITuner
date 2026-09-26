@@ -10,8 +10,8 @@ android {
         applicationId = "com.apituner.agent"
         minSdk = 23
         targetSdk = 34
-        versionCode = 27
-        versionName = "0.1.27"
+        versionCode = 29
+        versionName = "0.1.29"
     }
 
     signingConfigs {

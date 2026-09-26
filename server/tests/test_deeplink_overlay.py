@@ -309,3 +309,56 @@ async def test_app_play_uses_keys_backend(tmp_path):
     assert remote.launches == []
     assert remote.keys[:2] == ["POWER", "HOME"]
     assert remote.keys[-1] == "DPAD_CENTER"
+
+
+class _PairableKeys(RecordingBackend):
+    def __init__(self) -> None:
+        super().__init__(dpad=True)
+        self.paired = False
+        self.app: Optional[str] = "com.att.tv"
+
+    @property
+    def requires_pairing(self) -> bool:
+        return True
+
+    async def is_paired(self) -> bool:
+        return self.paired
+
+    async def current_app(self) -> Optional[str]:
+        return self.app
+
+
+class _AgentNoForeground(RecordingBackend):
+    def __init__(self) -> None:
+        super().__init__(dpad=False, keys=False)
+        self.app: Optional[str] = None
+
+    async def get_live_capabilities(self) -> dict:
+        return {"keys": False, "current_app": True, "playback_state": True, "dpad": False}
+
+    async def current_app(self) -> Optional[str]:
+        return self.app
+
+
+@pytest.mark.asyncio
+async def test_hybrid_foreground_falls_back_to_remote():
+    agent = _AgentNoForeground()
+    remote = _PairableKeys()
+    split = SplitControlBackend(agent, remote)
+    assert await split.current_app() == "com.att.tv"
+    agent.app = "com.att.tv.openvideo"
+    assert await split.current_app() == "com.att.tv.openvideo"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_dpad_capability_requires_pairing():
+    agent = _AgentNoForeground()
+    remote = _PairableKeys()
+    split = SplitControlBackend(agent, remote)
+    caps = await split.get_live_capabilities()
+    assert caps["dpad"] is True
+    assert caps["keys"] is False
+    remote.paired = True
+    caps = await split.get_live_capabilities()
+    assert caps["dpad"] is True
+    assert caps["keys"] is True

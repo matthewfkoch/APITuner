@@ -176,7 +176,12 @@ class AndroidTvRemoteBackend(ControlBackend):
 
     async def current_app(self) -> Optional[str]:
         await self.connect()
-        return self._remote.current_app
+        raw = self._remote.current_app
+        if not raw:
+            return None
+        # Some builds report "package/activity". Callers compare package names.
+        pkg = str(raw).split("/", 1)[0].strip()
+        return pkg or None
 
     async def stop(self) -> None:
         # HOME returns to the Google TV launcher, which stops playback.

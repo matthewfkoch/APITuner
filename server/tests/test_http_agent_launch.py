@@ -103,6 +103,22 @@ async def test_launch_rejects_success_false():
 
 
 @pytest.mark.asyncio
+async def test_stop_sends_empty_body_so_keepalive_is_not_poisoned():
+    """Agent <=0.1.27 does not read the /api/stop body. '{}' becomes '{}POST'."""
+    seen: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.content)
+        assert request.headers.get("content-length") == "0"
+        return httpx.Response(200, json={"success": True, "message": "sent HOME"})
+
+    backend = _backend_with_transport(handler)
+    await backend.stop()
+    assert seen == [b""]
+    await backend.close()
+
+
+@pytest.mark.asyncio
 async def test_launch_ok_on_success_true():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"success": True, "message": "launched"})

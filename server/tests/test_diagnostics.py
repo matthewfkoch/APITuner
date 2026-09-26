@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apituner.config import ConfigStore
-from apituner.log_buffer import RingBufferHandler, install_log_buffer
+from apituner.log_buffer import DropRoutineHttpPolls, RingBufferHandler, install_log_buffer
 from apituner.models import ControlConfig, Tuner
 
 
@@ -55,6 +55,26 @@ def test_ring_buffer_captures_lines():
     log.info("hello-ring")
     assert any("hello-ring" in line for line in handler.lines())
     log.removeHandler(handler)
+
+
+def test_ring_buffer_drops_routine_playback_polls():
+    handler = RingBufferHandler(capacity=10)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.addFilter(DropRoutineHttpPolls())
+    log = logging.getLogger("httpx")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    poll = 'HTTP Request: GET http://192.0.2.1:9092/api/playback "HTTP/1.1 200 OK"'
+    launch = (
+        'HTTP Request: POST http://192.0.2.1:9092/api/launch-intent '
+        '"HTTP/1.1 400 Bad Request"'
+    )
+    log.info(poll)
+    log.info(launch)
+    lines = handler.lines()
+    log.removeHandler(handler)
+    assert not any("/api/playback" in line for line in lines)
+    assert any("launch-intent" in line and "400" in line for line in lines)
 
 
 def test_diagnostics_download_redacts_token(client: TestClient):

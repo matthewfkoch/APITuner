@@ -134,9 +134,15 @@ class SplitControlBackend(ControlBackend):
         await self._keys.send_key(key)
 
     async def current_app(self) -> Optional[str]:
+        # Agent Usage Access is the normal signal. When it has no package
+        # (permission missing or not yet reported), the remote IME app is enough.
         if self._launch.capabilities.current_app:
-            return await self._launch.current_app()
-        return await self._keys.current_app()
+            app = await self._launch.current_app()
+            if app:
+                return app
+        if self._keys.capabilities.current_app:
+            return await self._keys.current_app()
+        return None
 
     async def playback_state(self) -> PlaybackState:
         if self._launch.capabilities.playback_state:
@@ -206,8 +212,22 @@ class SplitControlBackend(ControlBackend):
                     live = dict(raw)
             except Exception:  # noqa: BLE001
                 pass
-        # Keys plane supplies real D-pad even when Agent reports keys=False for DPAD.
-        live["keys"] = True if self._keys.capabilities.keys else live.get("keys", False)
-        live["dpad"] = bool(self._keys.capabilities.dpad or live.get("dpad", False))
+        # A paired remote/ADB keys plane supplies real keys even when Agent
+        # Accessibility is off. An unpaired remote must not look ready.
+        keys_ready = True
+        if self._keys.requires_pairing:
+            try:
+                keys_ready = await self._keys.is_paired()
+            except Exception:  # noqa: BLE001
+                keys_ready = False
+        if keys_ready and self._keys.capabilities.keys:
+            live["keys"] = True
+        # dpad stays on when a keys plane is configured so App Play can start
+        # and fail with a pair error. The Send keys badge uses ``keys``, which
+        # is on only after that plane is paired.
+        if self._keys.capabilities.dpad:
+            live["dpad"] = True
+        else:
+            live["dpad"] = bool(live.get("dpad", False))
         live["shell"] = bool(self._keys.capabilities.shell or live.get("shell", False))
         return live

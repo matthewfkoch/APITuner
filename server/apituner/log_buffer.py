@@ -8,6 +8,29 @@ from collections import deque
 from typing import Deque, Optional
 
 
+# Successful polls of these paths fire several times a second during a tune
+# and used to push the actual failure out of the diagnostics download.
+_ROUTINE_POLL_PATHS = (
+    "/api/playback",
+    "/api/info",
+    "/api/health",
+    "/api/foreground",
+    "/api/diagnostics",
+)
+
+
+class DropRoutineHttpPolls(logging.Filter):
+    """Keep Agent errors and launches; drop healthy playback/info polls."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not record.name.startswith("httpx"):
+            return True
+        message = record.getMessage()
+        if "200" not in message:
+            return True
+        return not any(path in message for path in _ROUTINE_POLL_PATHS)
+
+
 class RingBufferHandler(logging.Handler):
     """Keeps the last N formatted log records in memory."""
 
@@ -52,6 +75,7 @@ def install_log_buffer(
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     )
+    handler.addFilter(DropRoutineHttpPolls())
     root = logging.getLogger(logger_name)
     root.addHandler(handler)
     # Also capture httpx request lines used in tune/stream debugging.

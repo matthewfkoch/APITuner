@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- YouTube TV sports: a playing program title (`Nebraska at Michigan State` while tuning BIG10HD) is ready. The guide name is not in the media session. An unchanged show left on screen during a same-app switch is still rejected.
+- A deeplink that never brings the app forward is re-sent. Those tunes were failing idle with `relaunches=0`.
+
 ## [0.1.30] - 2026-09-26
 
 ### Fixed

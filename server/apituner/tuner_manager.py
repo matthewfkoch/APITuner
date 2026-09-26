@@ -1329,9 +1329,13 @@ class TunerManager:
                 wait = max(wait, _STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS)
             if loop.time() - launch_at < wait:
                 return
-            # DirecTV leftover PLAYING can show while Usage Access still
-            # reports the launcher; still re-send the channel intent.
-            if not stale_pkg and not await _foreground_in_targets():
+            # A dropped deeplink stays on the launcher. Re-send it. DirecTV
+            # that is already open waits longer above so HOME does not restart it.
+            if (
+                reason != "idle"
+                and not stale_pkg
+                and not await _foreground_in_targets()
+            ):
                 return
             try:
                 await relaunch()  # type: ignore[misc]
@@ -1415,7 +1419,21 @@ class TunerManager:
                         # (Chicago Fire leftover → Golden Girls on MeTV).
                         accept = True
                     elif title_match is False:
-                        if (
+                        if not stale_pkg:
+                            # YouTube TV reports the program (Nebraska at
+                            # Michigan State), not the guide name (BIG10HD).
+                            # Accept PLAYING unless this is the same show that
+                            # was already on before a same-app switch.
+                            if same_app_switch and had_leftover and still_leftover:
+                                logger.info(
+                                    "Ignoring playback title %r while tuning %s",
+                                    sess_title,
+                                    channel.name,
+                                )
+                                await _maybe_relaunch("title_mismatch")
+                            else:
+                                accept = True
+                        elif (
                             stale_pkg
                             and not had_leftover
                             and not same_app_switch

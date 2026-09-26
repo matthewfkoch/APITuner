@@ -622,6 +622,92 @@ async def test_yttv_still_relaunches_once(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_yttv_program_title_is_ready(tmp_path):
+    """BIG10HD log: session title is the game, not the guide name."""
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.google.android.youtube.tvunplugged"
+    backend.playback = PlaybackState.PLAYING
+    backend.title = "Nebraska at Michigan State"
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=211,
+        name="BIG10HD",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/big10",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=3.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=6.0,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + 3.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert relaunches == 0
+
+
+@pytest.mark.asyncio
+async def test_yttv_idle_on_launcher_relaunches(tmp_path):
+    """Sports lane log: launch returned 200 but the app never came forward."""
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.google.android.apps.tv.launcherx"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+        backend.playback = PlaybackState.PLAYING
+        backend.title = "Event"
+        backend.current = "com.google.android.youtube.tvunplugged"
+
+    channel = Channel(
+        number=9114,
+        name="YTTV Sports 15",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/lane",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=3.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.3,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + 3.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert relaunches == 1
+
+
+@pytest.mark.asyncio
 async def test_directv_unknown_title_then_show_is_ready(tmp_path):
     """First-boot dump: Unknown Title splash, then Cozi's actual program."""
     store = ConfigStore(data_dir=tmp_path)

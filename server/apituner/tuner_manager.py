@@ -55,6 +55,9 @@ _STALE_PLAYBACK_PACKAGES = frozenset(
 _STALE_SPLASH_GRACE_SECONDS = 45.0
 _STALE_SPLASH_GRACE_MIN_TIMEOUT = 20.0
 _HOME_BEFORE_DEEPLINK_SECONDS = 0.8
+# DirecTV often needs ~10s after a good deeplink before MediaSession flips
+# to PLAYING. A 2s idle HOME restarts that launch (MeTV log, 0.1.29).
+_STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS = 15.0
 _GENERIC_TITLE_TOKENS = frozenset(
     {
         "live",
@@ -1314,6 +1317,16 @@ class TunerManager:
             wait = relaunch_sec if reason == "generic_title" else (
                 first_relaunch_sec if relaunch_count == 0 else relaunch_sec
             )
+            if (
+                reason == "idle"
+                and stale_pkg
+                and relaunch_count == 0
+                and not same_app_switch
+                and relaunch_sec >= 2.0
+                and await _foreground_in_targets()
+            ):
+                # App is open and still starting. HOME here restarts it.
+                wait = max(wait, _STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS)
             if loop.time() - launch_at < wait:
                 return
             # DirecTV leftover PLAYING can show while Usage Access still
@@ -1363,7 +1376,13 @@ class TunerManager:
                 _ps0, _pkg0, leftover_title = await _snapshot()
                 if leftover_title is not None:
                     leftover_title = str(leftover_title).strip() or None
-                if _ps0 == PlaybackState.PLAYING and leftover_title:
+                # Same-app only. A cold start that is already PLAYING is the
+                # channel coming up, not a session left from before the launch.
+                if (
+                    _ps0 == PlaybackState.PLAYING
+                    and leftover_title
+                    and same_app_switch
+                ):
                     had_leftover = True
             except Exception:  # noqa: BLE001
                 leftover_title = None
@@ -1397,6 +1416,17 @@ class TunerManager:
                         accept = True
                     elif title_match is False:
                         if (
+                            stale_pkg
+                            and not had_leftover
+                            and not same_app_switch
+                            and relaunch_count == 0
+                            and sess_title
+                            and not _title_is_placeholder(sess_title)
+                        ):
+                            # Cold start: the first real program title is the
+                            # channel (Red Sparrow on MeTV), not a leftover.
+                            accept = True
+                        elif (
                             stale_pkg
                             and relaunch_count >= max_relaunches
                             and not had_leftover

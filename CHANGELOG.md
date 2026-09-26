@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-09-26
+
+### Fixed
+- DirecTV cold start no longer sends HOME a few seconds after a successful deeplink. MediaSession often appears around 10s later (MeTV log: idle, then `Red Sparrow`). Restarting at 2s was the “it tunes, then the app restarts” report. The first real program title on a cold start counts as the channel. Pairing Android TV Remote does not change this path; launches still go through the Agent. Server only — Agent **0.1.29** is unchanged.
+
 ## [0.1.29] - 2026-09-26
 
 ### Fixed
@@ -307,7 +312,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.29...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.30...HEAD
+[0.1.30]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.30
 [0.1.29]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.29
 [0.1.28]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.28
 [0.1.27]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.27

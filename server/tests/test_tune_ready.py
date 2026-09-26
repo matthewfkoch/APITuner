@@ -481,6 +481,60 @@ async def test_directv_pbs_and_grit_title_changes_are_ready(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_directv_cold_start_show_is_ready_without_restart(tmp_path):
+    """0.1.29 MeTV log: app opens, session arrives late as a program title.
+
+    HOME at 2s restarted DirecTV before MediaSession existed. A cold start
+    whose first real title is the show should be accepted, not relaunched.
+    """
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.att.tv"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    async def _session_arrives() -> None:
+        await asyncio.sleep(0.4)
+        backend.playback = PlaybackState.PLAYING
+        backend.title = "Red Sparrow"
+
+    channel = Channel(
+        number=77,
+        name="MeTV",
+        package_name="com.att.tv",
+        url="https://stream.directv.com/watch/77",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=8.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=6.0,
+    )
+    launch_at = time.monotonic()
+    waiter = asyncio.create_task(
+        manager._wait_ready(
+            backend,
+            channel,
+            "com.att.tv",
+            options,
+            launch_at + 8.0,
+            prior_app=None,
+            launch_at=launch_at,
+            relaunch=_relaunch,
+        )
+    )
+    await _session_arrives()
+    ready = await waiter
+    assert ready is True
+    assert relaunches == 0
+
+
+@pytest.mark.asyncio
 async def test_directv_idle_then_continue_watching_second_relaunch(tmp_path):
     """First-boot dump: idle relaunch, Roseanne leftover, second relaunch, then GRIT."""
     store = ConfigStore(data_dir=tmp_path)

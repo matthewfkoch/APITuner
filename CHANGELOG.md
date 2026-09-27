@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-09-26
+
 ### Fixed
 - YouTube TV sports: a playing program title (`Nebraska at Michigan State` while tuning BIG10HD) is ready. The guide name is not in the media session. An unchanged show left on screen during a same-app switch is still rejected.
 - A deeplink that never brings the app forward is re-sent. Those tunes were failing idle with `relaunches=0`.
@@ -319,7 +321,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.30...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.31...HEAD
+[0.1.31]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.31
 [0.1.30]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.30
 [0.1.29]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.29
 [0.1.28]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.28

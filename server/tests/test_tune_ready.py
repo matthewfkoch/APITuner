@@ -44,6 +44,17 @@ def test_tune_not_ready_message_points_at_the_cause():
     assert "malformed HTTP verb" in verb
     assert "Update the APITuner server" in verb
 
+    sitting = tune_not_ready_message(
+        number="9170",
+        name="YTTV Sports 71",
+        playback=PlaybackState.IDLE,
+        title=None,
+        relaunches=2,
+        foreground="com.google.android.youtube.tvunplugged",
+    )
+    assert "foreground='com.google.android.youtube.tvunplugged'" in sitting
+    assert "relaunches=2" in sitting
+
 
 class StubBackend(ControlBackend):
     capabilities = Capabilities(current_app=True, playback_state=True)
@@ -704,6 +715,252 @@ async def test_yttv_idle_on_launcher_relaunches(tmp_path):
         relaunch=_relaunch,
     )
     assert ready is True
+    assert relaunches == 1
+
+
+@pytest.mark.asyncio
+async def test_yttv_second_idle_resend_after_gap_starts_playback(tmp_path, monkeypatch):
+    """Launcher stays idle through the first resend; the later resend plays."""
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_NONSTALE_SECOND_RESEND_SECONDS", 0.18)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.google.android.apps.tv.launcherx"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+    sent_at: list[float] = []
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+        sent_at.append(time.monotonic())
+        if relaunches >= 2:
+            backend.playback = PlaybackState.PLAYING
+            backend.title = "Ole Miss at Florida"
+            backend.current = "com.google.android.youtube.tvunplugged"
+
+    channel = Channel(
+        number=9114,
+        name="YTTV Sports 15",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/lane",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=2.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.12,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + 2.0,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert relaunches == 2
+    assert sent_at[1] - sent_at[0] >= 0.16
+
+
+@pytest.mark.asyncio
+async def test_yttv_in_front_waits_full_interval_before_resend(tmp_path, monkeypatch):
+    """An open app is not CLEAR_TOP'd at the 2s cold-start mark."""
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_COLD_START_RESEND_SECONDS", 0.08)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.google.android.youtube.tvunplugged"
+    backend.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=9114,
+        name="YTTV Sports 15",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/lane",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=0.22,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.45,
+    )
+    launch_at = time.monotonic()
+    await manager._wait_ready(
+        backend,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    elapsed = time.monotonic() - launch_at
+    assert relaunches == 0
+    assert elapsed >= 0.15
+    assert elapsed < options.deeplink_relaunch_seconds
+
+
+@pytest.mark.asyncio
+async def test_yttv_remote_foreground_delays_first_resend(tmp_path, monkeypatch):
+    """Agent with no package defers to the paired remote before a 2s CLEAR_TOP."""
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_COLD_START_RESEND_SECONDS", 0.08)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    agent = StubBackend()
+    agent.current = None
+    agent.playback = PlaybackState.IDLE
+    remote = StubBackend()
+    remote.current = "com.google.android.youtube.tvunplugged"
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=9114,
+        name="YTTV Sports 15",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/lane",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=0.22,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.45,
+    )
+    launch_at = time.monotonic()
+    await manager._wait_ready(
+        agent,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+        foreground_backend=remote,
+    )
+    elapsed = time.monotonic() - launch_at
+    assert relaunches == 0
+    assert elapsed >= 0.15
+    assert elapsed < options.deeplink_relaunch_seconds
+
+
+@pytest.mark.asyncio
+async def test_yttv_agent_foreground_wins_over_remote(tmp_path, monkeypatch):
+    """A package from the Agent is not replaced by the remote."""
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_COLD_START_RESEND_SECONDS", 0.08)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    agent = StubBackend()
+    agent.current = "com.google.android.apps.tv.launcherx"
+    agent.playback = PlaybackState.IDLE
+    remote = StubBackend()
+    remote.current = "com.google.android.youtube.tvunplugged"
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=9114,
+        name="YTTV Sports 15",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/lane",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=0.22,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.45,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        agent,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+        foreground_backend=remote,
+    )
+    assert ready is False
+    assert relaunches == 1
+
+
+@pytest.mark.asyncio
+async def test_yttv_dead_remote_does_not_fail_tune(tmp_path, monkeypatch):
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_COLD_START_RESEND_SECONDS", 0.08)
+
+    class DeadRemote(StubBackend):
+        async def current_app(self) -> str | None:
+            raise RuntimeError("not connected")
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    agent = StubBackend()
+    agent.current = None
+    agent.playback = PlaybackState.IDLE
+    relaunches = 0
+
+    async def _relaunch() -> None:
+        nonlocal relaunches
+        relaunches += 1
+
+    channel = Channel(
+        number=9114,
+        name="YTTV Sports 15",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/lane",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=0.22,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.45,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        agent,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + options.tune_timeout_seconds,
+        prior_app=None,
+        launch_at=launch_at,
+        relaunch=_relaunch,
+        foreground_backend=DeadRemote(),
+    )
+    assert ready is False
     assert relaunches == 1
 
 

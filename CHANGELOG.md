@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - YouTube TV sports: a playing program title (`Nebraska at Michigan State` while tuning BIG10HD) is ready. The guide name is not in the media session. An unchanged show left on screen during a same-app switch is still rejected.
 - A deeplink that never brings the app forward is re-sent. Those tunes were failing idle with `relaunches=0`.
+- YouTube TV that stays idle after that first resend gets one more deeplink 12s later, past the window where a good resend becomes playback (about 5–9s). If the app is already in front, the first resend waits the full interval instead of 2s, so it does not reset a launch that is about to play. DirecTV splash handling is unchanged.
+- Agent **0.1.30** (`versionCode` 30): a show that has been playing for more than a few minutes still reports its package. Resume events are read over six hours, a later pause or move-to-background clears that app, and the usage-stats fallback is no longer limited to 30 seconds.
+- Deeplink wait asks the paired Android TV Remote when the Agent has no foreground package, so an open YouTube TV session is not reset at 2 seconds. Playback and launches stay on the Agent. A remote that is not connected does not fail the tune.
 
 ## [0.1.30] - 2026-09-26
 

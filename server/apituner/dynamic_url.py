@@ -193,7 +193,7 @@ async def resolve_dynamic_url(
                     continue
                 text = str(found).strip()
                 if text and text.lower() not in ("none", "null"):
-                    logger.info("Resolved dynamic URL via JSON key %s", key)
+                    logger.info("Resolved dynamic URL via JSON key %s: %s", key, text)
                     return text
             raise DynamicUrlError(
                 f"no event on this lane ({fetch_url!r} JSON missing deeplink; "
@@ -209,5 +209,5 @@ async def resolve_dynamic_url(
     first_line = body.splitlines()[0].strip()
     if not first_line:
         raise DynamicUrlError(f"Dynamic URL {fetch_url!r} returned empty deeplink")
-    logger.info("Resolved dynamic URL as text (%d chars)", len(first_line))
+    logger.info("Resolved dynamic URL as text: %s", first_line)
     return first_line

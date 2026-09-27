@@ -58,6 +58,13 @@ _HOME_BEFORE_DEEPLINK_SECONDS = 0.8
 # DirecTV often needs ~10s after a good deeplink before MediaSession flips
 # to PLAYING. A 2s idle HOME restarts that launch (MeTV log, 0.1.29).
 _STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS = 15.0
+# Cold start when the target app is not in front yet. Same-app switches and
+# an app that is already open wait the full deeplink_relaunch_seconds instead.
+_COLD_START_RESEND_SECONDS = 2.0
+# YouTube TV relaunch is CLEAR_TOP|SINGLE_TOP. A second intent at 6s lands
+# inside the window where a good first resend becomes PLAYING (5–9s). Wait
+# past that, then send one more time if playback is still idle.
+_NONSTALE_SECOND_RESEND_SECONDS = 12.0
 _GENERIC_TITLE_TOKENS = frozenset(
     {
         "live",
@@ -178,6 +185,7 @@ def tune_not_ready_message(
     relaunches: int,
     relaunch_error: Optional[str] = None,
     splash_extended: bool = False,
+    foreground: Optional[str] = None,
 ) -> str:
     """One line for the tuner card and diagnostics: what failed, and what to check."""
     state = playback.name if isinstance(playback, PlaybackState) else "UNKNOWN"
@@ -186,6 +194,8 @@ def tune_not_ready_message(
         detail += ", splash wait extended"
     if title:
         detail += f", title={title!r}"
+    if foreground is not None:
+        detail += f", foreground={foreground or 'unknown'!r}"
     head = f"channel {number} ({name}) not ready within timeout ({detail})"
     err = (relaunch_error or "").strip()
     if err:
@@ -1006,6 +1016,7 @@ class TunerManager:
             relaunch=relaunch,
             leftover_title=leftover_title,
             failure=not_ready,
+            foreground_backend=cmd_backend,
         )
         if not ready:
             raise TuneFailed(
@@ -1230,6 +1241,7 @@ class TunerManager:
         relaunch: Optional[Callable[[], Awaitable[None]]] = None,
         leftover_title: Optional[str] = None,
         failure: Optional[list[str]] = None,
+        foreground_backend: Optional[ControlBackend] = None,
     ) -> bool:
         loop = asyncio.get_event_loop()
         caps = await self._effective_capabilities(backend)
@@ -1256,12 +1268,17 @@ class TunerManager:
         can_relaunch = relaunch is not None and relaunch_sec > 0
         relaunch_count = 0
         stale_pkg = any(p in _STALE_PLAYBACK_PACKAGES for p in targets)
-        max_relaunches = 2 if stale_pkg else 1
+        # DirecTV and other deeplink apps both get two resends. The second
+        # non-DirecTV resend waits _NONSTALE_SECOND_RESEND_SECONDS so it does
+        # not CLEAR_TOP a launch that is about to play.
+        max_relaunches = 2
         splash_extended = False
         last_ps: Optional[PlaybackState] = None
         last_title: Optional[str] = None
         first_relaunch_sec = (
-            min(2.0, relaunch_sec) if not same_app_switch else relaunch_sec
+            min(_COLD_START_RESEND_SECONDS, relaunch_sec)
+            if not same_app_switch
+            else relaunch_sec
         )
         relaunched = False
         last_relaunch_ok = False
@@ -1275,11 +1292,39 @@ class TunerManager:
             await asyncio.sleep(min(3.0, max(0.0, deadline - loop.time())))
             return True
 
+        async def _read_foreground(source: ControlBackend) -> Optional[str]:
+            try:
+                app = await source.current_app()
+            except Exception:  # noqa: BLE001
+                return None
+            text = str(app).strip() if app else ""
+            return text or None
+
+        async def _foreground_package() -> Optional[str]:
+            # Agent first. A paired remote fills in when Usage Access has no
+            # package. A remote that is not connected must not fail the tune.
+            if caps.current_app:
+                app = await _read_foreground(backend)
+                if app:
+                    return app
+            extra = foreground_backend
+            if extra is not None and extra is not backend:
+                return await _read_foreground(extra)
+            return None
+
         async def _foreground_in_targets() -> bool:
-            if not caps.current_app:
-                return False
-            app = await backend.current_app()
+            app = await _foreground_package()
             return bool(app and app in targets)
+
+        async def _idle_resend_wait() -> float:
+            """Seconds from the last intent before the next non-DirecTV idle resend."""
+            if relaunch_count == 0:
+                # App already open: a 2s CLEAR_TOP can reset a launch that is
+                # about to produce a media session. Wait the full interval.
+                if await _foreground_in_targets():
+                    return relaunch_sec
+                return first_relaunch_sec
+            return _NONSTALE_SECOND_RESEND_SECONDS
 
         async def _snapshot() -> tuple[PlaybackState, Optional[str], Optional[str]]:
             snap_fn = getattr(backend, "playback_snapshot", None)
@@ -1292,7 +1337,13 @@ class TunerManager:
                     pass
             return await backend.playback_state(), None, None
 
-        def _not_ready() -> bool:
+        async def _not_ready() -> bool:
+            looked_up = caps.current_app or (
+                foreground_backend is not None and foreground_backend is not backend
+            )
+            foreground: Optional[str] = None
+            if looked_up:
+                foreground = await _foreground_package() or ""
             message = tune_not_ready_message(
                 number=str(channel.number),
                 name=channel.name,
@@ -1301,6 +1352,7 @@ class TunerManager:
                 relaunches=relaunch_count,
                 relaunch_error=last_relaunch_error,
                 splash_extended=splash_extended,
+                foreground=foreground,
             )
             logger.warning("%s", message)
             if failure is not None:
@@ -1314,9 +1366,14 @@ class TunerManager:
                 return
             # Splash / "Unknown Title" is still loading — use the full interval
             # so a 2s cold-start retry does not kill a working first tune.
-            wait = relaunch_sec if reason == "generic_title" else (
-                first_relaunch_sec if relaunch_count == 0 else relaunch_sec
-            )
+            if reason == "generic_title":
+                wait = relaunch_sec
+            elif reason == "idle" and not stale_pkg:
+                wait = await _idle_resend_wait()
+            elif relaunch_count == 0:
+                wait = first_relaunch_sec
+            else:
+                wait = relaunch_sec
             if (
                 reason == "idle"
                 and stale_pkg
@@ -1337,6 +1394,7 @@ class TunerManager:
                 and not await _foreground_in_targets()
             ):
                 return
+            foreground_pkg = await _foreground_package()
             try:
                 await relaunch()  # type: ignore[misc]
             except Exception as exc:  # noqa: BLE001
@@ -1364,12 +1422,13 @@ class TunerManager:
             launch_at = loop.time()
             seen_non_playing = False
             logger.info(
-                "Re-sent deeplink for channel %s (%s) (%s, %s/%s)",
+                "Re-sent deeplink for channel %s (%s) (%s, %s/%s, foreground=%s)",
                 channel.number,
                 channel.name,
                 reason,
                 relaunch_count,
                 max_relaunches,
+                foreground_pkg or "unknown",
             )
 
         if leftover_title is not None:
@@ -1492,9 +1551,14 @@ class TunerManager:
                         if non_playing_since is None:
                             non_playing_since = loop.time()
                         idle_elapsed = loop.time() - non_playing_since
-                        wait = (
-                            first_relaunch_sec if relaunch_count == 0 else relaunch_sec
-                        )
+                        if not stale_pkg:
+                            wait = await _idle_resend_wait()
+                        else:
+                            wait = (
+                                first_relaunch_sec
+                                if relaunch_count == 0
+                                else relaunch_sec
+                            )
                         if relaunch_count < max_relaunches and idle_elapsed >= wait:
                             await _maybe_relaunch("idle")
                         if (
@@ -1541,14 +1605,17 @@ class TunerManager:
                     and loop.time() - launch_at >= same_app_ready_delay
                 ):
                     return True
-                if caps.current_app and not stale_playing:
-                    app = await backend.current_app()
+                if not stale_playing:
+                    app = await _foreground_package()
                     if app and app in targets:
                         return True
 
             poll = 0.75
             if can_relaunch and relaunch_count < max_relaunches:
-                wait = first_relaunch_sec if relaunch_count == 0 else relaunch_sec
+                if not stale_pkg:
+                    wait = await _idle_resend_wait()
+                else:
+                    wait = first_relaunch_sec if relaunch_count == 0 else relaunch_sec
                 due_in = wait - (loop.time() - launch_at)
                 if due_in > 0:
                     poll = min(poll, max(0.05, due_in))
@@ -1561,16 +1628,15 @@ class TunerManager:
 
         # DirecTV leftover PLAYING / continue-watching / splash must not pass.
         if stale_pkg and not saw_playing:
-            return _not_ready()
+            return await _not_ready()
         if same_app_switch:
             return True
         if relaunched and not saw_playing:
-            return _not_ready()
-        if caps.current_app:
-            app = await backend.current_app()
-            if app and app in targets:
-                return True
-        return _not_ready()
+            return await _not_ready()
+        app = await _foreground_package()
+        if app and app in targets:
+            return True
+        return await _not_ready()
 
     async def _effective_capabilities(self, backend: ControlBackend) -> Capabilities:
         """Prefer live Agent permission flags when available; merge hybrid keys."""

@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-10-03
+
+### Fixed
+- YouTube TV that is still idle in the foreground at the second deeplink resend goes HOME first, then the deeplink is sent again. A second `CLEAR_TOP` into that same activity was ignored (Sports 1, BRAVO); the tune after HOME was ready in a few seconds. A second resend while the app is still on the launcher stays a plain deeplink. DirecTV splash handling is unchanged. Server only — Agent **0.1.30** is unchanged.
+
 ## [0.1.31] - 2026-09-26
 
 ### Fixed
@@ -321,7 +326,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.31...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.32...HEAD
+[0.1.32]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.32
 [0.1.31]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.31
 [0.1.30]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.30
 [0.1.29]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.29

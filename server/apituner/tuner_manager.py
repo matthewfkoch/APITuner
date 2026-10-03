@@ -63,7 +63,9 @@ _STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS = 15.0
 _COLD_START_RESEND_SECONDS = 2.0
 # YouTube TV relaunch is CLEAR_TOP|SINGLE_TOP. A second intent at 6s lands
 # inside the window where a good first resend becomes PLAYING (5–9s). Wait
-# past that, then send one more time if playback is still idle.
+# past that, then send one more time if playback is still idle. If the app
+# is still in front, that second CLEAR_TOP is ignored (Sports 1, BRAVO).
+# HOME first so the next VIEW starts clean, the way a retry after release does.
 _NONSTALE_SECOND_RESEND_SECONDS = 12.0
 _GENERIC_TITLE_TOKENS = frozenset(
     {
@@ -1270,7 +1272,8 @@ class TunerManager:
         stale_pkg = any(p in _STALE_PLAYBACK_PACKAGES for p in targets)
         # DirecTV and other deeplink apps both get two resends. The second
         # non-DirecTV resend waits _NONSTALE_SECOND_RESEND_SECONDS so it does
-        # not CLEAR_TOP a launch that is about to play.
+        # not CLEAR_TOP a launch that is about to play. If YouTube TV is still
+        # in front at that second send, HOME before the deeplink.
         max_relaunches = 2
         splash_extended = False
         last_ps: Optional[PlaybackState] = None
@@ -1395,6 +1398,22 @@ class TunerManager:
             ):
                 return
             foreground_pkg = await _foreground_package()
+            # Another CLEAR_TOP into an app that ignored the first resend stays
+            # IDLE. HOME, then the relaunch is a fresh VIEW. A second resend
+            # while the app never came forward (launcher) stays a plain intent.
+            if (
+                reason == "idle"
+                and not stale_pkg
+                and relaunch_count >= 1
+                and foreground_pkg in targets
+            ):
+                logger.info(
+                    "HOME before deeplink resend for channel %s (%s) — %s still idle in front",
+                    channel.number,
+                    channel.name,
+                    foreground_pkg,
+                )
+                await _home_off_splash(backend)
             try:
                 await relaunch()  # type: ignore[misc]
             except Exception as exc:  # noqa: BLE001

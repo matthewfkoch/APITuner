@@ -63,6 +63,7 @@ class StubBackend(ControlBackend):
         self.current: str | None = None
         self.playback = PlaybackState.UNKNOWN
         self.live_caps: dict[str, bool] | None = None
+        self.stops = 0
 
     async def connect(self) -> None:
         return None
@@ -97,7 +98,7 @@ class StubBackend(ControlBackend):
         return self.playback, self.current, getattr(self, "title", None)
 
     async def stop(self) -> None:
-        return None
+        self.stops += 1
 
 
 @pytest.mark.asyncio
@@ -768,6 +769,64 @@ async def test_yttv_second_idle_resend_after_gap_starts_playback(tmp_path, monke
     assert ready is True
     assert relaunches == 2
     assert sent_at[1] - sent_at[0] >= 0.16
+    assert backend.stops == 0
+
+
+@pytest.mark.asyncio
+async def test_yttv_second_idle_resend_homes_when_app_stays_in_front(
+    tmp_path, monkeypatch
+):
+    """Sports 1 / BRAVO: both CLEAR_TOPs were ignored until HOME, then the retry played."""
+    from apituner import tuner_manager as tm
+
+    monkeypatch.setattr(tm, "_NONSTALE_SECOND_RESEND_SECONDS", 0.12)
+    monkeypatch.setattr(tm, "_HOME_BEFORE_DEEPLINK_SECONDS", 0.0)
+
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+    backend = StubBackend()
+    backend.current = "com.google.android.youtube.tvunplugged"
+    backend.playback = PlaybackState.IDLE
+    events: list[str] = []
+
+    async def _stop() -> None:
+        events.append("home")
+        backend.current = "com.google.android.apps.tv.launcherx"
+
+    backend.stop = _stop  # type: ignore[method-assign]
+
+    async def _relaunch() -> None:
+        events.append("resend")
+        if events.count("resend") >= 2:
+            backend.playback = PlaybackState.PLAYING
+            backend.title = "Texas at Tennessee"
+            backend.current = "com.google.android.youtube.tvunplugged"
+
+    channel = Channel(
+        number=9100,
+        name="YTTV Sports 1",
+        package_name="com.google.android.youtube.tvunplugged",
+        url="https://tv.youtube.com/watch/lane",
+    )
+    options = GlobalOptions(
+        wait_for_playback=True,
+        tune_timeout_seconds=2.0,
+        ready_settle_seconds=0.0,
+        deeplink_relaunch_seconds=0.08,
+    )
+    launch_at = time.monotonic()
+    ready = await manager._wait_ready(
+        backend,
+        channel,
+        "com.google.android.youtube.tvunplugged",
+        options,
+        launch_at + 2.0,
+        prior_app="com.google.android.youtube.tvunplugged",
+        launch_at=launch_at,
+        relaunch=_relaunch,
+    )
+    assert ready is True
+    assert events == ["resend", "home", "resend"]
 
 
 @pytest.mark.asyncio

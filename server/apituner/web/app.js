@@ -93,25 +93,70 @@ function toast(msg, isErr, ms) {
   clearTimeout(toast._timer);
   toast._timer = setTimeout(() => t.classList.add("hidden"), ms || (isErr ? 8000 : 3200));
 }
+let modalTrigger = null;
+function labelFields(root) {
+  root.querySelectorAll(".field").forEach((field, i) => {
+    const input = field.querySelector("input, select, textarea");
+    const label = field.querySelector("label");
+    if (!input || !label) return;
+    if (!input.id) input.id = `field-${root.id || "dialog"}-${i}`;
+    label.htmlFor = input.id;
+    const hint = field.querySelector(".hint");
+    if (hint) { hint.id = `${input.id}-hint`; input.setAttribute("aria-describedby", hint.id); }
+  });
+}
 function openModal(title, node) {
+  const modal = document.getElementById("modal");
+  if (modal.classList.contains("hidden")) modalTrigger = document.activeElement;
   document.getElementById("modal-title").textContent = title;
   const body = document.getElementById("modal-body");
-  body.innerHTML = ""; body.appendChild(node);
-  document.getElementById("modal").classList.remove("hidden");
+  body.replaceChildren(node);
+  labelFields(body);
+  modal.classList.remove("hidden");
+  document.querySelector(".app-shell").setAttribute("inert", "");
+  document.querySelector(".app-shell").setAttribute("aria-hidden", "true");
+  document.body.classList.add("modal-open");
+  const first = body.querySelector("input:not([type=hidden]), select, textarea, button");
+  (first || document.getElementById("modal-close")).focus();
 }
 function closeModal() {
   stopAllPreviews();
   const modalCard = document.querySelector("#modal .modal-card");
   if (modalCard) modalCard.classList.remove("modal-card-preview");
   document.getElementById("modal").classList.add("hidden");
+  document.querySelector(".app-shell").removeAttribute("inert");
+  document.querySelector(".app-shell").removeAttribute("aria-hidden");
+  document.body.classList.remove("modal-open");
+  if (modalTrigger?.isConnected) modalTrigger.focus();
+  else document.querySelector(".nav-item.active")?.focus();
+  modalTrigger = null;
 }
+document.getElementById("modal").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); closeModal(); return; }
+  if (e.key !== "Tab") return;
+  const items = [...e.currentTarget.querySelectorAll('button, input, select, textarea, a[href], [tabindex="0"]')]
+    .filter((item) => !item.disabled && item.getClientRects().length);
+  const first = items[0], last = items[items.length - 1];
+  if (!first) { e.preventDefault(); e.currentTarget.focus(); return; }
+  if (e.shiftKey && (document.activeElement === first || !items.includes(document.activeElement))) {
+    e.preventDefault(); last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+document.querySelectorAll(".tools-disclosure").forEach((details) => {
+  details.addEventListener("toggle", () => { if (!details.open) closeCopyM3uMenu(); });
+  details.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { details.open = false; details.querySelector("summary").focus(); }
+  });
+  document.addEventListener("click", (e) => { if (!details.contains(e.target)) details.open = false; });
+});
 
 // ---- Navigation ----
 document.querySelectorAll(".nav-item").forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach((t) => { t.classList.remove("active"); t.removeAttribute("aria-current"); });
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
     tab.classList.add("active");
+    tab.setAttribute("aria-current", "page");
     document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
     if (tab.dataset.tab === "status") startStatusPolling(); else stopStatusPolling();
     if (tab.dataset.tab === "channels") loadChannels();
@@ -174,7 +219,7 @@ function initHdhr(status) {
   const hdhr = status && status.hdhr;
   if (!hdhr || !hdhr.enabled) {
     input.value = "(disabled)";
-    if (meta) meta.textContent = "Enable HDHomeRun in Options";
+    if (meta) meta.textContent = "Enable HDHomeRun in Settings";
     return;
   }
   input.value = hdhr.base_url || location.origin;
@@ -267,12 +312,6 @@ function renderCopyM3uMenu(channels) {
   const providers = [...new Set(
     channels.map((c) => String(c.provider_name || "").trim()).filter(Boolean)
   )].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  if (providers.length < 2) {
-    wrap.classList.add("hidden");
-    menu.innerHTML = "";
-    closeCopyM3uMenu();
-    return;
-  }
   wrap.classList.remove("hidden");
   const items = [{ label: "All channels", provider: null }].concat(
     providers.map((provider) => ({ label: provider, provider }))
@@ -370,30 +409,64 @@ function computeCatalogNeedsDpad(channels, configs) {
   return (channels || []).some((ch) => channelNeedsDpad(ch, byUuid));
 }
 
-function renderKeysControlWarning(tuners, needsDpad) {
-  const banner = document.getElementById("keys-control-warning");
-  if (!banner) return;
-  const missing = (tuners || []).filter(
-    (t) =>
-      t.enabled !== false
-      && t.control
-      && t.control.type === "http_agent"
-      && !(t.keys_control && t.keys_control.type)
-  );
-  if (!needsDpad || !missing.length) {
-    banner.classList.add("hidden");
-    banner.innerHTML = "";
-    return;
+function tunerIssues(card) { return APITunerUI.tunerIssues(card.dataset); }
+let fleetSummarySignature = "";
+let fleetIssueSignature = "";
+function updateFleetSummary() {
+  const cards = [...document.querySelectorAll("#tuner-list [data-tuner-id]")];
+  const affected = cards.filter((card) => tunerIssues(card).length);
+  const active = cards.filter((card) => card.dataset.active === "true").length;
+  const pending = cards.some((card) => card.dataset.active == null);
+  const summarySignature = JSON.stringify([cards.length, active, pending, affected.length]);
+  if (summarySignature !== fleetSummarySignature) {
+    fleetSummarySignature = summarySignature;
+    document.getElementById("fleet-summary").innerHTML = `
+    <div><span class="stat-value">${cards.length}</span><span class="stat-label">Configured tuners</span></div>
+    <div><span class="stat-value">${pending ? "—" : active}</span><span class="stat-label">In use</span></div>
+    <div><span class="stat-value ${affected.length ? "amber" : ""}">${affected.length}</span><span class="stat-label">Need attention</span></div>`;
   }
-  const names = missing.map((t) => t.name).join(", ");
-  banner.classList.remove("hidden");
-  banner.innerHTML = `
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
-    <div>
-      <strong>Keys / D-pad missing</strong> on ${escapeHtml(names)}.
-      Edit each Agent tuner, set <b>Keys / D-pad</b> (Google TV Remote, Fire REST, or ADB), then <b>Pair</b>.
-      Needed for Max, App Play, and D-pad macros.
-    </div>`;
+  const issueSignature = JSON.stringify(affected.map((card) => [card.dataset.tunerId, card.dataset.name, tunerIssues(card)]));
+  if (issueSignature === fleetIssueSignature) return;
+  fleetIssueSignature = issueSignature;
+  const banner = document.getElementById("keys-control-warning");
+  banner.classList.toggle("hidden", !affected.length);
+  banner.replaceChildren();
+  if (affected.length) {
+    banner.append(el(`<strong>${affected.length} tuner${affected.length === 1 ? "" : "s"} to review</strong>`));
+    const links = el('<div class="issue-links"></div>');
+    affected.forEach((card) => {
+      const link = el(`<button class="issue-link">${escapeHtml(card.dataset.name)}</button>`);
+      link.title = tunerIssues(card).join(" · ");
+      link.addEventListener("click", () => {
+        const details = card.querySelector("details"); details.open = true;
+        card.scrollIntoView({ block: "center" }); details.querySelector("summary").focus();
+      });
+      links.append(link);
+    });
+    banner.append(links);
+  }
+}
+function updateDeviceState(card) {
+  const issues = tunerIssues(card);
+  const issue = card.querySelector("[data-issue]");
+  issue.textContent = issues.join(" · ");
+  issue.classList.toggle("hidden", !issues.length);
+  const action = card.querySelector("[data-next-action]");
+  let target = "";
+  if (card.dataset.enabled !== "false") {
+    if (card.dataset.health === "offline" || card.dataset.health === "checking") target = "health";
+    else if (card.dataset.needsKeys === "true") target = "edit";
+    else if (card.dataset.pair === "unpaired") target = "pair";
+    else if (card.dataset.pair === "unknown") target = "details";
+    else if (card.dataset.update === "true") target = "update-agent";
+    else if (card.dataset.error) target = "details";
+  }
+  action.dataset.target = target;
+  action.textContent = { health: "Recheck connection", edit: "Set up D-pad", pair: "Pair remote", "update-agent": "Update Agent", details: "Review details" }[target] || "";
+  action.disabled = !!card.querySelector(`[data-act="${target}"]`)?.disabled;
+  if (target === "health" && action.disabled) action.textContent = "Checking…";
+  action.classList.toggle("hidden", !target);
+  updateFleetSummary();
 }
 
 async function fetchAgentLatest() {
@@ -424,20 +497,23 @@ async function loadTuners() {
     return;
   }
   const latestPromise = fetchAgentLatest();
-  renderKeysControlWarning(tuners, catalogNeedsDpadKeys);
+  document.getElementById("setup-help").open = !tuners.length;
   if (!tuners.length) {
     list.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">📡</div>
+        <div class="empty-state-icon" aria-hidden="true">＋</div>
         <h3>No tuners configured</h3>
         <p>Add a Google TV device and its HDMI encoder stream to start tuning channels.</p>
         <button class="btn btn-primary" id="empty-add-tuner">Add your first tuner</button>
       </div>`;
+    updateFleetSummary();
+    stopTunerErrorPolling();
     list.querySelector("#empty-add-tuner")?.addEventListener("click", () => tunerForm(null));
     return;
   }
   await latestPromise;
   list.innerHTML = "";
+  fleetIssueSignature = "";
   for (const t of tuners) {
     const backendLabel =
       t.control.type === "http_agent" ? "Agent APK"
@@ -455,49 +531,47 @@ async function loadTuners() {
     // ADB tuners are the Fire fallback. Agent cards reveal the button only
     // after the device identifies as Fire TV — Google TV grants in the Agent app.
     const showGrantPerms = isAgent || isAdb;
-    const needsKeysWarn = isAgent && !keysType && catalogNeedsDpadKeys;
+    const needsKeysWarn = t.enabled !== false && isAgent && !keysType && catalogNeedsDpadKeys;
     const needsPair =
       t.control.type === "androidtv_remote" || t.control.type === "firetv_rest"
       || keysType === "androidtv_remote" || keysType === "firetv_rest";
-    const card = el(`<article class="card" data-tuner-id="${escapeAttr(t.id)}"></article>`);
+    const card = el(`<article class="device-row" data-tuner-id="${escapeAttr(t.id)}"></article>`);
+    card.dataset.name = t.name;
+    card.dataset.enabled = String(t.enabled !== false);
+    card.dataset.needsKeys = String(needsKeysWarn);
     card.innerHTML = `
-      <div class="card-head">
-        <div>
-          <div class="card-title">${escapeHtml(t.name)}</div>
-          <div class="card-sub">
-            <span class="backend-pill">${backendLabel}</span>
-            ${keysLabel ? `&nbsp;<span class="backend-pill">${keysLabel}</span>` : ""}
-            &nbsp;·&nbsp; ${escapeHtml(t.control.host)}${t.control.port ? ":" + t.control.port : ""}
+      <div class="device-overview">
+        <div class="device-identity"><h2>${escapeHtml(t.name)}</h2><span class="device-backend">${backendLabel}${keysLabel ? ` · ${keysLabel}` : ""}</span></div>
+        <div class="device-connection"><span class="eyebrow">Connection</span><span class="badge muted" data-health>Checking…</span>${t.enabled === false ? '<span class="badge">Disabled</span>' : ""}</div>
+        <div class="device-activity"><span class="eyebrow">Activity</span><span data-activity>Checking…</span></div>
+        <div class="device-actions"><button class="btn btn-sm hidden" data-next-action></button><button class="btn btn-sm" data-act="preview">Preview</button></div>
+      </div>
+      <p class="device-issue hidden" data-issue></p>
+      <details class="device-details"><summary>More <span class="sr-only">about ${escapeHtml(t.name)}</span></summary>
+        <div class="device-detail-body">
+          <div class="card-meta">
+            <div class="card-row"><span class="label">Device address</span><span class="value mono">${escapeHtml(t.control.host)}${t.control.port ? ":" + t.control.port : ""}</span></div>
+            <div class="card-row"><span class="label">Encoder</span><span class="value mono">${escapeHtml(t.stream_endpoint)}</span></div>
+            ${isAgent ? '<div class="card-row"><span class="label">Agent version</span><span class="badge" data-agent-version>Checking…</span></div>' : ""}
+            ${needsPair ? '<div class="card-row"><span class="label">Remote pairing</span><span data-pair-status class="badge">Checking…</span></div>' : ""}
+            <div class="card-row hidden" data-last-error><span class="label">Last error</span><span class="value" data-last-error-text></span></div>
+          </div>
+          <div class="cap-section"><div class="cap-label">Capabilities</div><div class="badges" data-badges></div></div>
+          <div class="card-actions">
+            <button class="btn btn-sm" data-act="health">Recheck connection</button>
+            ${showGrantPerms ? `<button class="btn btn-sm ${isAdb ? "" : "hidden"}" data-act="grant-perms">Grant permissions (ADB)</button>` : ""}
+            ${isAgent ? '<button class="btn btn-sm hidden" data-act="update-agent">Update Agent</button>' : ""}
+            ${needsPair ? '<button class="btn btn-sm" data-act="pair">Pair remote</button>' : ""}
+            <button class="btn btn-sm" data-act="edit">Edit tuner</button>
+            <button class="btn btn-sm btn-danger" data-act="delete">Delete tuner</button>
           </div>
         </div>
-        <div class="card-badges">
-          <span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "Enabled" : "Disabled"}</span>
-          <span class="badge muted" data-health title="Checking whether the device is reachable…">Checking…</span>
-          ${isAgent ? `<span class="badge muted" data-agent-version title="Installed Agent APK version">Agent …</span>` : ""}
-          ${needsKeysWarn ? `<span class="badge warn" title="Set Keys / D-pad, then Pair">No D-pad keys</span>` : ""}
-        </div>
-      </div>
-      ${needsKeysWarn ? `<div class="card-callout-warn">Set Keys / D-pad on this Agent tuner, then Pair — needed for Max, App Play, and D-pad macros.</div>` : ""}
-      <div class="card-meta">
-        <div class="card-row"><span class="label">Encoder</span><span class="value mono">${escapeHtml(t.stream_endpoint)}</span></div>
-        <div class="card-row hidden" data-last-error>
-          <span class="label">Last error</span>
-          <span class="value"><span class="badge off" data-last-error-text></span></span>
-        </div>
-      </div>
-      <div class="cap-section">
-        <div class="cap-label">Capabilities</div>
-        <div class="badges" data-badges></div>
-      </div>
-      <div class="card-actions">
-        <button class="btn btn-sm btn-primary" data-act="preview" title="Preview the encoder stream">Preview</button>
-        <button class="btn btn-sm btn-secondary" data-act="health" title="Check whether the device is reachable">Recheck connection</button>
-        ${showGrantPerms ? `<button class="btn btn-sm btn-secondary ${isAdb ? "" : "hidden"}" data-act="grant-perms" title="One-time Fire TV permission grant over ADB">Grant permissions (ADB)</button>` : ""}
-        ${isAgent ? `<button class="btn btn-sm btn-secondary hidden" data-act="update-agent" title="Install the latest Agent APK on the TV">Update Agent</button>` : ""}
-        ${needsPair ? `<button class="btn btn-sm btn-secondary" data-act="pair">Pair</button><span data-pair-status class="badge muted">…</span>` : ""}
-        <button class="btn btn-sm btn-ghost" data-act="edit">Edit</button>
-        <button class="btn btn-sm btn-danger" data-act="delete">Delete</button>
-      </div>`;
+      </details>`;
+    card.querySelector("[data-next-action]").addEventListener("click", (event) => {
+      const target = event.currentTarget.dataset.target;
+      if (target === "details") { card.querySelector("details").open = true; card.querySelector("summary").focus(); }
+      else card.querySelector(`[data-act="${target}"]`)?.click();
+    });
     const badges = card.querySelector("[data-badges]");
     renderCapabilityBadges(badges, t.control.type, keysType);
     const healthBtn = card.querySelector('[data-act="health"]');
@@ -511,6 +585,8 @@ async function loadTuners() {
       healthBadge.title = online
         ? "Device responded to a health check"
         : "Device did not respond — check IP, Agent APK, or network";
+      card.dataset.health = online ? "online" : "offline";
+      updateDeviceState(card);
       card.classList.toggle("card-online", online);
       card.classList.toggle("card-offline", !online);
     };
@@ -520,6 +596,8 @@ async function loadTuners() {
       const code = info && info.version_code != null ? Number(info.version_code) : null;
       const name = info && info.version_name ? String(info.version_name) : null;
       if (name == null && code == null) {
+        card.dataset.update = "false";
+        updateDeviceState(card);
         versionBadge.className = "badge muted";
         versionBadge.textContent = "Agent ?";
         versionBadge.title = "Agent did not report a version";
@@ -529,7 +607,9 @@ async function loadTuners() {
       const latest = cachedAgentLatest;
       const latestCode = latest && latest.versionCode != null ? Number(latest.versionCode) : null;
       const outdated = latestCode != null && code != null && code < latestCode;
-      versionBadge.className = `badge ${outdated ? "warn" : "on"}`;
+      versionBadge.className = `badge ${outdated ? "warn" : ""}`;
+      card.dataset.update = String(outdated);
+      updateDeviceState(card);
       versionBadge.textContent = outdated
         ? `Update available (${name || code})`
         : `Agent v${name || code}`;
@@ -543,6 +623,9 @@ async function loadTuners() {
       healthBtn.textContent = "Checking…";
       healthBadge.className = "badge muted";
       healthBadge.textContent = "Checking…";
+      card.dataset.health = "checking";
+      card.dataset.update = "false";
+      updateDeviceState(card);
       try {
         const r = await api.get(`/api/tuners/${t.id}/health`);
         setHealth(r.online);
@@ -568,6 +651,7 @@ async function loadTuners() {
       }
       healthBtn.disabled = false;
       healthBtn.textContent = "Recheck connection";
+      updateDeviceState(card);
     };
     healthBtn.addEventListener("click", runHealthCheck);
     if (grantBtn) {
@@ -623,6 +707,7 @@ async function loadTuners() {
     });
     card.querySelector('[data-act="preview"]')?.addEventListener("click", () => openTunerPreview(t));
     list.appendChild(card);
+    updateDeviceState(card);
     runHealthCheck();
   }
   refreshTunerErrors();
@@ -645,17 +730,28 @@ async function refreshTunerErrors() {
   try {
     data = await api.get("/api/status");
   } catch (_) {
+    document.querySelectorAll("#tuner-list [data-tuner-id]").forEach((card) => {
+      delete card.dataset.active;
+      card.querySelector("[data-activity]").textContent = "Status unavailable";
+      card.querySelector("[data-activity]").classList.remove("activity-live");
+    });
+    updateFleetSummary();
     return;
   }
-  const byId = {};
-  for (const row of data.tuners || []) byId[row.id] = row.last_error || "";
+  const byId = Object.fromEntries((data.tuners || []).map((row) => [row.id, row]));
   document.querySelectorAll("#tuner-list [data-tuner-id]").forEach((card) => {
-    const err = byId[card.dataset.tunerId] || "";
-    const row = card.querySelector("[data-last-error]");
-    const text = card.querySelector("[data-last-error-text]");
-    if (!row || !text) return;
-    text.textContent = err;
-    row.classList.toggle("hidden", !err);
+    const state = byId[card.dataset.tunerId];
+    card.dataset.error = state?.last_error || "";
+    if (state) card.dataset.active = String(!!state.locked);
+    else delete card.dataset.active;
+    const activity = card.querySelector("[data-activity]");
+    activity.textContent = !state ? "Status unavailable" : state.locked
+      ? `In use${state.channel_name ? " · " + state.channel_name : ""}`
+      : card.dataset.enabled === "false" ? "Disabled" : "Idle";
+    activity.classList.toggle("activity-live", !!state?.locked);
+    card.querySelector("[data-last-error-text]").textContent = card.dataset.error;
+    card.querySelector("[data-last-error]").classList.toggle("hidden", !card.dataset.error);
+    updateDeviceState(card);
   });
 }
 
@@ -857,14 +953,20 @@ async function refreshPairStatus(tuner, badge) {
     const r = await api.get(`/api/tuners/${tuner.id}/pair/status`);
     if (!r.requires_pairing) {
       badge.className = "badge";
-      badge.textContent = "—";
+      badge.textContent = "Not required";
+      badge.closest("[data-tuner-id]").dataset.pair = "not-required";
       return;
     }
-    badge.className = `badge ${r.paired ? "on" : "off"}`;
+    badge.className = `badge ${r.paired ? "on" : "warn"}`;
     badge.textContent = r.paired ? "Paired" : "Not paired";
+    badge.closest("[data-tuner-id]").dataset.pair = r.paired ? "paired" : "unpaired";
   } catch (e) {
     badge.className = "badge off";
     badge.textContent = "Unknown";
+    badge.closest("[data-tuner-id]").dataset.pair = "unknown";
+  } finally {
+    const card = badge.closest("[data-tuner-id]");
+    if (card?.isConnected) updateDeviceState(card);
   }
 }
 
@@ -1245,22 +1347,19 @@ function renderChannels(channels) {
   if (countEl) countEl.textContent = countText;
   tbody.innerHTML = "";
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import a list or add one."}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import a list or add one."}</div></td></tr>`;
     return;
   }
   for (const c of filtered) {
     const cov = coverageForChannel(c);
     const warn = cov && (cov.status === "missing" || cov.status === "partial");
-    const pkgHtml = warn
-      ? `<span class="mono">${escapeHtml(c.package_name)}</span> <span class="pkg-warn" title="${escapeAttr(packageWarnTitle(cov))}">⚠ ${cov.status === "missing" ? "not installed" : "partial"}</span>`
-      : `<span class="mono">${escapeHtml(c.package_name)}</span>`;
-    const tr = el(`<tr class="row-clickable${warn ? " row-pkg-warn" : ""}" title="Click to edit channel">
-      <td><span class="ch-num">${c.number}</span></td>
+    const configuration = APITunerUI.channelConfiguration(c, cov);
+    const tr = el(`<tr class="row-clickable${warn ? " row-pkg-warn" : ""}" title="Edit channel">
+      <td><span class="ch-num">${escapeHtml(c.number)}</span></td>
       <td><strong>${escapeHtml(c.name)}</strong></td>
-      <td class="muted">${escapeHtml(c.provider_name || "—")}</td>
-      <td>${pkgHtml}</td>
-      <td class="mono col-url" title="${escapeAttr(c.url || "")}">${escapeHtml((c.url || "—").slice(0, 48))}${(c.url || "").length > 48 ? "…" : ""}</td>
-      <td class="col-actions"><button class="btn btn-sm btn-secondary" data-edit>Edit</button> <button class="btn btn-sm btn-danger" data-del>Delete</button></td>
+      <td class="channel-provider">${escapeHtml(c.provider_name || "—")}</td>
+      <td class="channel-config"><span class="badge ${configuration.warning ? "warn" : ""}" title="${escapeAttr(warn ? packageWarnTitle(cov) : "Package and deep link are available in Edit")}">${configuration.label}</span></td>
+      <td class="col-actions"><button class="btn btn-sm" data-edit aria-label="Edit ${escapeAttr(c.name)}">Edit</button> <button class="btn btn-sm btn-danger" data-del aria-label="Delete ${escapeAttr(c.name)}">Delete</button></td>
     </tr>`);
     tr.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
@@ -1708,11 +1807,18 @@ async function loadOptions() {
   let opts = {};
   try { opts = await api.get("/api/options"); } catch (e) { toast(e.message, true); return; }
   form.innerHTML = "";
+  const groups = {};
+  for (const [id, title] of [["integrations", "Integrations"], ["tuning", "Tuning behavior"], ["relay", "Stream relay"]]) {
+    const group = el(`<fieldset class="settings-group"><legend>${title}</legend><div class="form-grid"></div></fieldset>`);
+    form.append(group); groups[id] = group.querySelector(".form-grid");
+  }
   for (const [key, label, type, choices, hint] of OPTION_FIELDS) {
+    const group = /^(hdhr_|channels_|xmltv_|fruitdeeplinks_)/.test(key) ? groups.integrations
+      : /^(stream_mode|stream_during_tune|release_grace_seconds|stuck_tuner_timeout_seconds|tuner_idle_timeout_seconds)$/.test(key) ? groups.relay : groups.tuning;
     if (type === "bool") {
       const row = el(`<div class="field checkbox"><input type="checkbox" name="${key}" ${opts[key] ? "checked" : ""} /><label>${label}</label></div>`);
       if (hint) row.appendChild(el(`<div class="hint">${hint}</div>`));
-      form.appendChild(row);
+      group.appendChild(row);
     } else if (type === "select") {
       const f = el(`<div class="field"><label>${label}</label><select name="${key}"></select>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`);
       choices.forEach((ch) => {
@@ -1722,15 +1828,16 @@ async function loadOptions() {
         if (opts[key] === value) o.selected = true;
         f.querySelector("select").appendChild(o);
       });
-      form.appendChild(f);
+      group.appendChild(f);
     } else if (type === "text") {
       const val = opts[key] == null ? "" : opts[key];
-      form.appendChild(el(`<div class="field"><label>${label}</label><input type="text" name="${key}" value="${escapeAttr(val)}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
+      group.appendChild(el(`<div class="field"><label>${label}</label><input type="text" name="${key}" value="${escapeAttr(val)}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
     } else {
       const val = opts[key] == null ? "" : opts[key];
-      form.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${val}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
+      group.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${val}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
     }
   }
+  labelFields(form);
 }
 document.getElementById("save-options").addEventListener("click", async () => {
   const form = document.getElementById("options-form");
@@ -1747,7 +1854,7 @@ document.getElementById("save-options").addEventListener("click", async () => {
   }
   try {
     await api.put("/api/options", payload);
-    toast("Options saved (restart required for discovery changes)");
+    toast("Settings saved (restart required for discovery changes)");
     const status = await api.get("/api/status");
     initSidebarUrls(status);
   } catch (e) { toast(e.message, true); }
@@ -1788,7 +1895,7 @@ async function renderStatus() {
 
   stats.innerHTML = `
     <div class="stat-card"><div class="stat-label">Tuners</div><div class="stat-value">${data.tuners.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value amber">${active}</div></div>
+    <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value accent">${active}</div></div>
     <div class="stat-card"><div class="stat-label">Available</div><div class="stat-value green">${free}</div></div>
     <div class="stat-card"><div class="stat-label">Channels</div><div class="stat-value accent">${data.channel_count}</div></div>
     ${errors ? `<div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value" style="color:var(--red)">${errors}</div></div>` : ""}`;
@@ -1809,7 +1916,7 @@ async function renderStatus() {
           </div>
           <div class="card-sub">${s.backend}${s.model ? " · " + escapeHtml(s.model) : ""}</div>
         </div>
-        <span class="badge ${s.locked ? "warn" : "on"}">${s.locked ? "Tuning" : "Idle"}</span>
+        <span class="badge ${s.locked ? "accent" : ""}">${s.locked ? "In use" : "Idle"}</span>
       </div>
       <div class="card-meta">
         ${s.locked ? `<div class="card-row"><span class="label">Channel</span><span class="value"><strong>${s.channel_number ?? "?"}</strong> · ${escapeHtml(s.channel_name || "")}</span></div>` : ""}

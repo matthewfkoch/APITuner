@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>APITuner</title>
-  <meta name="theme-color" content="#080b10" />
+  <title>apituner</title>
+  <meta name="theme-color" content="#0c1015" />
   <meta name="description" content="ADB-free virtual tuner for Channels DVR" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/static/logo.svg" />
@@ -17,77 +17,33 @@
   <div class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <div class="logo-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="9.15" stroke="currentColor" stroke-width="1.65"/>
-            <g stroke="currentColor" stroke-linecap="round">
-              <path d="M12 5.4V3" stroke-width="1.7"/>
-              <path d="M17.09 6.91L18.36 5.64" stroke-width="1.35" opacity="0.65"/>
-              <path d="M18.6 12H21" stroke-width="1.7"/>
-              <path d="M17.09 17.09L18.36 18.36" stroke-width="1.35" opacity="0.65"/>
-              <path d="M12 18.6V21" stroke-width="1.7"/>
-              <path d="M6.91 17.09L5.64 18.36" stroke-width="1.35" opacity="0.65"/>
-              <path d="M5.4 12H3" stroke-width="1.7"/>
-              <path d="M6.91 6.91L5.64 5.64" stroke-width="1.35" opacity="0.65"/>
-            </g>
-            <path d="M10.44 12.9L17.02 9.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-            <circle cx="17.02" cy="9.1" r="1.2" fill="currentColor"/>
-            <circle cx="12" cy="12" r="1.85" fill="currentColor"/>
-          </svg>
-        </div>
-        <div>
-          <div class="brand-name">APITuner</div>
-          <div class="brand-sub">Virtual tuner</div>
-        </div>
+        <img class="brand-wordmark" src="/static/wordmark-light.svg?v={{VERSION}}" alt="apituner" width="192" height="55" />
       </div>
 
       <nav class="sidebar-nav" aria-label="Main">
-        <button class="nav-item active" data-tab="tuners">
-          <span class="nav-icon" aria-hidden="true">📡</span>
+        <button class="nav-item active" data-tab="tuners" aria-current="page">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M8 9h8M8 13h4"/></svg></span>
           <span>Tuners</span>
         </button>
         <button class="nav-item" data-tab="channels">
-          <span class="nav-icon" aria-hidden="true">📺</span>
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m9 9 5 3-5 3z"/></svg></span>
           <span>Channels</span>
         </button>
         <button class="nav-item" data-tab="configurations">
-          <span class="nav-icon" aria-hidden="true">🎛</span>
-          <span>Configurations</span>
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 4 11 8-11 8zM4 4v16"/></svg></span>
+          <span>App Play</span>
         </button>
         <button class="nav-item" data-tab="status">
-          <span class="nav-icon" aria-hidden="true">●</span>
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></span>
           <span>Live Status</span>
         </button>
         <button class="nav-item" data-tab="options">
-          <span class="nav-icon" aria-hidden="true">⚙</span>
-          <span>Options</span>
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></span>
+          <span>Settings</span>
         </button>
       </nav>
 
       <div class="sidebar-footer">
-        <label class="sidebar-label" for="hdhr-url">HDHomeRun device URL</label>
-        <div class="m3u-compact">
-          <input id="hdhr-url" type="text" readonly />
-          <button id="copy-hdhr" class="btn btn-icon" title="Copy HDHomeRun URL" aria-label="Copy HDHomeRun URL">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-        </div>
-        <div id="hdhr-meta" class="sidebar-version" style="margin-top:6px"></div>
-        <label class="sidebar-label" for="xmltv-url" style="margin-top:12px">XMLTV guide URL</label>
-        <div class="m3u-compact">
-          <input id="xmltv-url" type="text" readonly />
-          <button id="copy-xmltv" class="btn btn-icon" title="Copy XMLTV URL" aria-label="Copy XMLTV URL">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-        </div>
-        <label class="sidebar-label" for="m3u-url" style="margin-top:12px">M3U source URL</label>
-        <div class="m3u-compact">
-          <input id="m3u-url" type="text" readonly />
-          <button id="copy-m3u" class="btn btn-icon" title="Copy M3U URL" aria-label="Copy M3U URL">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-        </div>
-        <div class="sidebar-version" style="margin-top:4px">Use Copy M3U on Channels, or add <code>?provider=</code> to this URL.</div>
         <div class="sidebar-links">
           <a href="/docs" target="_blank" rel="noopener">API docs</a>
           <a class="agent-apk-link" href="{{AGENT_APK_RELEASES_URL}}" target="_blank" rel="noopener">Agent APK</a>
@@ -108,7 +64,7 @@
           <header class="page-header">
             <div>
               <h1>Tuners</h1>
-              <p class="page-desc">Android devices paired with an HDMI encoder. Reachability is checked when this page loads.</p>
+              <p class="page-desc">Your devices, current activity, and anything that needs attention.</p>
             </div>
             <div class="page-actions">
               <button id="discover-btn" class="btn btn-secondary">Discover</button>
@@ -116,6 +72,8 @@
             </div>
           </header>
 
+          <div id="fleet-summary" class="fleet-summary" aria-label="Tuner summary"></div>
+          <details id="setup-help" class="setup-help"><summary>Setup help</summary>
           <div class="info-card">
             <div class="info-card-icon" aria-hidden="true">ℹ</div>
             <div>
@@ -124,9 +82,10 @@
             </div>
           </div>
 
+          </details>
           <div id="keys-control-warning" class="callout-warn hidden" role="status"></div>
           <div id="discovered" class="discovered hidden"></div>
-          <div id="tuner-list" class="card-grid"></div>
+          <div id="tuner-list" class="tuner-list"></div>
         </section>
 
         <!-- CHANNELS -->
@@ -134,12 +93,14 @@
           <header class="page-header">
             <div>
               <h1>Channels</h1>
-              <p class="page-desc">Import from ADBTuner or FruitDeepLinks, or add channels manually. Subchannels (<code>100.1</code>) and duplicate numbers are allowed.</p>
+              <p class="page-desc">Manage your lineup and check which channels need configuration.</p>
             </div>
             <div class="page-actions">
+              <details class="tools-disclosure">
+                <summary class="btn">Tools</summary>
+                <div class="tools-panel">
               <button id="check-packages-btn" class="btn btn-secondary" title="Check packages against apps on Agent tuners">Check packages</button>
-              <button id="sync-fdl-btn" class="btn btn-secondary" title="Refresh FruitDeepLinks lanes from Options">Sync FruitDeepLinks</button>
-              <button id="import-btn" class="btn btn-secondary">Import</button>
+              <button id="sync-fdl-btn" class="btn btn-secondary" title="Refresh FruitDeepLinks lanes from Settings">Sync FruitDeepLinks</button>
               <button id="export-btn" class="btn btn-secondary" title="Download channel list">Export</button>
               <div id="copy-m3u-menu-wrap" class="menu-wrap hidden">
                 <button type="button" id="copy-m3u-menu-btn" class="btn btn-secondary" title="Copy playlist URL for all channels or one provider" aria-haspopup="true" aria-expanded="false" aria-controls="copy-m3u-menu">
@@ -148,6 +109,9 @@
                 </button>
                 <div id="copy-m3u-menu" class="menu hidden" role="menu"></div>
               </div>
+                </div>
+              </details>
+              <button id="import-btn" class="btn">Import</button>
               <button id="add-channel-btn" class="btn btn-primary">Add channel</button>
             </div>
           </header>
@@ -167,8 +131,7 @@
                   <th>#</th>
                   <th>Name</th>
                   <th>Provider</th>
-                  <th>Package</th>
-                  <th>Deep link</th>
+                  <th>Configuration</th>
                   <th class="col-actions">Actions</th>
                 </tr>
               </thead>
@@ -181,7 +144,7 @@
         <section id="tab-configurations" class="tab-panel">
           <header class="page-header">
             <div>
-              <h1>Configurations</h1>
+              <h1>App Play</h1>
               <p class="page-desc">App Play D-pad scripts. Import JSON, then set matching UUIDs on channels. The tuner needs a Keys / D-pad backend.</p>
             </div>
             <div class="page-actions">
@@ -221,20 +184,37 @@
         <section id="tab-options" class="tab-panel">
           <header class="page-header">
             <div>
-              <h1>Global Options</h1>
-              <p class="page-desc">Tune behavior and stream relay settings for all tuners.</p>
-            </div>
-            <div class="page-actions">
-              <button id="download-diagnostics" class="btn btn-secondary" title="Download logs and tuner status">Download diagnostics</button>
+              <h1>Settings</h1>
+              <p class="page-desc">Connections, tuning behavior, and stream delivery.</p>
             </div>
           </header>
-          <div class="info-card" style="margin-bottom:16px">
-            <div class="info-card-icon" aria-hidden="true">ℹ</div>
-            <div>
-              <strong>Share diagnostics when asking for help</strong>
-              <p>Includes recent logs and tuner status. Tokens are redacted; LAN IPs may still appear.</p>
-            </div>
-          </div>
+          <section class="connections-panel" aria-labelledby="connections-title">
+            <h2 id="connections-title">Connect to Channels DVR</h2>
+            <p class="page-desc">Copy a source address into your DVR.</p>
+        <label class="sidebar-label" for="hdhr-url">HDHomeRun device URL</label>
+        <div class="m3u-compact">
+          <input id="hdhr-url" type="text" readonly />
+          <button id="copy-hdhr" class="btn btn-icon" title="Copy HDHomeRun URL" aria-label="Copy HDHomeRun URL">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+        <div id="hdhr-meta" class="sidebar-version" style="margin-top:6px"></div>
+        <label class="sidebar-label" for="xmltv-url" style="margin-top:12px">XMLTV guide URL</label>
+        <div class="m3u-compact">
+          <input id="xmltv-url" type="text" readonly />
+          <button id="copy-xmltv" class="btn btn-icon" title="Copy XMLTV URL" aria-label="Copy XMLTV URL">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+        <label class="sidebar-label" for="m3u-url" style="margin-top:12px">M3U source URL</label>
+        <div class="m3u-compact">
+          <input id="m3u-url" type="text" readonly />
+          <button id="copy-m3u" class="btn btn-icon" title="Copy M3U URL" aria-label="Copy M3U URL">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+        <div class="sidebar-version" style="margin-top:4px">Use Copy M3U on Channels, or add <code>?provider=</code> to this URL.</div>
+          </section>
           <div class="options-card">
             <form id="options-form" class="form-grid"></form>
             <div class="form-actions">
@@ -242,12 +222,17 @@
               <button id="save-options" class="btn btn-primary">Save changes</button>
             </div>
           </div>
+          <section class="connections-panel">
+            <h2>Diagnostics</h2>
+            <p class="page-desc">Download recent logs and tuner status for troubleshooting. Tokens are redacted; LAN addresses may be included.</p>
+            <button id="download-diagnostics" class="btn">Download diagnostics</button>
+          </section>
         </section>
       </main>
     </div>
   </div>
 
-  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
     <div class="modal-card">
       <div class="modal-head">
         <h3 id="modal-title"></h3>
@@ -259,6 +244,7 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
+  <script src="/static/ui-state.js?v={{VERSION}}"></script>
   <script src="/static/app.js?v={{VERSION}}"></script>
 </body>
 </html>

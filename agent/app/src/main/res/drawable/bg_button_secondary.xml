@@ -5,7 +5,7 @@
             <solid android:color="@color/surface_2" />
             <stroke
                 android:width="3dp"
-                android:color="@color/accent" />
+                android:color="@color/text" />
             <corners android:radius="10dp" />
             <padding
                 android:left="2dp"
@@ -22,6 +22,9 @@
                 android:color="@color/border" />
             <corners android:radius="10dp" />
         </shape>
+    </item>
+    <item android:state_selected="true">
+        <shape><solid android:color="@color/surface_2"/><stroke android:width="2dp" android:color="@color/accent"/><corners android:radius="10dp"/></shape>
     </item>
     <item>
         <shape>

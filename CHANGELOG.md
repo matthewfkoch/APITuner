@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-10-18
+
+### Changed
+- New flat signal-path monogram shared by the dashboard, favicon, wordmark, and Android Agent.
+- Dashboard tuner rows separate connection, activity, and setup issues, with fleet summaries, linked attention items, and expandable device details. Routine setup help is collapsed for configured installations.
+- Labeled responsive navigation, a simpler channel lineup with maintenance tools, grouped Settings and DVR connection URLs, brighter secondary text, keyboard-accessible dialogs, and reduced-motion support.
+- Agent overview uses two columns on TV, with separate Permissions, Updates, and Advanced screens, larger text, explicit D-pad focus paths, and persistent update feedback. Optional permissions do not imply incomplete required setup.
+
 ## [0.1.32] - 2026-10-03
 
 ### Fixed

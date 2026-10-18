@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.ViewGroup
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -16,7 +17,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.apituner.agent.control.ForegroundAppDetector
@@ -31,6 +31,15 @@ import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var pageHost: LinearLayout
+    private lateinit var readinessView: TextView
+    private lateinit var readinessHint: TextView
+    private lateinit var nextActionButton: Button
+    private lateinit var updateResultView: TextView
+    private val pages = linkedMapOf<String, View>()
+    private val navigation = linkedMapOf<String, Button>()
+    private var currentPage = "Overview"
+    private var returnFocus: View? = null
     private lateinit var serverUrlView: TextView
     private lateinit var deviceInfoView: TextView
     private lateinit var tokenStatusView: TextView
@@ -44,7 +53,6 @@ class MainActivity : AppCompatActivity() {
     private val permissionBadges = mutableMapOf<String, TextView>()
     private val permissionButtons = mutableMapOf<String, Button>()
     private val permissionGranted = mutableMapOf<String, () -> Boolean>()
-    private val focusables = mutableListOf<View>()
     private val updateExecutor = Executors.newSingleThreadExecutor()
     private val isFireTv: Boolean =
         Build.MANUFACTURER.equals("Amazon", ignoreCase = true) ||
@@ -62,26 +70,112 @@ class MainActivity : AppCompatActivity() {
         }
 
         root.addView(buildBrandHeader())
-        root.addView(spacer(20))
-        root.addView(buildConnectionCard())
         root.addView(spacer(16))
-        root.addView(buildPermissionsCard())
-        root.addView(spacer(16))
-        root.addView(buildUpdatesCard())
-        root.addView(spacer(16))
-        root.addView(buildTokenCard())
-
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            isFocusable = false
-            isFocusableInTouchMode = false
-            descendantFocusability = ScrollView.FOCUS_AFTER_DESCENDANTS
-            setBackgroundColor(color(R.color.bg))
-            addView(root)
+        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (name in listOf("Overview", "Permissions", "Updates", "Advanced")) {
+            val button = secondaryButton(name) { showPage(name) }.apply {
+                id = View.generateViewId()
+                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(12) }
+                contentDescription = name
+            }
+            navigation[name] = button
+            nav.addView(button)
         }
-        setContentView(scroll)
-        wireFocusChain()
-        scroll.post { focusFirstAction() }
+        root.addView(nav)
+        root.addView(spacer(20))
+        pageHost = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+        val overview = LinearLayout(this).apply {
+            orientation = if (resources.configuration.screenWidthDp >= 720) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        }
+        val connection = buildConnectionCard()
+        val readiness = buildReadinessCard()
+        for (panel in listOf(connection, readiness)) {
+            panel.layoutParams = if (overview.orientation == LinearLayout.HORIZONTAL) {
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    if (panel === connection) marginEnd = dp(20)
+                }
+            } else LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16) }
+            overview.addView(panel)
+        }
+        pages["Overview"] = scrollPage(overview)
+        pages["Permissions"] = scrollPage(buildPermissionsCard())
+        pages["Updates"] = scrollPage(buildUpdatesCard())
+        pages["Advanced"] = scrollPage(buildTokenCard())
+        pages.values.forEach { pageHost.addView(it) }
+        root.addView(pageHost)
+        setContentView(root)
+        showPage(savedInstanceState?.getString("page") ?: "Overview", moveFocus = false)
+        root.post { navigation[currentPage]?.requestFocus() }
+    }
+
+    private fun scrollPage(content: View): ScrollView = ScrollView(this).apply {
+        isFillViewport = true
+        isFocusable = false
+        descendantFocusability = ScrollView.FOCUS_AFTER_DESCENDANTS
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT)
+        addView(content)
+    }
+
+    private fun buildReadinessCard(): LinearLayout = card().apply {
+        addView(cardTitle("Device setup"))
+        readinessView = TextView(this@MainActivity).apply {
+            textSize = 28f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(16), 0, dp(8))
+        }
+        addView(readinessView)
+        readinessHint = cardHint("")
+        addView(readinessHint)
+        nextActionButton = primaryButton("Review permissions") {
+            showPage("Permissions")
+            pageHost.post { focusFirstAction() }
+        }
+        addView(nextActionButton)
+        addView(cardHint("Device setup does not verify the HDMI encoder or DVR connection. Check those in the dashboard."))
+    }
+
+    private fun showPage(name: String, moveFocus: Boolean = true) {
+        currentPage = if (pages.containsKey(name)) name else "Overview"
+        pages.forEach { (key, page) -> page.visibility = if (key == currentPage) View.VISIBLE else View.GONE }
+        navigation.forEach { (key, button) ->
+            button.isSelected = key == currentPage
+            button.contentDescription = if (key == currentPage) "$key, selected" else key
+        }
+        pageHost.post {
+            wireFocusChain()
+            if (moveFocus) {
+                val first = visibleActions().firstOrNull()
+                (first ?: navigation[currentPage])?.requestFocus()
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("page", currentPage)
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onPause() {
+        returnFocus = currentFocus
+        super.onPause()
+    }
+
+    @Deprecated("Uses Activity back handling for existing supported Android versions")
+    override fun onBackPressed() {
+        if (currentPage == "Advanced" && tokenEditor.visibility == View.VISIBLE) {
+            tokenEditor.visibility = View.GONE
+            editTokenButton.visibility = View.VISIBLE
+            tokenInput.isFocusable = false
+            tokenInput.isFocusableInTouchMode = false
+            wireFocusChain()
+            editTokenButton.requestFocus()
+        } else if (currentPage != "Overview") {
+            showPage("Overview", moveFocus = false)
+            navigation["Overview"]?.requestFocus()
+        } else super.onBackPressed()
     }
 
     override fun onDestroy() {
@@ -92,42 +186,27 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshStatus()
+        pageHost.post {
+            wireFocusChain()
+            returnFocus?.takeIf { it.isShown && it.isFocusable }?.requestFocus()
+            returnFocus = null
+        }
     }
 
     private fun buildBrandHeader(): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val logoWrap = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            try {
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_logo_mark)
-            } catch (_: Exception) {
-                setBackgroundColor(color(R.color.accent))
-            }
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
-                marginEnd = dp(14)
-            }
-        }
-        logoWrap.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_logo_mark)
-            layoutParams = LinearLayout.LayoutParams(dp(24), dp(24))
-        })
-        row.addView(logoWrap)
-
+        val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val textCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        textCol.addView(TextView(this).apply {
-            text = getString(R.string.brand_title)
-            setTextColor(color(R.color.text))
-            textSize = 22f
-            setTypeface(typeface, Typeface.BOLD)
+        textCol.addView(ImageView(this).apply {
+            setImageResource(R.drawable.brand_wordmark)
+            contentDescription = getString(R.string.brand_title)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_START
+            layoutParams = LinearLayout.LayoutParams(dp(240), dp(69))
         })
         textCol.addView(TextView(this).apply {
             text = getString(R.string.brand_subtitle)
             setTextColor(color(R.color.text_muted))
-            textSize = 12f
+            textSize = 18f
             setPadding(0, dp(2), 0, 0)
         })
         row.addView(textCol)
@@ -140,7 +219,10 @@ class MainActivity : AppCompatActivity() {
         card.addView(cardHint(getString(R.string.connection_hint)))
 
         serverUrlView = monoValue()
-        card.addView(infoRow("Server URL", serverUrlView))
+        card.addView(cardHint("Agent address"))
+        serverUrlView.textSize = 22f
+        serverUrlView.setPadding(0, dp(8), 0, dp(12))
+        card.addView(serverUrlView)
 
         deviceInfoView = monoValue()
         card.addView(infoRow("Device", deviceInfoView))
@@ -162,13 +244,15 @@ class MainActivity : AppCompatActivity() {
             val next = !AgentPrefs.isAutoUpdateEnabled(this)
             AgentPrefs.setAutoUpdateEnabled(this, next)
             autoUpdateButton.text = autoUpdateLabel()
-        }.also { focusables += it }
+        }
         card.addView(autoUpdateButton)
 
         checkUpdateButton = primaryButton(getString(R.string.check_for_updates)) {
             runManualUpdateCheck()
-        }.also { focusables += it }
+        }
         card.addView(checkUpdateButton)
+        updateResultView = cardHint("Update results will appear here.").apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        card.addView(updateResultView)
         return card
     }
 
@@ -182,6 +266,7 @@ class MainActivity : AppCompatActivity() {
     private fun runManualUpdateCheck() {
         checkUpdateButton.isEnabled = false
         checkUpdateButton.text = getString(R.string.update_checking)
+        updateResultView.text = getString(R.string.update_checking)
         updateExecutor.execute {
             val result = try {
                 UpdateChecker(this).checkAndInstallIfNewer(force = true)
@@ -204,7 +289,7 @@ class MainActivity : AppCompatActivity() {
                     is UpdateChecker.CheckResult.Failed ->
                         getString(R.string.update_failed, result.message)
                 }
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                updateResultView.text = message
             }
         }
     }
@@ -212,7 +297,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildPermissionsCard(): LinearLayout {
         val card = card()
         card.addView(cardTitle(getString(R.string.permissions_title)))
-        card.addView(cardHint(getString(R.string.permissions_hint)))
+        card.addView(cardHint(if (isFireTv) "Fire TV: complete special permissions from this tuner in the dashboard using Grant permissions (ADB)." else getString(R.string.permissions_hint)))
 
         addPermission(
             card,
@@ -283,7 +368,7 @@ class MainActivity : AppCompatActivity() {
         // Keep the text field out of the D-pad path until the user chooses Edit.
         editTokenButton = secondaryButton(getString(R.string.edit_token)) {
             showTokenEditor()
-        }.also { focusables += it }
+        }
         card.addView(editTokenButton)
 
         tokenEditor = LinearLayout(this).apply {
@@ -297,7 +382,7 @@ class MainActivity : AppCompatActivity() {
             setHintTextColor(color(R.color.text_muted))
             setPadding(dp(16), dp(14), dp(16), dp(14))
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_input)
-            textSize = 16f
+            textSize = 18f
             // TV remotes: don't steal focus until Edit is pressed.
             isFocusable = false
             isFocusableInTouchMode = false
@@ -314,6 +399,7 @@ class MainActivity : AppCompatActivity() {
             tokenInput.isFocusable = false
             tokenInput.isFocusableInTouchMode = false
             refreshStatus()
+            wireFocusChain()
             editTokenButton.requestFocus()
         }
         tokenEditor.addView(saveTokenButton)
@@ -326,6 +412,7 @@ class MainActivity : AppCompatActivity() {
         tokenEditor.visibility = View.VISIBLE
         tokenInput.isFocusable = true
         tokenInput.isFocusableInTouchMode = true
+        wireFocusChain()
         tokenInput.requestFocus()
     }
 
@@ -353,16 +440,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         val titleView = TextView(this).apply {
-            text = title
+            text = "$title · ${if (required) "Required" else if (optional) "Optional" else "Recommended"}"
             setTextColor(color(R.color.text))
-            textSize = 17f
+            textSize = 20f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         head.addView(titleView)
 
         val badge = TextView(this).apply {
-            textSize = 12f
+            textSize = 18f
             setTypeface(typeface, Typeface.BOLD)
             setPadding(dp(10), dp(5), dp(10), dp(5))
         }
@@ -373,13 +460,12 @@ class MainActivity : AppCompatActivity() {
         row.addView(TextView(this).apply {
             text = description
             setTextColor(color(R.color.text_secondary))
-            textSize = 14f
+            textSize = 18f
             setPadding(0, dp(6), 0, dp(10))
         })
 
         val button = secondaryButton(getString(R.string.grant_needed), action).also {
             permissionButtons[key] = it
-            focusables += it
         }
         row.addView(button)
         card.addView(row)
@@ -387,6 +473,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshStatus() {
+        val overlay = Settings.canDrawOverlays(this)
+        val usage = ForegroundAppDetector(this).hasPermission()
+        val notifications = PlaybackDetector(this).hasPermission()
+        readinessView.text = when {
+            !overlay -> "Setup required"
+            !usage || !notifications -> "Playback checks limited"
+            else -> "Permissions ready"
+        }
+        readinessView.setTextColor(color(if (!overlay) R.color.amber else if (!usage || !notifications) R.color.text else R.color.green))
+        readinessHint.text = when {
+            !overlay && isFireTv -> "On your computer, open this tuner in the dashboard and choose Grant permissions (ADB)."
+            !overlay -> "Allow Display over other apps so the Agent can launch streaming apps."
+            !usage || !notifications -> "Enable recommended permissions to improve foreground-app and playback detection."
+            else -> "Required and recommended permissions are granted. Add this Agent address to your dashboard."
+        }
+        nextActionButton.text = if (!overlay || !usage || !notifications) "Complete setup" else "Review permissions"
         val ip = localIp()
         val port = AgentPrefs.DEFAULT_PORT
         serverUrlView.text = "http://$ip:$port"
@@ -480,7 +582,7 @@ class MainActivity : AppCompatActivity() {
             optional -> {
                 badge.text = getString(R.string.badge_optional)
                 badge.setTextColor(color(R.color.text_muted))
-                badge.background = ContextCompat.getDrawable(this, R.drawable.bg_badge_warn)
+                badge.background = ContextCompat.getDrawable(this, R.drawable.bg_card)
             }
             required -> {
                 badge.text = getString(R.string.badge_needed)
@@ -490,7 +592,7 @@ class MainActivity : AppCompatActivity() {
             else -> {
                 badge.text = getString(R.string.badge_needed)
                 badge.setTextColor(color(R.color.amber))
-                badge.background = ContextCompat.getDrawable(this, R.drawable.bg_badge_warn)
+                badge.background = ContextCompat.getDrawable(this, R.drawable.bg_card)
             }
         }
     }
@@ -507,15 +609,14 @@ class MainActivity : AppCompatActivity() {
     private fun cardTitle(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(color(R.color.text))
-        textSize = 18f
+        textSize = 24f
         setTypeface(typeface, Typeface.BOLD)
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     private fun cardHint(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(color(R.color.text_secondary))
-        textSize = 14f
+        textSize = 18f
         setPadding(0, dp(6), 0, 0)
     }
 
@@ -528,7 +629,7 @@ class MainActivity : AppCompatActivity() {
         row.addView(TextView(this).apply {
             text = label
             setTextColor(color(R.color.text_muted))
-            textSize = 14f
+            textSize = 18f
             layoutParams = LinearLayout.LayoutParams(dp(120), LinearLayout.LayoutParams.WRAP_CONTENT)
         })
         row.addView(valueView)
@@ -537,7 +638,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun monoValue(): TextView = TextView(this).apply {
         setTextColor(color(R.color.accent))
-        textSize = 14f
+        textSize = 18f
         typeface = Typeface.MONOSPACE
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -550,7 +651,7 @@ class MainActivity : AppCompatActivity() {
         isAllCaps = false
         setTextColor(color(R.color.accent_dark))
         setTypeface(typeface, Typeface.BOLD)
-        textSize = 16f
+        textSize = 18f
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
         setPadding(dp(18), dp(16), dp(18), dp(16))
         minHeight = dp(56)
@@ -569,7 +670,7 @@ class MainActivity : AppCompatActivity() {
         this.text = text
         isAllCaps = false
         setTextColor(color(R.color.text))
-        textSize = 16f
+        textSize = 18f
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_secondary)
         setPadding(dp(18), dp(16), dp(18), dp(16))
         minHeight = dp(56)
@@ -584,30 +685,46 @@ class MainActivity : AppCompatActivity() {
         elevation = 0f
     }
 
-    /** Keep D-pad up/down moving through action buttons in a predictable order. */
-    private fun wireFocusChain() {
-        for (view in focusables) {
-            if (view.id == View.NO_ID) view.id = View.generateViewId()
+    private fun visibleActions(): List<View> {
+        val result = mutableListOf<View>()
+        fun visit(view: View) {
+            if (view.visibility != View.VISIBLE) return
+            if ((view is Button || view is EditText) && view.isFocusable && view.isEnabled) result += view
+            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
         }
-        for (i in focusables.indices) {
-            val view = focusables[i]
-            if (i > 0) view.nextFocusUpId = focusables[i - 1].id
-            if (i < focusables.lastIndex) view.nextFocusDownId = focusables[i + 1].id
+        pages[currentPage]?.let { visit(it) }
+        return result
+    }
+
+    private fun wireFocusChain() {
+        val actions = visibleActions()
+        val nav = navigation.values.toList()
+        (actions + nav).forEach { if (it.id == View.NO_ID) it.id = View.generateViewId() }
+        nav.forEachIndexed { i, button ->
+            button.nextFocusLeftId = nav[maxOf(0, i - 1)].id
+            button.nextFocusRightId = nav[minOf(nav.lastIndex, i + 1)].id
+            button.nextFocusUpId = button.id
+            button.nextFocusDownId = actions.firstOrNull()?.id ?: button.id
+        }
+        actions.forEachIndexed { i, view ->
+            view.nextFocusUpId = if (i == 0) navigation[currentPage]!!.id else actions[i - 1].id
+            view.nextFocusDownId = if (i == actions.lastIndex) view.id else actions[i + 1].id
+            if (view !is EditText) {
+                view.nextFocusLeftId = view.id
+                view.nextFocusRightId = view.id
+            }
         }
     }
 
     private fun focusFirstAction() {
-        // Prefer the first permission that still needs granting.
-        val order = listOf("overlay", "usage", "notification", "accessibility", "home")
-        for (key in order) {
-            val granted = permissionGranted[key]?.invoke() == true
+        for (key in listOf("overlay", "usage", "notification")) {
             val button = permissionButtons[key] ?: continue
-            if (!granted) {
+            if (permissionGranted[key]?.invoke() != true && button.isShown) {
                 button.requestFocus()
                 return
             }
         }
-        focusables.firstOrNull()?.requestFocus()
+        visibleActions().firstOrNull()?.requestFocus()
     }
 
     private fun divider(): View = View(this).apply {

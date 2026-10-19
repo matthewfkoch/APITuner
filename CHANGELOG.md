@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-10-19
+
+### Changed
+- Agent **0.1.34** (`versionCode` 32): compact TV header, tabs, typography, cards, and permission rows keep more information visible. Overview cards have matching widths and heights on TV. Moving focus across the top tabs immediately shows the matching section; Down enters its controls.
+
+### Fixed
+- Agent provides a branded TV launcher banner and explicitly declares Android TV support without requiring a touchscreen.
+- Canceling API token editing discards unsaved changes; reopening the editor reloads the saved token. Opening, saving, and canceling the editor keep focus inside Advanced.
+- Checking for updates keeps focus on Updates while the request runs. Fire TV token editing supports Down to Save after dismissing the system keyboard.
+
 ## [0.1.33] - 2026-10-18
 
 ### Changed

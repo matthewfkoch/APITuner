@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.View
 import android.widget.Button
@@ -47,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tokenInput: EditText
     private lateinit var autoUpdateButton: Button
     private lateinit var checkUpdateButton: Button
+    private var manualUpdateChecking = false
     private lateinit var editTokenButton: Button
     private lateinit var saveTokenButton: Button
     private lateinit var tokenEditor: LinearLayout
@@ -64,25 +66,34 @@ class MainActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(32), dp(28), dp(32), dp(40))
+            setPadding(dp(28), dp(20), dp(28), dp(24))
             setBackgroundColor(color(R.color.bg))
             descendantFocusability = LinearLayout.FOCUS_AFTER_DESCENDANTS
         }
 
         root.addView(buildBrandHeader())
-        root.addView(spacer(16))
+        root.addView(spacer(12))
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         for (name in listOf("Overview", "Permissions", "Updates", "Advanced")) {
             val button = secondaryButton(name) { showPage(name) }.apply {
                 id = View.generateViewId()
-                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(12) }
+                layoutParams = if (resources.configuration.screenWidthDp >= 600) {
+                    LinearLayout.LayoutParams(dp(124), dp(44))
+                } else {
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }.apply { marginEnd = dp(8) }
                 contentDescription = name
+                setOnFocusChangeListener { _, hasFocus ->
+                    if (hasFocus && currentPage != name) {
+                        showPage(name, moveFocus = false)
+                    }
+                }
             }
             navigation[name] = button
             nav.addView(button)
         }
         root.addView(nav)
-        root.addView(spacer(20))
+        root.addView(spacer(12))
         pageHost = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -94,13 +105,13 @@ class MainActivity : AppCompatActivity() {
         val readiness = buildReadinessCard()
         for (panel in listOf(connection, readiness)) {
             panel.layoutParams = if (overview.orientation == LinearLayout.HORIZONTAL) {
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    if (panel === connection) marginEnd = dp(20)
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                    if (panel === connection) marginEnd = dp(16)
                 }
             } else LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16) }
             overview.addView(panel)
         }
-        pages["Overview"] = scrollPage(overview)
+        pages["Overview"] = scrollPage(overview).apply { isFillViewport = false }
         pages["Permissions"] = scrollPage(buildPermissionsCard())
         pages["Updates"] = scrollPage(buildUpdatesCard())
         pages["Advanced"] = scrollPage(buildTokenCard())
@@ -122,9 +133,9 @@ class MainActivity : AppCompatActivity() {
     private fun buildReadinessCard(): LinearLayout = card().apply {
         addView(cardTitle("Device setup"))
         readinessView = TextView(this@MainActivity).apply {
-            textSize = 28f
+            textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(16), 0, dp(8))
+            setPadding(0, dp(10), 0, dp(4))
         }
         addView(readinessView)
         readinessHint = cardHint("")
@@ -134,7 +145,7 @@ class MainActivity : AppCompatActivity() {
             pageHost.post { focusFirstAction() }
         }
         addView(nextActionButton)
-        addView(cardHint("Device setup does not verify the HDMI encoder or DVR connection. Check those in the dashboard."))
+        addView(cardHint("Check encoder and DVR connections in the dashboard."))
     }
 
     private fun showPage(name: String, moveFocus: Boolean = true) {
@@ -166,12 +177,8 @@ class MainActivity : AppCompatActivity() {
     @Deprecated("Uses Activity back handling for existing supported Android versions")
     override fun onBackPressed() {
         if (currentPage == "Advanced" && tokenEditor.visibility == View.VISIBLE) {
-            tokenEditor.visibility = View.GONE
-            editTokenButton.visibility = View.VISIBLE
-            tokenInput.isFocusable = false
-            tokenInput.isFocusableInTouchMode = false
-            wireFocusChain()
-            editTokenButton.requestFocus()
+            tokenInput.setText(AgentPrefs.getToken(this))
+            hideTokenEditor()
         } else if (currentPage != "Overview") {
             showPage("Overview", moveFocus = false)
             navigation["Overview"]?.requestFocus()
@@ -194,22 +201,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildBrandHeader(): LinearLayout {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val textCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        textCol.addView(ImageView(this).apply {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(ImageView(this).apply {
             setImageResource(R.drawable.brand_wordmark)
             contentDescription = getString(R.string.brand_title)
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_START
-            layoutParams = LinearLayout.LayoutParams(dp(240), dp(69))
+            layoutParams = LinearLayout.LayoutParams(dp(144), dp(42))
         })
-        textCol.addView(TextView(this).apply {
+        row.addView(TextView(this).apply {
             text = getString(R.string.brand_subtitle)
             setTextColor(color(R.color.text_muted))
-            textSize = 18f
-            setPadding(0, dp(2), 0, 0)
+            textSize = 14f
+            setPadding(dp(16), 0, 0, 0)
         })
-        row.addView(textCol)
         return row
     }
 
@@ -219,18 +227,25 @@ class MainActivity : AppCompatActivity() {
         card.addView(cardHint(getString(R.string.connection_hint)))
 
         serverUrlView = monoValue()
+        serverUrlView.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        )
         card.addView(cardHint("Agent address"))
-        serverUrlView.textSize = 22f
-        serverUrlView.setPadding(0, dp(8), 0, dp(12))
+        serverUrlView.textSize = 18f
+        serverUrlView.setPadding(0, dp(4), 0, dp(4))
         card.addView(serverUrlView)
 
         deviceInfoView = monoValue()
+        deviceInfoView.typeface = Typeface.DEFAULT
         card.addView(infoRow("Device", deviceInfoView))
 
         tokenStatusView = monoValue()
+        tokenStatusView.typeface = Typeface.DEFAULT
         card.addView(infoRow("API token", tokenStatusView))
 
         versionView = monoValue()
+        versionView.typeface = Typeface.DEFAULT
         card.addView(infoRow("Version", versionView))
         return card
     }
@@ -264,7 +279,10 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun runManualUpdateCheck() {
-        checkUpdateButton.isEnabled = false
+        // Keep the focused button enabled so Android does not move focus to
+        // the first tab and switch sections while the check is in progress.
+        if (manualUpdateChecking) return
+        manualUpdateChecking = true
         checkUpdateButton.text = getString(R.string.update_checking)
         updateResultView.text = getString(R.string.update_checking)
         updateExecutor.execute {
@@ -275,7 +293,7 @@ class MainActivity : AppCompatActivity() {
             }
             AgentPrefs.setLastUpdateCheckMs(this, System.currentTimeMillis())
             runOnUiThread {
-                checkUpdateButton.isEnabled = true
+                manualUpdateChecking = false
                 checkUpdateButton.text = getString(R.string.check_for_updates)
                 val message = when (result) {
                     is UpdateChecker.CheckResult.UpToDate ->
@@ -378,11 +396,21 @@ class MainActivity : AppCompatActivity() {
         tokenInput = EditText(this).apply {
             hint = getString(R.string.token_placeholder)
             setText(AgentPrefs.getToken(this@MainActivity))
+            setSingleLine(true)
+            setOnKeyListener { _, keyCode, event ->
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_DOWN -> saveTokenButton.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_UP -> navigation["Advanced"]?.requestFocus() == true
+                        else -> false
+                    }
+                } else false
+            }
             setTextColor(color(R.color.text))
             setHintTextColor(color(R.color.text_muted))
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_input)
-            textSize = 18f
+            textSize = 16f
             // TV remotes: don't steal focus until Edit is pressed.
             isFocusable = false
             isFocusableInTouchMode = false
@@ -394,13 +422,8 @@ class MainActivity : AppCompatActivity() {
         tokenEditor.addView(tokenInput)
         saveTokenButton = primaryButton(getString(R.string.save_token)) {
             AgentPrefs.setToken(this, tokenInput.text.toString().trim())
-            tokenEditor.visibility = View.GONE
-            editTokenButton.visibility = View.VISIBLE
-            tokenInput.isFocusable = false
-            tokenInput.isFocusableInTouchMode = false
+            hideTokenEditor()
             refreshStatus()
-            wireFocusChain()
-            editTokenButton.requestFocus()
         }
         tokenEditor.addView(saveTokenButton)
         card.addView(tokenEditor)
@@ -408,12 +431,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTokenEditor() {
-        editTokenButton.visibility = View.GONE
+        tokenInput.setText(AgentPrefs.getToken(this))
         tokenEditor.visibility = View.VISIBLE
         tokenInput.isFocusable = true
         tokenInput.isFocusableInTouchMode = true
-        wireFocusChain()
         tokenInput.requestFocus()
+        editTokenButton.visibility = View.GONE
+        wireFocusChain()
+    }
+
+    private fun hideTokenEditor() {
+        // Move focus before hiding the editor so Android cannot fall back to
+        // the first tab and switch sections while the focused view disappears.
+        editTokenButton.visibility = View.VISIBLE
+        editTokenButton.requestFocus()
+        tokenEditor.visibility = View.GONE
+        tokenInput.isFocusable = false
+        tokenInput.isFocusableInTouchMode = false
+        wireFocusChain()
     }
 
     private fun addPermission(
@@ -429,9 +464,22 @@ class MainActivity : AppCompatActivity() {
     ) {
         permissionGranted[key] = granted
 
+        val wideLayout = resources.configuration.screenWidthDp >= 600
         val row = LinearLayout(this).apply {
+            orientation = if (wideLayout) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, dp(8))
+        }
+
+        val details = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(12), 0, dp(12))
+            layoutParams = if (wideLayout) {
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = dp(16)
+                }
+            } else {
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
         }
 
         val head = LinearLayout(this).apply {
@@ -442,30 +490,34 @@ class MainActivity : AppCompatActivity() {
         val titleView = TextView(this).apply {
             text = "$title · ${if (required) "Required" else if (optional) "Optional" else "Recommended"}"
             setTextColor(color(R.color.text))
-            textSize = 20f
+            textSize = 16f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         head.addView(titleView)
 
         val badge = TextView(this).apply {
-            textSize = 18f
+            textSize = 12f
             setTypeface(typeface, Typeface.BOLD)
-            setPadding(dp(10), dp(5), dp(10), dp(5))
+            setPadding(dp(8), dp(3), dp(8), dp(3))
         }
         permissionBadges[key] = badge
         head.addView(badge)
-        row.addView(head)
+        details.addView(head)
 
-        row.addView(TextView(this).apply {
+        details.addView(TextView(this).apply {
             text = description
             setTextColor(color(R.color.text_secondary))
-            textSize = 18f
-            setPadding(0, dp(6), 0, dp(10))
+            textSize = 14f
+            setPadding(0, dp(3), 0, 0)
         })
+        row.addView(details)
 
         val button = secondaryButton(getString(R.string.grant_needed), action).also {
             permissionButtons[key] = it
+            if (wideLayout) {
+                it.layoutParams = LinearLayout.LayoutParams(dp(148), LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
         }
         row.addView(button)
         card.addView(row)
@@ -486,7 +538,7 @@ class MainActivity : AppCompatActivity() {
             !overlay && isFireTv -> "On your computer, open this tuner in the dashboard and choose Grant permissions (ADB)."
             !overlay -> "Allow Display over other apps so the Agent can launch streaming apps."
             !usage || !notifications -> "Enable recommended permissions to improve foreground-app and playback detection."
-            else -> "Required and recommended permissions are granted. Add this Agent address to your dashboard."
+            else -> "Required and recommended permissions are granted."
         }
         nextActionButton.text = if (!overlay || !usage || !notifications) "Complete setup" else "Review permissions"
         val ip = localIp()
@@ -600,7 +652,7 @@ class MainActivity : AppCompatActivity() {
     private fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_card)
-        setPadding(dp(20), dp(20), dp(20), dp(20))
+        setPadding(dp(16), dp(14), dp(16), dp(14))
         // Cards themselves should not steal D-pad focus from buttons.
         isFocusable = false
         descendantFocusability = LinearLayout.FOCUS_AFTER_DESCENDANTS
@@ -609,28 +661,28 @@ class MainActivity : AppCompatActivity() {
     private fun cardTitle(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(color(R.color.text))
-        textSize = 24f
+        textSize = 18f
         setTypeface(typeface, Typeface.BOLD)
     }
 
     private fun cardHint(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(color(R.color.text_secondary))
-        textSize = 18f
-        setPadding(0, dp(6), 0, 0)
+        textSize = 14f
+        setPadding(0, dp(4), 0, 0)
     }
 
     private fun infoRow(label: String, valueView: TextView): LinearLayout {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(12), 0, 0)
+            setPadding(0, dp(8), 0, 0)
             isFocusable = false
         }
         row.addView(TextView(this).apply {
             text = label
             setTextColor(color(R.color.text_muted))
-            textSize = 18f
-            layoutParams = LinearLayout.LayoutParams(dp(120), LinearLayout.LayoutParams.WRAP_CONTENT)
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(dp(80), LinearLayout.LayoutParams.WRAP_CONTENT)
         })
         row.addView(valueView)
         return row
@@ -638,11 +690,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun monoValue(): TextView = TextView(this).apply {
         setTextColor(color(R.color.accent))
-        textSize = 18f
+        textSize = 14f
         typeface = Typeface.MONOSPACE
         layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
+            0,
             LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f,
         )
     }
 
@@ -651,16 +704,17 @@ class MainActivity : AppCompatActivity() {
         isAllCaps = false
         setTextColor(color(R.color.accent_dark))
         setTypeface(typeface, Typeface.BOLD)
-        textSize = 18f
+        textSize = 15f
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
-        setPadding(dp(18), dp(16), dp(18), dp(16))
-        minHeight = dp(56)
+        setPadding(dp(16), dp(10), dp(16), dp(10))
+        minHeight = dp(44)
+        minimumHeight = dp(44)
         isFocusable = true
         isFocusableInTouchMode = false
         layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = dp(12) }
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(10) }
         setOnClickListener { onClick() }
         stateListAnimator = null
         elevation = 0f
@@ -670,14 +724,15 @@ class MainActivity : AppCompatActivity() {
         this.text = text
         isAllCaps = false
         setTextColor(color(R.color.text))
-        textSize = 18f
+        textSize = 15f
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_secondary)
-        setPadding(dp(18), dp(16), dp(18), dp(16))
-        minHeight = dp(56)
+        setPadding(dp(16), dp(10), dp(16), dp(10))
+        minHeight = dp(44)
+        minimumHeight = dp(44)
         isFocusable = true
         isFocusableInTouchMode = false
         layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = dp(8) }
         setOnClickListener { onClick() }

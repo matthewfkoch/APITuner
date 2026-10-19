@@ -35,7 +35,7 @@ jobs:
           else
             ver="$(grep 'versionName' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
           fi
-          code="$(grep 'versionCode' app/build.gradle.kts | head -1 | sed -E 's/.*([0-9]+).*/\1/')"
+          code="$(grep 'versionCode' app/build.gradle.kts | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "Building agent version $ver"

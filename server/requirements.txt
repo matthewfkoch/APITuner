@@ -7,4 +7,4 @@ pychromecast==14.0.10
 zeroconf==0.150.0
 python-multipart==0.0.32
 pytesseract==0.3.13
-Pillow==11.3.0
+Pillow==12.3.0

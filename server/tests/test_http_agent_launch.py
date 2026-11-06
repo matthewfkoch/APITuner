@@ -126,3 +126,73 @@ async def test_launch_ok_on_success_true():
     backend = _backend_with_transport(handler)
     await backend.launch(package="com.espn.score_center")
     await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_typed_extras_preserve_boolean_types_and_url_punctuation():
+    launches = []
+
+    def handler(request):
+        if request.url.path == "/api/info":
+            return httpx.Response(200, json={"capabilities": {"typed_intent_extras": True}})
+        launches.append(json.loads(request.content))
+        return httpx.Response(200, json={"success": True})
+
+    backend = _backend_with_transport(handler)
+    extras = {
+        "drm": True, "captions": False,
+        "stream_url": "http://server/play/a,b.mpd?token=a:b&x=%2F",
+        "title": "News: live, 日本語",
+    }
+    try:
+        await backend.launch(package="com.fastchannels.player", intent_extras=extras)
+        assert launches == [{"packageName": "com.fastchannels.player", "intent_extras": extras}]
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_typed_extras_refuse_old_agent_before_launch():
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"capabilities": {}})
+
+    backend = _backend_with_transport(handler)
+    try:
+        with pytest.raises(BackendUnavailable, match="Update APITuner Agent"):
+            await backend.launch(package="com.fastchannels.player", intent_extras={"drm": True})
+        assert paths == ["/api/info"]
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [1, None, [], {}])
+async def test_typed_extras_reject_unsupported_values(value):
+    def handler(request):
+        pytest.fail("Invalid extras must not issue a request")
+
+    backend = _backend_with_transport(handler)
+    try:
+        with pytest.raises(BackendUnavailable, match="strings or booleans"):
+            await backend.launch(package="com.fastchannels.player", intent_extras={"drm": value})
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_typed_launch_never_falls_back_to_keys_backend():
+    from unittest.mock import AsyncMock
+    from apituner.backends.hybrid import SplitControlBackend
+
+    primary = _backend_with_transport(lambda request: httpx.Response(200, json={"capabilities": {}}))
+    keys = AsyncMock()
+    backend = SplitControlBackend(primary, keys)
+    try:
+        with pytest.raises(BackendUnavailable, match="Update APITuner Agent"):
+            await backend.launch(package="com.fastchannels.player", intent_extras={"drm": True})
+        keys.launch.assert_not_called()
+    finally:
+        await primary.close()

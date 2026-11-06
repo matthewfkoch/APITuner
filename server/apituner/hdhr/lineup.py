@@ -61,7 +61,7 @@ def build_lineup_json(channels: list[Channel], base_url: str) -> list[dict[str, 
     """Build lineup.json entries pointing at /auto/v{id} stream URLs."""
     base = base_url.rstrip("/")
     out: list[dict[str, Any]] = []
-    for ch in sort_channels(channels):
+    for ch in sort_channels([ch for ch in channels if ch.available]):
         entry: dict[str, Any] = {
             "GuideNumber": str(ch.number),
             "GuideName": ch.name,
@@ -91,7 +91,7 @@ def build_lineup_m3u(channels: list[Channel], base_url: str) -> str:
     """HDHomeRun-style lineup.m3u."""
     base = base_url.rstrip("/")
     lines = ["#EXTM3U"]
-    for ch in sort_channels(channels):
+    for ch in sort_channels([ch for ch in channels if ch.available]):
         lines.append(f'#EXTINF:-1 tvg-chno="{ch.number}",{ch.name}')
         lines.append(f"{base}/auto/v{ch.id}")
     return "\n".join(lines) + "\n"

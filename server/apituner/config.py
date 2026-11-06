@@ -36,6 +36,9 @@ _ADBTUNER_CHANNEL_FIELDS = (
     "tvg_id",
     "configuration_uuid",
     "source",
+    "available",
+    "fastchannels_source",
+    "fastchannels_channel_id",
 )
 
 

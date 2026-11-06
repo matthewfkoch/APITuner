@@ -129,6 +129,7 @@ class AgentWebServer(
             "power" to false,
             "app_list" to true,
             "install" to true,
+            "typed_intent_extras" to true,
         )
         return json(
             mapOf(
@@ -168,6 +169,7 @@ class AgentWebServer(
                     "power" to false,
                     "app_list" to true,
                     "install" to true,
+                    "typed_intent_extras" to true,
                 ),
                 "foreground" to mapOf(
                     "packageName" to foreground.currentForegroundPackage(),
@@ -217,7 +219,7 @@ class AgentWebServer(
         val data = obj.get("data")?.asString
         val component = obj.get("component")?.asString
 
-        val extras = HashMap<String, String>()
+        val extras = HashMap<String, Any>()
         obj.get("extra_string")?.asString?.split(",")?.forEach { pair ->
             val parts = pair.split(":", limit = 2)
             if (parts.size == 2) extras[parts[0].trim()] = parts[1].trim()
@@ -225,6 +227,21 @@ class AgentWebServer(
         obj.entrySet().forEach { (k, v) ->
             if (k.startsWith("extra_") && k != "extra_string") {
                 extras[k.removePrefix("extra_")] = v.asString
+            }
+        }
+
+        // Preserve booleans (DRM/captions) and punctuation in URLs. Legacy
+        // comma-separated extras remain supported; structured extras win.
+        obj.get("intent_extras")?.let { supplied ->
+            if (!supplied.isJsonObject) {
+                return json(mapOf("success" to false, "message" to "intent_extras must be an object"))
+            }
+            supplied.asJsonObject.entrySet().forEach { (key, value) ->
+                if (!value.isJsonPrimitive ||
+                    (!value.asJsonPrimitive.isString && !value.asJsonPrimitive.isBoolean)) {
+                    return json(mapOf("success" to false, "message" to "intent_extras values must be strings or booleans"))
+                }
+                extras[key] = if (value.asJsonPrimitive.isBoolean) value.asBoolean else value.asString
             }
         }
 

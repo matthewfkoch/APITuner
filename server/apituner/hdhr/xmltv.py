@@ -104,6 +104,8 @@ def build_xmltv(
 
     programme_count = 0
     for ch in sort_channels(channels):
+        if ch.source == "fastchannels":
+            continue  # Companion XMLTV is authoritative for this source.
         station = str(ch.tvc_guide_stationid) if ch.tvc_guide_stationid else ""
         if not station:
             continue
@@ -307,9 +309,11 @@ async def get_xmltv(
     force_refresh: bool = False,
 ) -> str:
     """Return cached or freshly built XMLTV (Gracenote remap and/or FDL lanes)."""
+    channels = [ch for ch in channels if ch.available]
+    fc = (options.fastchannels_url or "").strip()
     dvr = (options.channels_dvr_url or "").strip().rstrip("/")
     fdl = (options.fruitdeeplinks_url or "").strip().rstrip("/")
-    if not dvr and not fdl:
+    if not dvr and not fdl and not fc:
         raise ValueError(
             "Set Channels DVR URL (Gracenote remap) and/or FruitDeepLinks URL "
             "in Options so /xmltv.xml has a guide source."
@@ -319,7 +323,8 @@ async def get_xmltv(
     device = options.xmltv_source_device or "M3U-YouTubeTV"
     ids = ",".join(ch.id for ch in sorted(channels, key=lambda c: c.id))
     cache_key = (
-        f"{dvr}|{fdl}|{options.fruitdeeplinks_xmltv_path}|{device}|{duration}|{ids}"
+        f"{dvr}|{fdl}|{fc}|{options.fruitdeeplinks_xmltv_path}|{device}|{duration}|{ids}|"
+        + repr([(ch.id, ch.name, ch.number, ch.tvg_id, ch.tvc_guide_stationid) for ch in channels])
     )
     now = time.time()
     if (
@@ -339,7 +344,7 @@ async def get_xmltv(
                 duration_seconds=duration,
             )
         except Exception:
-            if not fdl:
+            if not fdl and not fc:
                 raise
             logger.exception(
                 "Channels DVR guide fetch failed; continuing with FDL XMLTV"
@@ -350,6 +355,9 @@ async def get_xmltv(
         foreign = await fetch_fdl_xmltv(options)
         if foreign:
             xml = merge_fdl_programmes(xml, rewrite_fdl_xmltv(foreign, channels))
+    if fc:
+        from ..fastchannels import guide_programmes
+        xml = merge_fdl_programmes(xml, await guide_programmes(fc, channels))
     _cache["key"] = cache_key
     _cache["xml"] = xml
     _cache["expires"] = now + max(30.0, float(options.xmltv_cache_seconds))

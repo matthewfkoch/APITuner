@@ -16,7 +16,21 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/apituner
 
 jobs:
+  validate:
+    name: Validate release candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test server and companion contract
+        run: |
+          pip install -r server/requirements.txt -r server/requirements-dev.txt flask
+          python -m pytest server/tests integrations/fastchannels/test_external_player.py -q
+
   build-agent:
+    needs: validate
     name: Build Agent APK
     runs-on: ubuntu-latest
     defaults:
@@ -96,6 +110,12 @@ jobs:
             echo "No keystore secret; will build debug APK"
           fi
 
+      - name: Require signing for published tags
+        if: github.ref_type == 'tag' && steps.signing.outputs.enabled != 'true'
+        run: |
+          echo "::error::Tagged releases require the existing release signing key."
+          exit 1
+
       - name: Build release APK
         if: steps.signing.outputs.enabled == 'true'
         env:
@@ -174,6 +194,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish-docker:
+    needs: validate
     name: Publish Docker image
     runs-on: ubuntu-latest
     steps:
@@ -187,7 +208,12 @@ jobs:
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             ver="${GITHUB_REF_NAME#v}"
             echo "version=${ver}" >> "$GITHUB_OUTPUT"
-            echo "tags=${{ env.REGISTRY }}/${image}:${ver},${{ env.REGISTRY }}/${image}:latest" >> "$GITHUB_OUTPUT"
+            if [[ "$ver" == *-* ]]; then
+              # Prereleases must never replace the stable Docker image.
+              echo "tags=${{ env.REGISTRY }}/${image}:${ver}" >> "$GITHUB_OUTPUT"
+            else
+              echo "tags=${{ env.REGISTRY }}/${image}:${ver},${{ env.REGISTRY }}/${image}:latest" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "version=dev" >> "$GITHUB_OUTPUT"
             echo "tags=${{ env.REGISTRY }}/${image}:dev" >> "$GITHUB_OUTPUT"
@@ -319,6 +345,8 @@ jobs:
           token: ${{ secrets.RELEASES_REPO_TOKEN }}
           tag_name: ${{ github.ref_name }}
           name: APITuner v${{ steps.version.outputs.version }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
           body: |
             ## Agent APK
 
@@ -328,8 +356,8 @@ jobs:
 
             In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and your HDMI encoder stream URL.
 
-            Machine-readable update metadata: **latest.json** (also available at
-            `…/releases/latest/download/latest.json`).
+            Machine-readable update metadata: **latest.json** is attached to this release.
+            The `releases/latest/download/latest.json` URL serves stable releases only.
 
             ## Server (Docker)
 
@@ -337,10 +365,17 @@ jobs:
             docker pull ${{ env.REGISTRY }}/${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
             ```
 
-            Or pull `:latest` for the most recent release.
+            Prereleases require the explicit version tag shown above.
+            `:latest` tracks stable releases only.
+
+            FastChannels builds also require the companion server patch and official
+            FastChannels Player. See the attached integration instructions.
           files: |
             apituner-agent-*.apk
             latest.json
+            docs/FASTCHANNELS.md
+            docs/RELEASE-0.1.35-fastchannels.1.md
+            integrations/fastchannels/external-player-v1.patch
 
       - name: Job summary
         if: always()

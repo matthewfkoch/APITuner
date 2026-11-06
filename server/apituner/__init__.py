@@ -1,3 +1,3 @@
 """APITuner - day-to-day ADB-free virtual tuner for Channels DVR with pluggable backends."""
 
-__version__ = "0.1.34"
+__version__ = "0.1.35-fastchannels.1"

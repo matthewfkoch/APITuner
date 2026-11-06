@@ -100,7 +100,7 @@ class AppLauncher(val context: Context) {
         action: String?,
         data: String?,
         component: String?,
-        extras: Map<String, String>?,
+        extras: Map<String, Any>?,
         clearTask: Boolean = false,
     ): LaunchResult {
         return try {
@@ -126,7 +126,13 @@ class AppLauncher(val context: Context) {
                         Intent.FLAG_ACTIVITY_SINGLE_TOP
                 },
             )
-            extras?.forEach { (k, v) -> intent.putExtra(k, v) }
+            extras?.forEach { (k, v) ->
+                when (v) {
+                    is Boolean -> intent.putExtra(k, v)
+                    is String -> intent.putExtra(k, v)
+                    else -> return LaunchResult(false, "unsupported intent extra: $k")
+                }
+            }
 
             // Fall back to the plain launch intent if the explicit intent can't resolve.
             if (intent.resolveActivity(context.packageManager) == null && component.isNullOrEmpty()) {

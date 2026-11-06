@@ -116,6 +116,9 @@ class Channel(BaseModel):
     configuration_uuid: Optional[str] = None
     # Integrator origin (e.g. fruitdeeplinks). Sync replaces only matching rows.
     source: Optional[str] = None
+    available: bool = True
+    fastchannels_source: Optional[str] = None
+    fastchannels_channel_id: Optional[str] = None
 
     @field_validator("number", mode="before")
     @classmethod
@@ -206,6 +209,10 @@ class GlobalOptions(BaseModel):
     xmltv_source_device: str = "M3U-YouTubeTV"
     xmltv_duration_seconds: int = 259200  # 3 days
     xmltv_cache_seconds: float = 900.0
+
+    fastchannels_url: Optional[str] = None
+    fastchannels_start_number: int = Field(default=10000, ge=1)
+    fastchannels_sync_seconds: float = Field(default=0, ge=0)
 
     # FruitDeepLinks / Android TV deeplink source (lane resolvers + XMLTV).
     fruitdeeplinks_url: Optional[str] = None

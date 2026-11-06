@@ -1793,6 +1793,9 @@ const OPTION_FIELDS = [
   ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as the schedule source"],
   ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 3 days)"],
   ["xmltv_cache_seconds", "XMLTV cache (s)", "number", null, "How long to reuse a built XMLTV response"],
+  ["fastchannels_url", "FastChannels URL", "text", null, "Companion server URL. Configure FASTCHANNELS_TOKEN on the APITuner server; credentials stay out of the browser."],
+  ["fastchannels_start_number", "FastChannels first number", "number", null, "New channels start here; existing channel numbers are preserved."],
+  ["fastchannels_sync_seconds", "FastChannels refresh interval (s)", "number", null, "0 = manual sync. Save changes before syncing."],
   ["fruitdeeplinks_url", "FruitDeepLinks URL", "text", null, "LAN URL. Sync imports lanes; XMLTV remaps their guide"],
   ["fruitdeeplinks_profile", "FruitDeepLinks device profile", "select", [
     { value: "google_tv", label: "Google TV / Android TV" },
@@ -1813,7 +1816,7 @@ async function loadOptions() {
     form.append(group); groups[id] = group.querySelector(".form-grid");
   }
   for (const [key, label, type, choices, hint] of OPTION_FIELDS) {
-    const group = /^(hdhr_|channels_|xmltv_|fruitdeeplinks_)/.test(key) ? groups.integrations
+    const group = /^(hdhr_|channels_|xmltv_|fruitdeeplinks_|fastchannels_)/.test(key) ? groups.integrations
       : /^(stream_mode|stream_during_tune|release_grace_seconds|stuck_tuner_timeout_seconds|tuner_idle_timeout_seconds)$/.test(key) ? groups.relay : groups.tuning;
     if (type === "bool") {
       const row = el(`<div class="field checkbox"><input type="checkbox" name="${key}" ${opts[key] ? "checked" : ""} /><label>${label}</label></div>`);
@@ -1964,3 +1967,12 @@ api.get("/api/status").then((d) => {
     });
   }
 }).catch((e) => toast(e.message || "Could not load server status", true));
+
+// FastChannels uses only the server-side service token.
+document.getElementById("sync-fastchannels-btn").addEventListener("click", async () => {
+  try {
+    const result = await api.post("/api/fastchannels/sync", {});
+    toast(`FastChannels: ${result.available} available, ${result.added} added, ${result.unavailable} unavailable`);
+    loadChannels();
+  } catch (error) { toast(error.message, true); }
+});

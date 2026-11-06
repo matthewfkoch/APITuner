@@ -55,6 +55,7 @@ _STALE_PLAYBACK_PACKAGES = frozenset(
 _STALE_SPLASH_GRACE_SECONDS = 45.0
 _STALE_SPLASH_GRACE_MIN_TIMEOUT = 20.0
 _HOME_BEFORE_DEEPLINK_SECONDS = 0.8
+_RELEASE_TIMEOUT_SECONDS = 60.0
 # DirecTV often needs ~10s after a good deeplink before MediaSession flips
 # to PLAYING. A 2s idle HOME restarts that launch (MeTV log, 0.1.29).
 _STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS = 15.0
@@ -256,6 +257,9 @@ class Lease:
     command_backend: Optional[ControlBackend] = None
     # Background App Play / deeplink tune when stream_during_tune is enabled.
     tune_task: Optional[asyncio.Task] = None
+    force_stop: bool = False
+    player_session_key: Optional[str] = None
+    monitor_task: Optional[asyncio.Task] = None
 
 
 class TunerManager:
@@ -267,6 +271,8 @@ class TunerManager:
         self._states: dict[str, TunerState] = {}
         self._alloc_lock = asyncio.Lock()
         self._reaper_task: Optional[asyncio.Task] = None
+        self._leases: dict[str, Lease] = {}
+        self._release_tasks: dict[str, asyncio.Task] = {}
 
     # -- Config helpers --
 
@@ -509,6 +515,8 @@ class TunerManager:
         async with self._alloc_lock:
             candidates: list[Tuner] = []
             for tuner in self._tuners():
+                if channel.source == "fastchannels" and tuner.control.type != "http_agent":
+                    continue
                 if tuner.id in exclude or not tuner.enabled:
                     continue
                 if self._state(tuner.id).locked:
@@ -542,6 +550,8 @@ class TunerManager:
             tuner = self.tuner_at_index(tuner_index)
             if tuner is None:
                 raise NoTunerAvailable(f"No tuner at index {tuner_index}")
+            if channel.source == "fastchannels" and tuner.control.type != "http_agent":
+                raise NoTunerAvailable("FastChannels requires an HTTP Agent tuner")
             if self._has_app(tuner.id, channel) is False:
                 raise NoTunerAvailable(
                     f"Tuner {tuner_index} cannot serve channel {channel.number}"
@@ -568,17 +578,22 @@ class TunerManager:
         self, channel: Channel, *, tuner_index: Optional[int] = None
     ) -> Lease:
         options = self._options
+        if not channel.available:
+            raise NoTunerAvailable("Channel is no longer available from its source")
         if tuner_index is not None:
             tuner = await self._select_index(channel, tuner_index)
             backend = self.get_backend(tuner)
             tune_id = _new_tune_id()
+            self._state(tuner.id).tune_id = tune_id
             try:
-                return await self._lease_on(tuner, backend, channel, tune_id, options)
-            except Exception as exc:  # noqa: BLE001
+                lease = await self._lease_on(tuner, backend, channel, tune_id, options)
+                self._leases[tune_id] = lease
+                return lease
+            except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
                 logger.warning("Tune %s failed on %s: %s", tune_id, tuner.name, exc)
                 st = self._state(tuner.id)
                 st.last_error = str(exc)
-                self._unlock(tuner.id)
+                await self._abort_tune(tuner, backend, channel, tune_id)
                 raise
 
         tried: set[str] = set()
@@ -594,16 +609,27 @@ class TunerManager:
             tried.add(tuner.id)
             backend = self.get_backend(tuner)
             tune_id = _new_tune_id()
+            self._state(tuner.id).tune_id = tune_id
             try:
-                return await self._lease_on(tuner, backend, channel, tune_id, options)
-            except Exception as exc:  # noqa: BLE001
+                lease = await self._lease_on(tuner, backend, channel, tune_id, options)
+                self._leases[tune_id] = lease
+                return lease
+            except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
                 logger.warning("Tune %s failed on %s: %s", tune_id, tuner.name, exc)
                 st = self._state(tuner.id)
                 st.last_error = str(exc)
-                self._unlock(tuner.id)
+                await self._abort_tune(tuner, backend, channel, tune_id)
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
                 last_err = exc
                 if not options.retry_on_other_tuner:
                     raise
+
+    async def _abort_tune(self, tuner, backend, channel, tune_id) -> None:
+        lease = self._leases.get(tune_id) or Lease(tuner=tuner, backend=backend, channel=channel,
+                      tune_id=tune_id, force_stop=True)
+        self._leases[tune_id] = lease
+        await self.release(lease)
 
     async def _lease_on(
         self,
@@ -613,6 +639,8 @@ class TunerManager:
         tune_id: str,
         options: GlobalOptions,
     ) -> Lease:
+        if channel.source == "fastchannels":
+            return await self._lease_fastchannels(tuner, backend, channel, tune_id, options)
         configs = self._store.config.configurations
         try:
             overlay = resolve_tune_configuration(channel, configs)
@@ -733,6 +761,33 @@ class TunerManager:
             tune_configuration=tune_configuration,
             command_backend=cmd_backend,
         )
+
+    async def _lease_fastchannels(self, tuner, backend, channel, tune_id, options):
+        from .fastchannels_runtime import tune, monitor
+        from .fastchannels_probe import ProbeError
+        if not channel.fastchannels_source or not channel.fastchannels_channel_id:
+            raise TuneFailed("FastChannels channel identity is missing; sync again")
+        state = self._state(tuner.id)
+        state.tune_id, state.channel_number, state.channel_name = tune_id, channel.number, channel.name
+        state.last_seen, state.last_error = time.time(), None
+        key = f"apituner:{tune_id}:{uuid.uuid4().hex}"
+        lease = Lease(tuner=tuner, backend=backend, channel=channel, tune_id=tune_id,
+                      player_session_key=key)
+        self._leases[tune_id] = lease
+        async def launch():
+            try:
+                await tune(backend, channel, options, key)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                message = str(exc) if isinstance(exc, ProbeError) else "FastChannels tune failed"
+                state.last_error = message
+                raise TuneFailed(message) from None
+        lease.tune_task = asyncio.create_task(launch(), name=f"fastchannels-{tune_id}")
+        if not options.stream_during_tune:
+            await lease.tune_task
+        lease.monitor_task = asyncio.create_task(monitor(backend, lease.tune_task))
+        return lease
 
     async def _do_tune_background(
         self,
@@ -1682,6 +1737,10 @@ class TunerManager:
 
     # -- Streaming lifecycle --
 
+    def owns_lease(self, lease: Lease) -> bool:
+        state = self._state(lease.tuner.id)
+        return state.locked and state.tune_id == lease.tune_id and lease.tune_id not in self._release_tasks
+
     def touch(self, tune_id: str, nbytes: int) -> None:
         for st in self._states.values():
             if st.tune_id == tune_id:
@@ -1690,41 +1749,85 @@ class TunerManager:
                 return
 
     async def release(self, lease: Lease) -> None:
+        # No await before claiming cleanup: concurrent releases share one task.
+        # A delayed release from an older stream must never stop a newer tune.
+        st = self._state(lease.tuner.id)
+        if not st.locked or st.tune_id != lease.tune_id:
+            return
+        task = self._release_tasks.get(lease.tune_id)
+        if task is None:
+            task = asyncio.create_task(self._finish_release(lease),
+                                       name=f"release-{lease.tune_id}")
+            self._release_tasks[lease.tune_id] = task
+        # Client disconnect/cancellation cannot interrupt device cleanup.
+        await asyncio.shield(task)
+
+    async def _finish_release(self, lease: Lease) -> None:
+        try:
+            await asyncio.wait_for(self._cleanup_lease(lease), _RELEASE_TIMEOUT_SECONDS)
+        except Exception as exc:  # noqa: BLE001
+            st = self._state(lease.tuner.id)
+            if st.tune_id == lease.tune_id:
+                st.last_error = f"Tuner cleanup failed ({type(exc).__name__}); tuner remains reserved"
+            logger.warning("Cleanup failed for tuner %s (%s)", lease.tuner.name, type(exc).__name__)
+            # Retain the lease for a later explicit/reaper cleanup retry.
+        else:
+            if self._state(lease.tuner.id).tune_id == lease.tune_id:
+                self._unlock(lease.tuner.id)
+            self._leases.pop(lease.tune_id, None)
+            logger.info("Released tuner %s (tune %s)", lease.tuner.name, lease.tune_id)
+        finally:
+            self._release_tasks.pop(lease.tune_id, None)
+
+    async def _cleanup_lease(self, lease: Lease) -> None:
+        monitor = lease.monitor_task
+        if monitor is not None:
+            if not monitor.done():
+                monitor.cancel()
+            try:
+                await monitor
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling():
+                    raise
+            except Exception:
+                pass
         options = self._options
         task = lease.tune_task
         if task is not None and not task.done():
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            except asyncio.CancelledError:
+                # A canceled tune task is expected. Cancellation of this cleanup
+                # task (e.g. its deadline), however, must not be swallowed.
+                if asyncio.current_task().cancelling():
+                    raise
+            except Exception:  # noqa: BLE001
                 pass
             lease.tune_task = None
-        self._unlock(lease.tuner.id)
+        if lease.player_session_key is not None:
+            from .fastchannels_probe import stop_player
+            await stop_player(lease.backend, lease.player_session_key)
+            return
         app_play = lease.tune_configuration
         cmd_be = lease.command_backend or lease.backend
         if app_play is not None and app_play.post_tune_commands:
             chosen_pkg = self._choose_package(lease.tuner.id, lease.channel)
             identifier = lease.channel.url if lease.channel.url is not None else ""
-            try:
-                await run_commands(
-                    cmd_be,
-                    app_play.post_tune_commands,
-                    package=chosen_pkg,
-                    identifier=identifier,
-                    skip_am_start=True,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("post_tune_commands failed: %s", exc)
+            await run_commands(
+                cmd_be,
+                app_play.post_tune_commands,
+                package=chosen_pkg,
+                identifier=identifier,
+                skip_am_start=True,
+            )
         elif (
-            options.stop_on_release
+            lease.force_stop
+            or options.stop_on_release
             or not options.keep_apps_running
             or lease.channel.compatibility_mode
         ):
-            try:
-                await lease.backend.stop()
-            except Exception:  # noqa: BLE001
-                pass
-        logger.info("Released tuner %s (tune %s)", lease.tuner.name, lease.tune_id)
+            await lease.backend.stop()
 
     # -- Status + reaper --
 
@@ -1769,6 +1872,9 @@ class TunerManager:
             except asyncio.CancelledError:
                 pass
             self._reaper_task = None
+        await asyncio.gather(*(self.release(lease) for lease in list(self._leases.values())))
+        if self._release_tasks:
+            await asyncio.gather(*list(self._release_tasks.values()))
         for backend in list(self._backends.values()) + list(self._keys_backends.values()):
             try:
                 await backend.close()
@@ -1777,16 +1883,21 @@ class TunerManager:
         self._backends.clear()
         self._keys_backends.clear()
 
+    async def _reap_once(self) -> None:
+        timeout = self._options.stuck_tuner_timeout_seconds
+        now = time.time()
+        expired = []
+        for st in list(self._states.values()):
+            if st.locked and st.last_seen and now - st.last_seen > timeout:
+                # Synchronous tuning has not returned a lease yet. Never unlock
+                # it while the request can still issue commands to the device.
+                lease = self._leases.get(st.tune_id)
+                if lease is not None:
+                    logger.warning("Cleaning up stale tuner %s", st.tuner_id)
+                    expired.append(lease)
+        await asyncio.gather(*(self.release(lease) for lease in expired))
+
     async def _reaper_loop(self) -> None:
         while True:
             await asyncio.sleep(10)
-            timeout = self._options.stuck_tuner_timeout_seconds
-            now = time.time()
-            for st in list(self._states.values()):
-                if st.locked and st.last_seen and (now - st.last_seen) > timeout:
-                    logger.warning(
-                        "Reaping stuck tuner %s (no data for %.0fs)",
-                        st.tuner_id,
-                        now - st.last_seen,
-                    )
-                    self._unlock(st.tuner_id)
+            await self._reap_once()

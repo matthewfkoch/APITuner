@@ -25,6 +25,8 @@ def filter_channels_by_provider(
 
 def m3u_tvg_id(channel: Channel) -> str:
     """XMLTV join key for Channels DVR (tvg-id). Not Gracenote."""
+    if channel.source == "fastchannels":
+        return channel.id
     explicit = (channel.tvg_id or "").strip()
     if explicit:
         return explicit
@@ -39,7 +41,7 @@ def build_m3u(channels: list[Channel], base_url: str) -> str:
     """Build a Channels-DVR-compatible M3U pointing back at APITuner."""
     base = base_url.rstrip("/")
     lines = ["#EXTM3U"]
-    for ch in sort_channels(channels):
+    for ch in sort_channels([ch for ch in channels if ch.available]):
         attrs = [
             f'channel-id="{ch.id}"',
             f'channel-number="{ch.number}"',

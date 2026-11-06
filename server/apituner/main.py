@@ -26,6 +26,7 @@ from .deeplink_catalog import catalog_payload
 from .diagnostics import build_diagnostics
 from .discovery import discover
 from .fruitdeeplinks import FruitDeepLinksError, sync_fruitdeeplinks
+from .fastchannels import FastChannelsError, sync_fastchannels
 from .hdhr.discovery import DiscoverIdentity, HdhrDiscoveryService
 from .hdhr.lineup import resolve_base_url
 from .hdhr.routes import router as hdhr_router
@@ -106,9 +107,15 @@ async def lifespan(app: FastAPI):
     logger.info("APITuner %s started", __version__)
     sync_task = asyncio.create_task(_fruitdeeplinks_sync_loop(store))
     app.state.fdl_sync_task = sync_task
+    fc_sync_task = asyncio.create_task(_fastchannels_sync_loop(store))
     try:
         yield
     finally:
+        fc_sync_task.cancel()
+        try:
+            await fc_sync_task
+        except asyncio.CancelledError:
+            pass
         sync_task.cancel()
         try:
             await sync_task
@@ -122,6 +129,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="APITuner", version=__version__, lifespan=lifespan)
 app.include_router(hdhr_router)
+
+
+async def _fastchannels_sync_loop(store: ConfigStore) -> None:
+    while True:
+        seconds = store.config.options.fastchannels_sync_seconds
+        if seconds and store.config.options.fastchannels_url:
+            try:
+                await sync_fastchannels(store)
+            except FastChannelsError as exc:
+                logger.warning("FastChannels refresh failed: %s", exc)
+        await asyncio.sleep(max(10, seconds or 10))
 
 
 async def _fruitdeeplinks_sync_loop(store: ConfigStore) -> None:
@@ -609,6 +627,9 @@ async def update_channel(channel_id: str, channel: Channel, request: Request) ->
     # FruitDeepLinks sync grouping and YTTV Sports tvg-id inference.
     if not (channel.source or "").strip() and previous.source:
         updates["source"] = previous.source
+    if previous.source == "fastchannels":
+        for field in ("source", "available", "fastchannels_source", "fastchannels_channel_id"):
+            updates[field] = getattr(previous, field)
     updated = channel.model_copy(update=updates)
     store.config.channels[idx] = updated
     try:
@@ -701,6 +722,14 @@ async def export_channels(request: Request, native: int = 0) -> JSONResponse:
 async def deeplink_catalog() -> dict:
     """Provider / scheme → Android package map for FruitDeepLinks and similar sources."""
     return catalog_payload()
+
+
+@app.post("/api/fastchannels/sync")
+async def fastchannels_sync(request: Request) -> dict:
+    try:
+        return await sync_fastchannels(_store(request))
+    except FastChannelsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @app.post("/api/fruitdeeplinks/sync")
@@ -992,6 +1021,7 @@ async def status(request: Request) -> dict:
     epg_source = bool(
         (options.channels_dvr_url or "").strip()
         or (options.fruitdeeplinks_url or "").strip()
+        or (options.fastchannels_url or "").strip()
     )
     return {
         "version": __version__,

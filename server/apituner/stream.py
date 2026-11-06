@@ -37,14 +37,15 @@ async def _redirect_release(manager: TunerManager, lease: Lease, idle: float) ->
 
 def _tune_failed(lease: Lease) -> Optional[BaseException]:
     """Return the exception if a background tune task finished with failure."""
-    task = getattr(lease, "tune_task", None)
-    if task is None or not task.done():
-        return None
-    try:
-        exc = task.exception()
-    except asyncio.CancelledError:
-        return None
-    return exc
+    for task in (getattr(lease, "tune_task", None), getattr(lease, "monitor_task", None)):
+        if task is not None and task.done():
+            try:
+                exc = task.exception()
+            except asyncio.CancelledError:
+                continue
+            if exc is not None:
+                return exc
+    return None
 
 
 async def _proxy_iter(
@@ -60,7 +61,7 @@ async def _proxy_iter(
     url = lease.tuner.stream_endpoint
     # follow_redirects: some encoders 301/302 (trailing slash, http→https).
     client = httpx.AsyncClient(
-        timeout=httpx.Timeout(None, connect=15.0),
+        timeout=httpx.Timeout(15.0, connect=15.0),
         follow_redirects=True,
     )
     try:
@@ -73,19 +74,36 @@ async def _proxy_iter(
                     url,
                 )
             resp.raise_for_status()
-            async for chunk in resp.aiter_bytes(_CHUNK):
-                failed = _tune_failed(lease)
-                if failed is not None:
-                    logger.warning(
-                        "Stream %s stopping: background tune failed: %s",
-                        lease.tune_id,
-                        failed,
-                    )
-                    break
-                if await request.is_disconnected():
-                    break
-                manager.touch(lease.tune_id, len(chunk))
-                yield chunk
+            iterator = resp.aiter_bytes(_CHUNK).__aiter__()
+            pending = None
+            try:
+                while True:
+                    failed = _tune_failed(lease)
+                    if failed is not None or await request.is_disconnected():
+                        break
+                    active = getattr(manager, "owns_lease", None)
+                    if active is not None and not active(lease):
+                        break
+                    if pending is None:
+                        pending = asyncio.create_task(iterator.__anext__())
+                    done, _ = await asyncio.wait({pending}, timeout=1)
+                    if not done:
+                        continue
+                    try:
+                        chunk = pending.result()
+                    except StopAsyncIteration:
+                        break
+                    pending = None
+                    manager.touch(lease.tune_id, len(chunk))
+                    yield chunk
+            finally:
+                if pending is not None:
+                    pending.cancel()
+                    try:
+                        await pending
+                    except (asyncio.CancelledError, StopAsyncIteration, httpx.HTTPError):
+                        pass
+
     except (httpx.HTTPError, asyncio.CancelledError, GeneratorExit) as exc:
         detail = ""
         if isinstance(exc, httpx.HTTPStatusError):
@@ -104,7 +122,7 @@ async def open_stream(request: Request, manager: TunerManager, channel) -> Respo
     """Acquire a tuner, tune the channel, and return a stream response."""
     lease = await manager.lease(channel)
 
-    if manager.options.stream_mode == "redirect":
+    if manager.options.stream_mode == "redirect" and channel.source != "fastchannels":
         # Video flows encoder -> Channels directly; reclaim after App Play
         # finishes (if any) plus the idle window.
         asyncio.create_task(

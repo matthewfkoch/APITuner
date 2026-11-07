@@ -19,30 +19,11 @@ from .m3u_import import (
     normalize_resolver_url,
     whatson_resolver_url,
 )
-from .models import Channel, TuneConfiguration, TuneConfigurationOptions
+from .models import Channel
 
 logger = logging.getLogger(__name__)
 
 FDL_SOURCE = SOURCE_FRUITDEEPLINKS
-APPLE_TV_OVERLAY_UUID = "apple-tv-whos-watching"
-
-
-def default_apple_tv_overlay_config() -> TuneConfiguration:
-    """Built-in overlay for Apple TV channels to clear 'Who's Watching?' prompts via OCR."""
-    return TuneConfiguration(
-        uuid=APPLE_TV_OVERLAY_UUID,
-        name="Apple TV (Who's Watching + Watch)",
-        version="1.0",
-        description="Waits for Apple TV UI, clears 'Who's Watching?' via OCR if present, then runs key_macro",
-        global_options=TuneConfigurationOptions(
-            wait_for_video_playback_detection=False,
-            use_fixed_delay=False,
-            fixed_delay_seconds=0.0,
-            check_for_and_clear_whos_watching_prompts=True,
-            wait_after_post_playback_start_commands_seconds=0.0,
-        ),
-        tune_commands=["sleep 4"],
-    )
 
 
 def fdl_deterministic_channel_id(code: str, lane: int | str) -> str:
@@ -111,9 +92,6 @@ def channels_from_adb_lanes(
             )
             continue
         package, alternate = mapped
-        is_apple = code.startswith("apple_") or package == "com.apple.atve.androidtv.appletv"
-        default_macro = ["DPAD_CENTER", "DPAD_CENTER"] if is_apple else None
-        default_cfg_uuid = APPLE_TV_OVERLAY_UUID if is_apple else None
         for lane in range(1, count + 1):
             ch_number, number = _next_free(number, taken)
             channels.append(
@@ -127,8 +105,6 @@ def channels_from_adb_lanes(
                     url=lane_resolver_url(base_url, code, lane),
                     action="android.intent.action.VIEW",
                     source=FDL_SOURCE,
-                    key_macro=default_macro,
-                    configuration_uuid=default_cfg_uuid,
                 )
             )
     return channels, skipped
@@ -270,10 +246,6 @@ def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
             merged.append(Channel.model_validate(data))
         else:
             merged.append(inc)
-
-    if any(c.configuration_uuid == APPLE_TV_OVERLAY_UUID for c in merged):
-        if not any(cfg.uuid == APPLE_TV_OVERLAY_UUID for cfg in store.config.configurations):
-            store.config.configurations.append(default_apple_tv_overlay_config())
 
     return store.replace_source_channels(FDL_SOURCE, merged)
 

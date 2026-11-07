@@ -75,23 +75,25 @@ def test_deeplink_catalog_includes_apple_f1():
     assert mapped[1] == "com.apple.atve.amazon.appletv"
 
 
-def test_channels_from_adb_lanes_defaults_apple_key_macro():
+def test_channels_from_adb_lanes_deterministic_ids():
     providers = [
         {"provider_code": "apple_mls", "adb_enabled": 1, "adb_lane_count": 2},
         {"provider_code": "sportscenter", "adb_enabled": 1, "adb_lane_count": 1},
     ]
-    channels, _ = channels_from_adb_lanes(
+    channels1, _ = channels_from_adb_lanes(
         providers,
         base_url="http://192.0.2.40:6655",
         profile="google_tv",
         start_number=3000,
     )
-    apple_ch = [c for c in channels if c.provider_name == "apple_mls"]
-    espn_ch = [c for c in channels if c.provider_name == "sportscenter"]
-    assert all(c.key_macro == ["DPAD_CENTER", "DPAD_CENTER"] for c in apple_ch)
-    assert all(c.configuration_uuid == "apple-tv-whos-watching" for c in apple_ch)
-    assert all(c.key_macro is None for c in espn_ch)
-    assert all(c.configuration_uuid is None for c in espn_ch)
+    channels2, _ = channels_from_adb_lanes(
+        providers,
+        base_url="http://192.0.2.40:6655",
+        profile="google_tv",
+        start_number=4000,
+    )
+    assert [c.id for c in channels1] == [c.id for c in channels2]
+    assert len({c.id for c in channels1}) == 3
 
 
 def test_apply_fdl_channels_preserves_customizations(tmp_path):

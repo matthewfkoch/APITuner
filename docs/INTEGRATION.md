@@ -91,7 +91,7 @@ Optional `#EXTINF` tags: `package-name`, `alternate-package-name`, `tvg-chno`. O
 
 Live **Sync FruitDeepLinks** tries, in order:
 
-1. `GET /api/adb/lanes` (per-provider ADB lanes, if exported)
+1. `GET /api/provider_lanes` (or legacy `/api/adb/lanes` if exported)
 2. `GET /m3u/adb`
 3. `GET /api/lanes` + `/whatson/{id}` (v2 virtual lanes — this is what most current FDL servers expose)
 4. `GET /m3u/lanes` (rewrites `/lane/N/stream.m3u8` HLS URLs into `/whatson/N` resolvers; do not launch the HLS URL on a stick)

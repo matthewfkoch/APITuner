@@ -53,3 +53,24 @@ def test_channels_from_virtual_lanes_whatson():
     assert url.startswith("http://192.0.2.40:6655/api/adb/lanes/max/1/deeplink")
     assert "format=json" in url
     assert "dynamic_url_json_key=deeplink_url" in url
+
+
+def test_base_url_normalizes_missing_scheme():
+    from apituner.fruitdeeplinks import _base_url
+    from apituner.models import GlobalOptions
+
+    opts = GlobalOptions(fruitdeeplinks_url="192.168.1.17:6655")
+    assert _base_url(opts) == "http://192.168.1.17:6655"
+
+    opts2 = GlobalOptions(fruitdeeplinks_url="https://fdl.lan:6655/")
+    assert _base_url(opts2) == "https://fdl.lan:6655"
+
+
+def test_deeplink_catalog_includes_apple_f1():
+    from apituner.deeplink_catalog import packages_for
+
+    mapped = packages_for("apple_f1", profile="google_tv")
+    assert mapped is not None
+    assert mapped[0] == "com.apple.atve.androidtv.appletv"
+    assert mapped[1] == "com.apple.atve.amazon.appletv"
+

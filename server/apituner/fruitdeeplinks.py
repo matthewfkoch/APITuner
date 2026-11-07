@@ -30,7 +30,10 @@ class FruitDeepLinksError(Exception):
 
 
 def _base_url(options) -> str:
-    return (options.fruitdeeplinks_url or "").strip().rstrip("/")
+    url = (options.fruitdeeplinks_url or "").strip().rstrip("/")
+    if url and not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+    return url
 
 
 def _next_free(number: int, taken: set[int]) -> tuple[int, int]:
@@ -208,7 +211,9 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
     mode = ""
 
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        adb = await _get(client, base + "/api/adb/lanes")
+        adb = await _get(client, base + "/api/provider_lanes")
+        if adb is None:
+            adb = await _get(client, base + "/api/adb/lanes")
         if adb is not None:
             try:
                 providers = _parse_adb_providers(adb.json())
@@ -232,7 +237,13 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
                 dicts, skipped = channels_from_m3u(
                     m3u_adb.text, profile=profile, start_number=start
                 )
-                incoming = [Channel.model_validate(row) for row in dicts]
+                taken = set(occupied or ())
+                curr = start
+                incoming = []
+                for row in dicts:
+                    ch_number, curr = _next_free(curr, taken)
+                    row["number"] = str(ch_number)
+                    incoming.append(Channel.model_validate(row))
                 mode = "m3u_adb"
 
         if not incoming:
@@ -267,9 +278,8 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
 
     if not incoming:
         raise FruitDeepLinksError(
-            f"{base} has no ADB lanes API (404 on /api/adb/lanes) and no usable "
-            "/api/lanes or /m3u/lanes playlist. On FruitDeepLinks, either export "
-            "ADB lanes or use virtual lanes (this v2 layout)."
+            f"{base} has no ADB provider lanes API (/api/provider_lanes or /api/adb/lanes) "
+            "and no usable /m3u/adb, /api/lanes, or /m3u/lanes playlist."
         )
 
     try:

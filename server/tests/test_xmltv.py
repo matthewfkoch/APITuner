@@ -106,3 +106,46 @@ def test_rewrite_fdl_xmltv_maps_lane_dot_id():
     merged = merge_fdl_programmes(base, programmes)
     assert merged.count("<programme") == 1
     assert f'channel="{ch_espn.id}"' in merged
+
+
+def test_rewrite_fdl_xmltv_maps_two_digit_unhyphenated_channel_ids():
+    from apituner.hdhr.xmltv import rewrite_fdl_xmltv
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="sportscenter02">
+    <display-name>ESPN+ V2</display-name>
+  </channel>
+  <channel id="aiv01">
+    <display-name>Prime Video 01</display-name>
+  </channel>
+  <programme start="20261107183000 +0000" stop="20261107213500 +0000" channel="sportscenter02">
+    <title>College Football: Lindenwood vs Gardner-Webb</title>
+  </programme>
+  <programme start="20261107190000 +0000" stop="20261107220000 +0000" channel="aiv01">
+    <title>Prime Game</title>
+  </programme>
+</tv>
+"""
+    ch_sc2 = Channel(
+        id="sc2id000000000000000000000000000",
+        number=3022,
+        name="sportscenter 2",
+        package_name="com.espn.score_center",
+        url="http://192.168.1.17:6655/api/adb/lanes/sportscenter/2/deeplink?dynamic_url_json_key=deeplink_url&format=json",
+        source="fruitdeeplinks",
+    )
+    ch_aiv1 = Channel(
+        id="aiv1id00000000000000000000000000",
+        number=3010,
+        name="aiv 1",
+        package_name="com.amazon.amazonvideo.livingroom",
+        url="http://192.168.1.17:6655/api/adb/lanes/aiv/1/deeplink?dynamic_url_json_key=deeplink_url&format=json",
+        source="fruitdeeplinks",
+    )
+    programmes = rewrite_fdl_xmltv(xml, [ch_sc2, ch_aiv1])
+    assert f'channel="{ch_sc2.id}"' in programmes
+    assert "College Football: Lindenwood vs Gardner-Webb" in programmes
+    assert f'channel="{ch_aiv1.id}"' in programmes
+    assert "Prime Game" in programmes
+

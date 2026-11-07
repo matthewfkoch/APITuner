@@ -91,7 +91,7 @@ Optional `#EXTINF` tags: `package-name`, `alternate-package-name`, `tvg-chno`. O
 
 Live **Sync FruitDeepLinks** tries, in order:
 
-1. `GET /api/adb/lanes` (per-provider ADB lanes, if exported)
+1. `GET /api/provider_lanes` (or legacy `/api/adb/lanes` if exported)
 2. `GET /m3u/adb`
 3. `GET /api/lanes` + `/whatson/{id}` (v2 virtual lanes — this is what most current FDL servers expose)
 4. `GET /m3u/lanes` (rewrites `/lane/N/stream.m3u8` HLS URLs into `/whatson/N` resolvers; do not launch the HLS URL on a stick)
@@ -102,7 +102,7 @@ Virtual lanes mix apps (ESPN, Prime, Apple TV, …). At tune time APITuner infer
 
 ## XMLTV
 
-When FruitDeepLinks URL is set, `/xmltv.xml` fetches FDL XMLTV (`fruitdeeplinks_xmltv_path`, default `/xmltv/adb`, then `/xmltv/lanes`) and rewrites FDL channel ids onto APITuner **channel ids**. Matchers include `ADB-{provider}-{lane}`, `lane.{n}`, `Fruit Lane {n}`, and display-name. Gracenote remap from Channels DVR still applies to stations that have `tvc_guide_stationid`.
+When FruitDeepLinks URL is set, `/xmltv.xml` fetches FDL XMLTV (`fruitdeeplinks_xmltv_path`, default `/out/adb_lanes.xml`, then `/xmltv/adb`, `/xmltv/lanes`) and rewrites FDL channel ids onto APITuner **channel ids**. Matchers include `ADB-{provider}-{lane}`, `{provider}{lane:02d}`, `lane.{n}`, `Fruit Lane {n}`, and display-name. Gracenote remap from Channels DVR still applies to stations that have `tvc_guide_stationid`.
 
 Renamed FDL rows (custom names that no longer match those ids) get a channel element but **no programmes**.
 

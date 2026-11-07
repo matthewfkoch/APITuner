@@ -2,10 +2,32 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+import re
+from typing import Any, Iterable, Optional
+
+_SLEEP_TOKEN_RE = re.compile(
+    r"^(?:SLEEP|WAIT)[\s_:]+([0-9]+(?:\.[0-9]+)?)$", re.IGNORECASE
+)
+
+
+def parse_key_macro_sleep(raw: str) -> Optional[float]:
+    """Return sleep duration in seconds when ``raw`` is a SLEEP/WAIT token, else None."""
+    if not raw:
+        return None
+    m = _SLEEP_TOKEN_RE.match(raw.strip())
+    if not m:
+        return None
+    try:
+        val = float(m.group(1))
+    except ValueError:
+        return None
+    return max(0.0, val)
 
 
 def _strip_keycode(raw: str) -> str:
+    sleep_sec = parse_key_macro_sleep(raw)
+    if sleep_sec is not None:
+        return f"SLEEP {sleep_sec:g}"
     key = raw.strip()
     if key.upper().startswith("KEYCODE_"):
         key = key[8:]
@@ -43,6 +65,8 @@ def normalize_key_macro(value: Any) -> list[str]:
 
 def key_requires_dpad(key: str) -> bool:
     """True when the key cannot be sent via Agent Accessibility (BACK/HOME/RECENTS)."""
+    if parse_key_macro_sleep(key) is not None:
+        return False
     k = _strip_keycode(key)
     if k in {"BACK", "HOME", "RECENTS", "APP_SWITCH"}:
         return False

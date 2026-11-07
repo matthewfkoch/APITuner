@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apituner.keys import key_requires_dpad, normalize_key_macro
+from apituner.keys import key_requires_dpad, normalize_key_macro, parse_key_macro_sleep
 from apituner.models import Channel
 
 
@@ -36,5 +36,22 @@ def test_channel_model_normalizes_key_macro():
 def test_key_requires_dpad():
     assert not key_requires_dpad("BACK")
     assert not key_requires_dpad("HOME")
+    assert not key_requires_dpad("SLEEP 4")
+    assert not key_requires_dpad("sleep 0.5")
     assert key_requires_dpad("DPAD_CENTER")
     assert key_requires_dpad("MEDIA_STOP")
+
+
+def test_key_macro_sleep_tokens():
+    assert parse_key_macro_sleep("sleep 4") == 4.0
+    assert parse_key_macro_sleep("SLEEP 0.5") == 0.5
+    assert parse_key_macro_sleep("SLEEP_2.5") == 2.5
+    assert parse_key_macro_sleep("WAIT 3") == 3.0
+    assert parse_key_macro_sleep("DPAD_CENTER") is None
+    assert normalize_key_macro("sleep 4, KEYCODE_DPAD_CENTER, sleep 0.5, DPAD_CENTER") == [
+        "SLEEP 4",
+        "DPAD_CENTER",
+        "SLEEP 0.5",
+        "DPAD_CENTER",
+    ]
+

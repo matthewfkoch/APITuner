@@ -125,7 +125,9 @@ def test_apply_fdl_channels_preserves_customizations(tmp_path):
     apply_fdl_channels(store, incoming)
 
     updated = store.config.channels[0]
-    # Existing custom macro was preserved over the incoming default
+    # Existing custom macro and stable channel ID were preserved
+    assert updated.id == ch_existing.id
+    assert updated.number == ch_existing.number
     assert updated.key_macro == ["DPAD_CENTER", "DPAD_DOWN", "DPAD_CENTER"]
     assert updated.configuration_uuid == "custom-uuid"
     assert updated.tvc_guide_stationid == "99999"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any, Optional
 from urllib.parse import urljoin
 
@@ -23,6 +24,11 @@ from .models import Channel
 logger = logging.getLogger(__name__)
 
 FDL_SOURCE = SOURCE_FRUITDEEPLINKS
+
+
+def fdl_deterministic_channel_id(code: str, lane: int | str) -> str:
+    """Generate a stable 32-char hex channel ID for a FruitDeepLinks lane."""
+    return uuid.uuid5(uuid.NAMESPACE_DNS, f"fdl:{str(code).lower()}:{str(lane).lower()}").hex
 
 
 class FruitDeepLinksError(Exception):
@@ -92,6 +98,7 @@ def channels_from_adb_lanes(
             ch_number, number = _next_free(number, taken)
             channels.append(
                 Channel(
+                    id=fdl_deterministic_channel_id(code, lane),
                     number=ch_number,
                     name=f"{code} {lane}",
                     provider_name=code,
@@ -225,6 +232,10 @@ def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
 
         if match is not None:
             data = inc.model_dump()
+            if match.id:
+                data["id"] = match.id
+            if match.number is not None:
+                data["number"] = match.number
             if match.key_macro is not None:
                 data["key_macro"] = match.key_macro
             if match.configuration_uuid is not None:

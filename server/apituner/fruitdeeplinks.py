@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any, Optional
 from urllib.parse import urljoin
 
@@ -25,12 +26,20 @@ logger = logging.getLogger(__name__)
 FDL_SOURCE = SOURCE_FRUITDEEPLINKS
 
 
+def fdl_deterministic_channel_id(code: str, lane: int | str) -> str:
+    """Generate a stable 32-char hex channel ID for a FruitDeepLinks lane."""
+    return uuid.uuid5(uuid.NAMESPACE_DNS, f"fdl:{str(code).lower()}:{str(lane).lower()}").hex
+
+
 class FruitDeepLinksError(Exception):
     """Raised when FruitDeepLinks cannot be reached or parsed."""
 
 
 def _base_url(options) -> str:
-    return (options.fruitdeeplinks_url or "").strip().rstrip("/")
+    url = (options.fruitdeeplinks_url or "").strip().rstrip("/")
+    if url and not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+    return url
 
 
 def _next_free(number: int, taken: set[int]) -> tuple[int, int]:
@@ -83,10 +92,13 @@ def channels_from_adb_lanes(
             )
             continue
         package, alternate = mapped
+        is_apple = code.startswith("apple_") or package == "com.apple.atve.androidtv.appletv"
+        default_macro = ["DPAD_CENTER", "DPAD_CENTER"] if is_apple else None
         for lane in range(1, count + 1):
             ch_number, number = _next_free(number, taken)
             channels.append(
                 Channel(
+                    id=fdl_deterministic_channel_id(code, lane),
                     number=ch_number,
                     name=f"{code} {lane}",
                     provider_name=code,
@@ -95,6 +107,7 @@ def channels_from_adb_lanes(
                     url=lane_resolver_url(base_url, code, lane),
                     action="android.intent.action.VIEW",
                     source=FDL_SOURCE,
+                    key_macro=default_macro,
                 )
             )
     return channels, skipped
@@ -187,8 +200,57 @@ async def _get(
 
 
 def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
-    """Replace existing fruitdeeplinks-sourced channels with ``incoming``."""
-    return store.replace_source_channels(FDL_SOURCE, incoming)
+    """Replace existing fruitdeeplinks channels while preserving user customizations."""
+    existing_fdl = [
+        c for c in store.config.channels if (c.source or "").strip() == FDL_SOURCE
+    ]
+    by_url: dict[str, Channel] = {c.url.strip(): c for c in existing_fdl if c.url}
+    by_name: dict[str, Channel] = {
+        c.name.strip().lower(): c for c in existing_fdl if c.name
+    }
+    by_provider_lane: dict[tuple[str, str], Channel] = {}
+    for c in existing_fdl:
+        if c.provider_name and c.name:
+            by_provider_lane[(c.provider_name.strip().lower(), c.name.strip().lower())] = c
+
+    merged: list[Channel] = []
+    for inc in incoming:
+        match: Optional[Channel] = None
+        if inc.url and inc.url.strip() in by_url:
+            match = by_url[inc.url.strip()]
+        elif (
+            inc.provider_name
+            and inc.name
+            and (inc.provider_name.strip().lower(), inc.name.strip().lower())
+            in by_provider_lane
+        ):
+            match = by_provider_lane[
+                (inc.provider_name.strip().lower(), inc.name.strip().lower())
+            ]
+        elif inc.name and inc.name.strip().lower() in by_name:
+            match = by_name[inc.name.strip().lower()]
+
+        if match is not None:
+            data = inc.model_dump()
+            if match.id:
+                data["id"] = match.id
+            if match.number is not None:
+                data["number"] = match.number
+            if match.key_macro is not None:
+                data["key_macro"] = match.key_macro
+            if match.configuration_uuid is not None:
+                data["configuration_uuid"] = match.configuration_uuid
+            if match.tvc_guide_stationid is not None:
+                data["tvc_guide_stationid"] = match.tvc_guide_stationid
+            if match.tvg_id is not None:
+                data["tvg_id"] = match.tvg_id
+            if match.compatibility_mode:
+                data["compatibility_mode"] = match.compatibility_mode
+            merged.append(Channel.model_validate(data))
+        else:
+            merged.append(inc)
+
+    return store.replace_source_channels(FDL_SOURCE, merged)
 
 
 async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
@@ -208,7 +270,9 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
     mode = ""
 
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        adb = await _get(client, base + "/api/adb/lanes")
+        adb = await _get(client, base + "/api/provider_lanes")
+        if adb is None:
+            adb = await _get(client, base + "/api/adb/lanes")
         if adb is not None:
             try:
                 providers = _parse_adb_providers(adb.json())
@@ -232,7 +296,13 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
                 dicts, skipped = channels_from_m3u(
                     m3u_adb.text, profile=profile, start_number=start
                 )
-                incoming = [Channel.model_validate(row) for row in dicts]
+                taken = set(occupied or ())
+                curr = start
+                incoming = []
+                for row in dicts:
+                    ch_number, curr = _next_free(curr, taken)
+                    row["number"] = str(ch_number)
+                    incoming.append(Channel.model_validate(row))
                 mode = "m3u_adb"
 
         if not incoming:
@@ -267,9 +337,8 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
 
     if not incoming:
         raise FruitDeepLinksError(
-            f"{base} has no ADB lanes API (404 on /api/adb/lanes) and no usable "
-            "/api/lanes or /m3u/lanes playlist. On FruitDeepLinks, either export "
-            "ADB lanes or use virtual lanes (this v2 layout)."
+            f"{base} has no ADB provider lanes API (/api/provider_lanes or /api/adb/lanes) "
+            "and no usable /m3u/adb, /api/lanes, or /m3u/lanes playlist."
         )
 
     try:

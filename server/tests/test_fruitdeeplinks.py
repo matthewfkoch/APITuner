@@ -53,3 +53,83 @@ def test_channels_from_virtual_lanes_whatson():
     assert url.startswith("http://192.0.2.40:6655/api/adb/lanes/max/1/deeplink")
     assert "format=json" in url
     assert "dynamic_url_json_key=deeplink_url" in url
+
+
+def test_base_url_normalizes_missing_scheme():
+    from apituner.fruitdeeplinks import _base_url
+    from apituner.models import GlobalOptions
+
+    opts = GlobalOptions(fruitdeeplinks_url="192.168.1.17:6655")
+    assert _base_url(opts) == "http://192.168.1.17:6655"
+
+    opts2 = GlobalOptions(fruitdeeplinks_url="https://fdl.lan:6655/")
+    assert _base_url(opts2) == "https://fdl.lan:6655"
+
+
+def test_deeplink_catalog_includes_apple_f1():
+    from apituner.deeplink_catalog import packages_for
+
+    mapped = packages_for("apple_f1", profile="google_tv")
+    assert mapped is not None
+    assert mapped[0] == "com.apple.atve.androidtv.appletv"
+    assert mapped[1] == "com.apple.atve.amazon.appletv"
+
+
+def test_channels_from_adb_lanes_defaults_apple_key_macro():
+    providers = [
+        {"provider_code": "apple_mls", "adb_enabled": 1, "adb_lane_count": 2},
+        {"provider_code": "sportscenter", "adb_enabled": 1, "adb_lane_count": 1},
+    ]
+    channels, _ = channels_from_adb_lanes(
+        providers,
+        base_url="http://192.0.2.40:6655",
+        profile="google_tv",
+        start_number=3000,
+    )
+    apple_ch = [c for c in channels if c.provider_name == "apple_mls"]
+    espn_ch = [c for c in channels if c.provider_name == "sportscenter"]
+    assert all(c.key_macro == ["DPAD_CENTER", "DPAD_CENTER"] for c in apple_ch)
+    assert all(c.key_macro is None for c in espn_ch)
+
+
+def test_apply_fdl_channels_preserves_customizations(tmp_path):
+    from apituner.config import ConfigStore
+    from apituner.fruitdeeplinks import apply_fdl_channels
+    from apituner.models import Channel
+
+    store = ConfigStore(data_dir=tmp_path)
+    ch_existing = Channel(
+        number=3016,
+        name="apple_mls 1",
+        provider_name="apple_mls",
+        package_name="com.apple.atve.androidtv.appletv",
+        url="http://192.0.2.40:6655/api/adb/lanes/apple_mls/1/deeplink",
+        source="fruitdeeplinks",
+        key_macro=["DPAD_CENTER", "DPAD_DOWN", "DPAD_CENTER"],
+        configuration_uuid="custom-uuid",
+        tvc_guide_stationid="99999",
+    )
+    store.import_channels([ch_existing.model_dump()], replace=True)
+
+    incoming = [
+        Channel(
+            number=3016,
+            name="apple_mls 1",
+            provider_name="apple_mls",
+            package_name="com.apple.atve.androidtv.appletv",
+            url="http://192.0.2.40:6655/api/adb/lanes/apple_mls/1/deeplink",
+            source="fruitdeeplinks",
+            key_macro=["DPAD_CENTER"],
+        )
+    ]
+    apply_fdl_channels(store, incoming)
+
+    updated = store.config.channels[0]
+    # Existing custom macro and stable channel ID were preserved
+    assert updated.id == ch_existing.id
+    assert updated.number == ch_existing.number
+    assert updated.key_macro == ["DPAD_CENTER", "DPAD_DOWN", "DPAD_CENTER"]
+    assert updated.configuration_uuid == "custom-uuid"
+    assert updated.tvc_guide_stationid == "99999"
+
+

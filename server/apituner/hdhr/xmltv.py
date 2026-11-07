@@ -178,10 +178,15 @@ def fdl_xmltv_aliases(channel: Channel) -> set[str]:
         aliases.update(
             {
                 f"adb-{code}-{number:03d}",
+                f"adb-{code}-{number:02d}",
                 f"adb-{code}-{number}",
+                f"adb-{code}{number:02d}",
+                f"adb-{code}{number}",
                 f"{code}-{number:03d}",
+                f"{code}-{number:02d}",
                 f"{code}-{number}",
-                code,
+                f"{code}{number:02d}",
+                f"{code}{number}",
             }
         )
     whatson = parse_whatson_url(channel.url or "")
@@ -272,9 +277,9 @@ async def fetch_fdl_xmltv(options: GlobalOptions, *, timeout: float = 30.0) -> O
     base = (options.fruitdeeplinks_url or "").strip().rstrip("/")
     if not base:
         return None
-    primary = options.fruitdeeplinks_xmltv_path or "/xmltv/adb"
+    primary = options.fruitdeeplinks_xmltv_path or "/out/adb_lanes.xml"
     paths: list[str] = []
-    for path in (primary, "/xmltv/adb", "/xmltv/lanes", "/xmltv/direct"):
+    for path in (primary, "/out/adb_lanes.xml", "/xmltv/adb", "/xmltv/lanes", "/xmltv/direct"):
         if path and path not in paths:
             paths.append(path)
     last_error: Optional[str] = None

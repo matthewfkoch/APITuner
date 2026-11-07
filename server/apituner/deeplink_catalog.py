@@ -114,6 +114,10 @@ _PACKAGES: dict[str, tuple[str, str]] = {
         "com.apple.atve.androidtv.appletv",
         "com.apple.atve.amazon.appletv",
     ),
+    "apple_f1": (
+        "com.apple.atve.androidtv.appletv",
+        "com.apple.atve.amazon.appletv",
+    ),
     "apple_other": (
         "com.apple.atve.androidtv.appletv",
         "com.apple.atve.amazon.appletv",
@@ -179,6 +183,8 @@ _DISPLAY_TO_CODE: dict[str, str] = {
     "apple tv": "apple_other",
     "apple tv+": "apple_other",
     "apple mls": "apple_mls",
+    "apple f1": "apple_f1",
+    "formula 1 (apple tv)": "apple_f1",
     "paramount+": "pplus",
     "paramount plus": "pplus",
     "cbs sports": "cbssportsapp",

@@ -88,7 +88,7 @@ def test_channels_from_adb_lanes_defaults_apple_key_macro():
     )
     apple_ch = [c for c in channels if c.provider_name == "apple_mls"]
     espn_ch = [c for c in channels if c.provider_name == "sportscenter"]
-    assert all(c.key_macro == ["DPAD_CENTER"] for c in apple_ch)
+    assert all(c.key_macro == ["DPAD_CENTER", "DPAD_CENTER"] for c in apple_ch)
     assert all(c.key_macro is None for c in espn_ch)
 
 

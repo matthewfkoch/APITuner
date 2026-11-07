@@ -93,7 +93,7 @@ def channels_from_adb_lanes(
             continue
         package, alternate = mapped
         is_apple = code.startswith("apple_") or package == "com.apple.atve.androidtv.appletv"
-        default_macro = ["DPAD_CENTER"] if is_apple else None
+        default_macro = ["DPAD_CENTER", "DPAD_CENTER"] if is_apple else None
         for lane in range(1, count + 1):
             ch_number, number = _next_free(number, taken)
             channels.append(

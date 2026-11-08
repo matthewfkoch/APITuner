@@ -177,6 +177,7 @@ def fdl_xmltv_aliases(channel: Channel) -> set[str]:
         code, number = lane
         aliases.update(
             {
+                f"{code} {number}",
                 f"adb-{code}-{number:03d}",
                 f"adb-{code}-{number:02d}",
                 f"adb-{code}-{number}",

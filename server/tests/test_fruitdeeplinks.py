@@ -104,7 +104,7 @@ def test_apply_fdl_channels_preserves_customizations(tmp_path):
     store = ConfigStore(data_dir=tmp_path)
     ch_existing = Channel(
         number=3016,
-        name="apple_mls 1",
+        name="MLS 1 (Colorado Rapids)",
         provider_name="apple_mls",
         package_name="com.apple.atve.androidtv.appletv",
         url="http://192.0.2.40:6655/api/adb/lanes/apple_mls/1/deeplink",
@@ -117,11 +117,11 @@ def test_apply_fdl_channels_preserves_customizations(tmp_path):
 
     incoming = [
         Channel(
-            number=3016,
+            number=9000,
             name="apple_mls 1",
             provider_name="apple_mls",
             package_name="com.apple.atve.androidtv.appletv",
-            url="http://192.0.2.40:6655/api/adb/lanes/apple_mls/1/deeplink",
+            url="http://192.0.2.99:6655/api/adb/lanes/apple_mls/1/deeplink",
             source="fruitdeeplinks",
             key_macro=["DPAD_CENTER"],
         )
@@ -129,9 +129,11 @@ def test_apply_fdl_channels_preserves_customizations(tmp_path):
     apply_fdl_channels(store, incoming)
 
     updated = store.config.channels[0]
-    # Existing custom macro and stable channel ID were preserved
+    # Existing custom name, number, macro, and stable channel ID were preserved
     assert updated.id == ch_existing.id
     assert updated.number == ch_existing.number
+    assert updated.name == "MLS 1 (Colorado Rapids)"
+    assert updated.url == "http://192.0.2.99:6655/api/adb/lanes/apple_mls/1/deeplink"
     assert updated.key_macro == ["DPAD_CENTER", "DPAD_DOWN", "DPAD_CENTER"]
     assert updated.configuration_uuid == "custom-uuid"
     assert updated.tvc_guide_stationid == "99999"

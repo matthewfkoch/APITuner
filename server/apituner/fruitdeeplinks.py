@@ -12,7 +12,12 @@ import httpx
 from .channel_numbers import occupied_integer_numbers
 from .channels import ChannelValidationError
 from .config import ConfigStore
-from .deeplink_catalog import code_from_display_name, packages_for
+from .deeplink_catalog import (
+    code_from_display_name,
+    packages_for,
+    parse_lane_url,
+    parse_whatson_url,
+)
 from .m3u_import import (
     SOURCE_FRUITDEEPLINKS,
     channels_from_m3u,
@@ -148,6 +153,7 @@ def channels_from_virtual_lanes(
             name = f"{name} ({display})"
         channels.append(
             Channel(
+                id=fdl_deterministic_channel_id("whatson", lane_id),
                 number=ch_number,
                 name=name,
                 provider_name=code or (display or None),
@@ -196,12 +202,31 @@ async def _get(
     return resp
 
 
+def _channel_lane_key(channel: Channel) -> Optional[tuple[str, int]]:
+    url = (channel.url or "").strip()
+    if not url:
+        return None
+    lane = parse_lane_url(url)
+    if lane is not None:
+        return lane
+    whatson = parse_whatson_url(url)
+    if whatson is not None:
+        return ("whatson", whatson)
+    return None
+
+
 def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
     """Replace existing fruitdeeplinks channels while preserving user customizations."""
     existing_fdl = [
         c for c in store.config.channels if (c.source or "").strip() == FDL_SOURCE
     ]
+    by_id: dict[str, Channel] = {c.id.strip(): c for c in existing_fdl if c.id}
     by_url: dict[str, Channel] = {c.url.strip(): c for c in existing_fdl if c.url}
+    by_lane_key: dict[tuple[str, int], Channel] = {}
+    for c in existing_fdl:
+        lane_key = _channel_lane_key(c)
+        if lane_key is not None:
+            by_lane_key[lane_key] = c
     by_name: dict[str, Channel] = {
         c.name.strip().lower(): c for c in existing_fdl if c.name
     }
@@ -213,8 +238,13 @@ def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
     merged: list[Channel] = []
     for inc in incoming:
         match: Optional[Channel] = None
-        if inc.url and inc.url.strip() in by_url:
+        inc_lane_key = _channel_lane_key(inc)
+        if inc.id and inc.id.strip() in by_id:
+            match = by_id[inc.id.strip()]
+        elif inc.url and inc.url.strip() in by_url:
             match = by_url[inc.url.strip()]
+        elif inc_lane_key is not None and inc_lane_key in by_lane_key:
+            match = by_lane_key[inc_lane_key]
         elif (
             inc.provider_name
             and inc.name
@@ -233,6 +263,8 @@ def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
                 data["id"] = match.id
             if match.number is not None:
                 data["number"] = match.number
+            if match.name and match.name.strip():
+                data["name"] = match.name
             if match.key_macro is not None:
                 data["key_macro"] = match.key_macro
             if match.configuration_uuid is not None:

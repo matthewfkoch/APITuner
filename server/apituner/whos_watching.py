@@ -14,10 +14,11 @@ from .preview import grab_preview_jpeg, have_ffmpeg
 logger = logging.getLogger(__name__)
 
 # Wall-clock budget for the whole phase (grabs + OCR + key sleeps).
-DEFAULT_BUDGET_SECONDS = 3.5
-GRAB_TIMEOUT_SECONDS = 1.5
+DEFAULT_BUDGET_SECONDS = 6.5
+GRAB_TIMEOUT_SECONDS = 2.5
 MAX_SELECTS = 2
 SELECT_GAP_SECONDS = 0.45
+POST_SELECT_SETTLE_SECONDS = 1.8
 FALLBACK_SELECTS = 2
 
 SendKey = Callable[[str], Awaitable[None]]
@@ -93,7 +94,7 @@ async def clear_whos_watching_prompt(
     """Attempt to clear a profile / who's-watching prompt.
 
     Returns a short status token for logs:
-    ``ocr_cleared`` | ``ocr_absent`` | ``timed_fallback`` | ``skipped_no_dpad``.
+    ``ocr_cleared`` | ``ocr_absent`` | ``grab_failed`` | ``timed_fallback`` | ``skipped_no_dpad``.
     """
     if not has_dpad:
         logger.warning(
@@ -111,22 +112,39 @@ async def clear_whos_watching_prompt(
 
     selects = 0
     saw_prompt = False
+    retried_grab = False
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        frame = await grab_encoder_frame(
-            stream_url, timeout=min(GRAB_TIMEOUT_SECONDS, remaining)
+        grab_timeout = (
+            GRAB_TIMEOUT_SECONDS
+            if saw_prompt
+            else min(GRAB_TIMEOUT_SECONDS, remaining)
         )
+        frame = await grab_encoder_frame(stream_url, timeout=grab_timeout)
         if frame is None:
-            logger.info("Who's-watching: frame grab failed — timed DPAD fallback")
-            await _timed_selects(send_key, FALLBACK_SELECTS, SELECT_GAP_SECONDS)
-            return "timed_fallback"
+            if saw_prompt:
+                logger.info(
+                    "Who's-watching: post-select frame grab timed out after %d select(s)",
+                    selects,
+                )
+                return "ocr_cleared" if selects else "grab_failed"
+            if not retried_grab and time.monotonic() < deadline:
+                retried_grab = True
+                continue
+            logger.warning(
+                "Who's-watching: encoder frame grab failed — skipping blind DPAD presses"
+            )
+            return "grab_failed"
 
         text = await asyncio.to_thread(ocr_image_bytes, frame)
         if not text_looks_like_whos_watching(text):
             if saw_prompt:
-                logger.info("Who's-watching: prompt cleared via OCR")
+                logger.info(
+                    "Who's-watching: prompt cleared via OCR after %d select(s)",
+                    selects,
+                )
                 return "ocr_cleared"
             logger.info("Who's-watching: no prompt in frame (fast exit)")
             return "ocr_absent"
@@ -138,12 +156,15 @@ async def clear_whos_watching_prompt(
             break
         await send_key("DPAD_CENTER")
         selects += 1
-        await asyncio.sleep(min(SELECT_GAP_SECONDS, max(0.0, deadline - time.monotonic())))
+        await asyncio.sleep(
+            min(POST_SELECT_SETTLE_SECONDS, max(0.0, deadline - time.monotonic()))
+        )
 
     if saw_prompt:
         logger.info("Who's-watching: budget exhausted after %d select(s)", selects)
-        return "ocr_cleared" if selects else "timed_fallback"
+        return "ocr_cleared" if selects else "grab_failed"
 
-    # No successful OCR path — still try a quick fallback if we never got text.
-    await _timed_selects(send_key, FALLBACK_SELECTS, SELECT_GAP_SECONDS)
-    return "timed_fallback"
+    logger.warning(
+        "Who's-watching: budget exhausted without frame — skipping blind DPAD presses"
+    )
+    return "grab_failed"

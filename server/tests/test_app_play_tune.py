@@ -144,3 +144,66 @@ async def test_app_play_runs_commands_on_dpad_backend(tmp_path):
     # Wake + HOME precede the config script (dismiss screensaver / ambient).
     assert backend.keys[:2] == ["WAKEUP", "HOME"]
     assert backend.keys[-1] == "DPAD_CENTER"
+
+
+@pytest.mark.asyncio
+async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path):
+    store = ConfigStore(data_dir=tmp_path)
+    manager = TunerManager(store)
+
+    events: list[str] = []
+
+    class TrackingDpadBackend(DpadBackend):
+        capabilities = Capabilities(keys=True, dpad=True, current_app=True)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._fg: str | None = None
+
+        async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
+            await super().launch(
+                package=package,
+                deeplink=deeplink,
+                component=component,
+                action=action,
+                extras=extras,
+            )
+            self._fg = package
+            events.append(f"launch:{package}")
+
+        async def send_key(self, key: str) -> None:
+            await super().send_key(key)
+            events.append(f"key:{key}")
+
+        async def current_app(self):
+            return self._fg
+
+    backend = TrackingDpadBackend()
+    tuner = Tuner(
+        id="t1",
+        name="Remote",
+        control=ControlConfig(type="androidtv_remote", host="192.0.2.1"),
+        stream_endpoint="http://192.0.2.2/s",
+    )
+    channel = Channel(
+        number=3000,
+        name="Altitude Sports",
+        package_name="com.altitudeplus",
+        url="",
+        key_macro=["DPAD_CENTER"],
+    )
+    await manager._do_tune(
+        tuner,
+        backend,
+        channel,
+        "tune1",
+        GlobalOptions(wait_for_playback=False, ready_settle_seconds=0),
+        app_play=None,
+    )
+    assert events == [
+        "key:WAKEUP",
+        "key:HOME",
+        "launch:com.altitudeplus",
+        "key:DPAD_CENTER",
+    ]
+

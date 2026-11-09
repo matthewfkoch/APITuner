@@ -188,6 +188,9 @@ class AndroidTvRemoteBackend(ControlBackend):
         await self.connect()
         self._remote.send_key_command("HOME")
 
+    async def wake(self) -> None:
+        await self.send_key("WAKEUP")
+
     async def playback_state(self) -> PlaybackState:
         try:
             state = await asyncio.get_event_loop().run_in_executor(

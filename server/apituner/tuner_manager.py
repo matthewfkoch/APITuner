@@ -895,6 +895,22 @@ class TunerManager:
         inferred = packages_for(infer_provider(launch_url), profile=profile)
         fallbacks = merge_package_try_order(fallbacks, inferred)
 
+        package_only = not (
+            (launch_url and str(launch_url).strip())
+            or (channel.component and str(channel.component).strip())
+            or (channel.extra_string and str(channel.extra_string).strip())
+            or (
+                channel.action
+                and channel.action
+                not in (
+                    "android.intent.action.VIEW",
+                    "android.intent.action.MAIN",
+                )
+            )
+        )
+        if package_only:
+            await self._prepare_device_for_app_play(cmd_backend)
+
         if overlay is not None and overlay.pre_tune_commands:
             try:
                 await run_commands(

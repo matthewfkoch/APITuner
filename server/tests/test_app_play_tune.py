@@ -202,7 +202,6 @@ async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path):
     )
     assert events == [
         "key:WAKEUP",
-        "key:HOME",
         "launch:com.altitudeplus",
         "key:DPAD_CENTER",
     ]

@@ -909,7 +909,7 @@ class TunerManager:
             )
         )
         if package_only:
-            await self._prepare_device_for_app_play(cmd_backend)
+            await self._wake_device(cmd_backend)
 
         if overlay is not None and overlay.pre_tune_commands:
             try:
@@ -1068,12 +1068,8 @@ class TunerManager:
                 await asyncio.sleep(wait_after)
         return chosen_pkg
 
-    async def _prepare_device_for_app_play(self, backend: ControlBackend) -> None:
-        """Wake the stick and return to HOME before App Play D-pad scripts.
-
-        Google TV ambient / screensaver eats directional keys (often lands in
-        screensaver settings). Fire is usually fine but HOME is still cheap.
-        """
+    async def _wake_device(self, backend: ControlBackend) -> None:
+        """Wake the stick without navigating HOME."""
         try:
             wake = getattr(backend, "wake", None)
             if callable(wake):
@@ -1086,7 +1082,15 @@ class TunerManager:
                 except Exception:  # noqa: BLE001
                     pass
         except Exception as exc:  # noqa: BLE001
-            logger.debug("App Play wake skipped: %s", exc)
+            logger.debug("Wake skipped: %s", exc)
+
+    async def _prepare_device_for_app_play(self, backend: ControlBackend) -> None:
+        """Wake the stick and return to HOME before App Play D-pad scripts.
+
+        Google TV ambient / screensaver eats directional keys (often lands in
+        screensaver settings). Fire is usually fine but HOME is still cheap.
+        """
+        await self._wake_device(backend)
         try:
             await backend.send_key("HOME")
             await asyncio.sleep(1.0)

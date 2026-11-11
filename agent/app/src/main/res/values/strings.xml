@@ -4,9 +4,9 @@
     <string name="brand_title">apituner</string>
     <string name="brand_subtitle">Device control agent</string>
     <string name="connection_title">This device</string>
-    <string name="connection_hint">Add this device in the APITuner dashboard as an Agent tuner. After the first launch, the control server auto-starts on reboot.</string>
+    <string name="connection_hint">Add this address as an Agent tuner in the dashboard. Starts automatically on reboot.</string>
     <string name="permissions_title">Permissions</string>
-    <string name="permissions_hint">Required permissions enable launches. Recommended permissions improve playback detection. Optional permissions add remote keys and kiosk features.</string>
+    <string name="permissions_hint">Enable app launches and playback checks. Remote keys and launcher mode are optional.</string>
     <string name="token_title">API token</string>
     <string name="token_hint">Optional. If set, APITuner must send this value as X-Auth-Token.</string>
     <string name="token_placeholder">Leave blank for no auth</string>

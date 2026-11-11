@@ -1937,7 +1937,14 @@ function fmtBytes(n) {
 
 // ---- misc ----
 document.getElementById("modal-close").addEventListener("click", closeModal);
-document.getElementById("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
+let modalBackdropMouseDown = false;
+document.getElementById("modal").addEventListener("mousedown", (e) => {
+  modalBackdropMouseDown = e.target.id === "modal";
+});
+document.getElementById("modal").addEventListener("click", (e) => {
+  if (modalBackdropMouseDown && e.target.id === "modal") closeModal();
+  modalBackdropMouseDown = false;
+});
 function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function escapeAttr(s) { return escapeHtml(s); }
 

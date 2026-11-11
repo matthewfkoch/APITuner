@@ -1498,7 +1498,7 @@ function channelForm(existing) {
     <div class="field"><label>Action</label><input name="action" value="${escapeAttr(c.action || "android.intent.action.VIEW")}" /></div>
     <div class="field"><label>Component <span class="hint">(Android 12+)</span></label><input name="component" value="${escapeAttr(c.component || "")}" /></div>
     <div class="field full"><label>Intent extras <span class="hint">(key:value,key:value)</span></label><input name="extra_string" value="${escapeAttr(c.extra_string || "")}" /></div>
-    <div class="field full"><label>Key macro <span class="hint">(after launch; supports SLEEP N; needs Keys / D-pad)</span></label><input name="key_macro" placeholder="e.g. SLEEP 4, DPAD_CENTER, DPAD_CENTER" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
+    <div class="field full"><label>Key macro <span class="hint">(after launch; SLEEP or WAIT, up to 10 seconds total)</span></label><input name="key_macro" placeholder="e.g. SLEEP 4, DPAD_CENTER, DPAD_CENTER" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
     <div class="field checkbox full"><input type="checkbox" name="compatibility_mode" ${c.compatibility_mode ? "checked" : ""} /><label>Compatibility mode (stop app before launch)</label></div>
     <div class="field full"><label>Installed apps <span class="hint">(search, then set as package or alternate)</span></label>
       <select id="app-picker-tuner"><option value="">Select a tuner…</option></select>

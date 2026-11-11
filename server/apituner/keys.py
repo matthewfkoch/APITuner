@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
+from fractions import Fraction
 from typing import Any, Iterable, Optional
 
 _SLEEP_TOKEN_RE = re.compile(
@@ -10,24 +12,32 @@ _SLEEP_TOKEN_RE = re.compile(
 )
 
 
-def parse_key_macro_sleep(raw: str) -> Optional[float]:
-    """Return sleep duration in seconds when ``raw`` is a SLEEP/WAIT token, else None."""
-    if not raw:
-        return None
-    m = _SLEEP_TOKEN_RE.match(raw.strip())
-    if not m:
-        return None
-    try:
-        val = float(m.group(1))
-    except ValueError:
-        return None
-    return max(0.0, val)
+_WAIT_PREFIX_RE = re.compile(r"^(?:WAIT(?:$|[\s_:])|SLEEP[\s_:])", re.IGNORECASE)
+MAX_KEY_MACRO_WAIT_SECONDS = 10
+
+
+def parse_key_macro_sleep(raw: str) -> Optional[Decimal]:
+    """Return the exact decimal duration of a wait token."""
+    match = _SLEEP_TOKEN_RE.fullmatch(raw.strip())
+    return Decimal(match.group(1)) if match else None
+
+
+def validate_key_macro_waits(keys: Iterable[str]) -> None:
+    total = Fraction()
+    for key in keys:
+        duration = parse_key_macro_sleep(key)
+        if duration is None:
+            if _WAIT_PREFIX_RE.match(key):
+                raise ValueError(f"Invalid key macro wait {key!r}; use SLEEP or WAIT with seconds")
+            continue
+        if duration > MAX_KEY_MACRO_WAIT_SECONDS:
+            raise ValueError(f"Key macro waits may total at most {MAX_KEY_MACRO_WAIT_SECONDS} seconds")
+        total += Fraction(duration)
+        if total > MAX_KEY_MACRO_WAIT_SECONDS:
+            raise ValueError(f"Key macro waits may total at most {MAX_KEY_MACRO_WAIT_SECONDS} seconds")
 
 
 def _strip_keycode(raw: str) -> str:
-    sleep_sec = parse_key_macro_sleep(raw)
-    if sleep_sec is not None:
-        return f"SLEEP {sleep_sec:g}"
     key = raw.strip()
     if key.upper().startswith("KEYCODE_"):
         key = key[8:]
@@ -59,7 +69,14 @@ def normalize_key_macro(value: Any) -> list[str]:
         for piece in text.replace(";", ",").split(","):
             piece = piece.strip()
             if piece:
-                tokens.append(_strip_keycode(piece))
+                key = _strip_keycode(piece)
+                duration = parse_key_macro_sleep(key)
+                if duration is not None:
+                    seconds = format(duration, "f")
+                    if "." in seconds:
+                        seconds = seconds.rstrip("0").rstrip(".")
+                    key = f"SLEEP {seconds}"
+                tokens.append(key)
     return tokens
 
 

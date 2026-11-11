@@ -7,7 +7,7 @@ import secrets
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from .channel_numbers import normalize_channel_number
 from .dynamic_url import DEFAULT_ATTEMPTS, DEFAULT_TIMEOUT
@@ -127,12 +127,14 @@ class Channel(BaseModel):
 
     @field_validator("key_macro", mode="before")
     @classmethod
-    def _normalize_key_macro_field(cls, value: object) -> object:
-        from .keys import normalize_key_macro
+    def _normalize_key_macro_field(cls, value: object, info: ValidationInfo) -> object:
+        from .keys import normalize_key_macro, validate_key_macro_waits
 
         if value is None or value == "":
             return None
         normalized = normalize_key_macro(value)
+        if not (info.context or {}).get("loading_saved_config"):
+            validate_key_macro_waits(normalized)
         return normalized or None
 
 

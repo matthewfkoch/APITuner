@@ -147,7 +147,8 @@ async def test_app_play_runs_commands_on_dpad_backend(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path):
+@pytest.mark.parametrize("foreground", [None, "com.att.tv"])
+async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path, foreground):
     store = ConfigStore(data_dir=tmp_path)
     manager = TunerManager(store)
 
@@ -158,7 +159,7 @@ async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path):
 
         def __init__(self) -> None:
             super().__init__()
-            self._fg: str | None = None
+            self._fg: str | None = foreground
 
         async def launch(self, *, package, deeplink=None, component=None, action=None, extras=None):
             await super().launch(
@@ -187,8 +188,8 @@ async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path):
     )
     channel = Channel(
         number=3000,
-        name="Altitude Sports",
-        package_name="com.altitudeplus",
+        name="DirecTV",
+        package_name="com.att.tv",
         url="",
         key_macro=["DPAD_CENTER"],
     )
@@ -202,7 +203,6 @@ async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path):
     )
     assert events == [
         "key:WAKEUP",
-        "launch:com.altitudeplus",
+        "launch:com.att.tv",
         "key:DPAD_CENTER",
     ]
-

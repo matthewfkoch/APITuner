@@ -957,7 +957,7 @@ class TunerManager:
             and prior_app in set(fallbacks)
             and leftover_state != PlaybackState.PLAYING
         )
-        if stuck_splash:
+        if stuck_splash and not package_only:
             logger.info(
                 "HOME before deeplink on %s — %s open but not playing",
                 tuner.name,

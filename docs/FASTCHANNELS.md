@@ -1,5 +1,38 @@
 # FastChannels Player integration — hardware proof and staging contract
 
+## Connect FastChannels
+
+Use a FastChannels build that includes **Bridge → External tuners**. FastChannels
+v5.9.0 predates this feature. See the
+[FastChannels external tuner guide](https://github.com/kineticman/FastChannels/blob/development/docs/external-tuner-api.md#turning-it-on)
+for availability and details.
+
+1. On the TV, install the updated APITuner Agent and the official FastChannels
+   Player. Grant the Agent **Display over other apps** and **Notification Access**.
+   Grant **Usage Access** so APITuner can tell when the Player leaves the
+   foreground. In APITuner, configure the TV and HDMI encoder as an HTTP Agent tuner.
+2. In FastChannels, switch to **Advanced** mode if **Bridge** is hidden. Open
+   **Bridge → External tuners** and turn on **Allow external tuners**. Copy the
+   server URL and generated token from that card. You can skip the FastChannels
+   Player Devices, HDMI Capture, and ah4c setup screens.
+3. Enable **Bridge mode** at the top of the FastChannels Bridge page. Run a scrape
+   or **Stream Audit** on the sources you want to import so FastChannels marks the
+   Player-compatible channels.
+4. In APITuner, open **Options → Connect FastChannels**, paste the URL and token,
+   and select **Connect & import**. Use the M3U and XMLTV URLs under
+   **Connect to Channels DVR**. APITuner serves the XMLTV URL when HDHomeRun
+   emulation is enabled.
+
+If the import finds zero channels, check that the desired sources and Bridge mode
+are enabled, then scrape or audit those sources and retry. If you select **New
+token** in FastChannels, paste the replacement into APITuner and connect again.
+Refreshes preserve existing channel names, numbers and guide overrides. Missing
+channels are hidden from M3U and HDHomeRun until they return.
+
+For the older patched beta, the shared secret was created by the operator. See
+the [original beta setup](RELEASE-0.1.35-fastchannels.1.md). Existing
+environment-based APITuner connections can continue using `FASTCHANNELS_TOKEN`.
+
 ## Current status
 
 The first hardware gate passed on October 28, 2026, on a Chromecast running
@@ -23,7 +56,9 @@ catalog sync, stable channel IDs and numbers, unavailable-channel filtering,
 XMLTV mapping, and HTTP-only tuner lifecycle management. Each tune receives a
 unique Player channel key; cleanup retains the tuner reservation until stopped.
 FastChannels streams are always proxied so disconnects release their reservation.
-Playback loss or prolonged buffering ends the stream; encoder reads are bounded.
+During an interruption, APITuner gives the Player up to 130 seconds to recover.
+The shorter 15-second grace still applies when the Player leaves the foreground,
+stops, or cannot be reached. Encoder reads are bounded.
 
 The integrated staging deployment passed end-to-end validation on November 5,
 2026. APITuner runs at `http://192.168.1.19:6593`, and its companion runs at
@@ -36,20 +71,7 @@ To test again, reserve it exclusively before enabling it in staging. This stagin
 companion intentionally has no scheduler; its test channel guide was refreshed
 manually. A normal deployment uses the upstream scheduler to maintain guide data.
 
-## Configure the source
-
-Set `FASTCHANNELS_TOKEN` in the APITuner server environment to the companion's
-`FC_EXTERNAL_PLAYER_TOKEN`. Secrets are not stored in the browser's Options.
-In Options, save the FastChannels URL and starting channel number, then select
-**Sync FastChannels**. A refresh interval of zero disables scheduled refresh.
-Refresh preserves existing names, numbers and guide overrides. Missing channels
-remain in configuration as unavailable and disappear from M3U/HDHomeRun outputs;
-when they return, their previous IDs and numbers are restored.
-
-Only HTTP Agent tuners are eligible. Install the updated APITuner Agent and official
-FastChannels Player, grant Notification Access, and configure the HDMI encoder.
-The source uses the companion's catalog, prepare and XMLTV endpoints. It never
-falls back to an unauthenticated administrative playback API.
+## Initial patched server tests
 
 The staging server passed authenticated catalog and prepare requests for one
 Sling Freestream channel (ABC News Live), and its DASH manifest returned 200.

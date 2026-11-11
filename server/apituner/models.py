@@ -7,7 +7,7 @@ import secrets
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from .channel_numbers import normalize_channel_number
 from .dynamic_url import DEFAULT_ATTEMPTS, DEFAULT_TIMEOUT
@@ -211,6 +211,7 @@ class GlobalOptions(BaseModel):
     xmltv_cache_seconds: float = 900.0
 
     fastchannels_url: Optional[str] = None
+    fastchannels_token: Optional[SecretStr] = Field(default=None, exclude=True)
     fastchannels_start_number: int = Field(default=10000, ge=1)
     fastchannels_sync_seconds: float = Field(default=0, ge=0)
 

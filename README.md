@@ -97,6 +97,8 @@ The Docker image includes `adb` so the grant button works from the container whe
 
 3. In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and the HDMI encoder stream URL (do this before or after the Fire grant step above).
 
+For FastChannels Player channels, see [Connect FastChannels](docs/FASTCHANNELS.md#connect-fastchannels).
+
 ---
 
 ## Quick start (Docker)

@@ -1793,9 +1793,8 @@ const OPTION_FIELDS = [
   ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as the schedule source"],
   ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 3 days)"],
   ["xmltv_cache_seconds", "XMLTV cache (s)", "number", null, "How long to reuse a built XMLTV response"],
-  ["fastchannels_url", "FastChannels URL", "text", null, "Companion server URL. Configure FASTCHANNELS_TOKEN on the APITuner server; credentials stay out of the browser."],
   ["fastchannels_start_number", "FastChannels first number", "number", null, "New channels start here; existing channel numbers are preserved."],
-  ["fastchannels_sync_seconds", "FastChannels refresh interval (s)", "number", null, "0 = manual sync. Save changes before syncing."],
+  ["fastchannels_sync_seconds", "FastChannels refresh interval (s)", "number", null, "0 = refresh with Connect & import."],
   ["fruitdeeplinks_url", "FruitDeepLinks URL", "text", null, "LAN URL. Sync imports lanes; XMLTV remaps their guide"],
   ["fruitdeeplinks_profile", "FruitDeepLinks device profile", "select", [
     { value: "google_tv", label: "Google TV / Android TV" },
@@ -1809,6 +1808,8 @@ async function loadOptions() {
   const form = document.getElementById("options-form");
   let opts = {};
   try { opts = await api.get("/api/options"); } catch (e) { toast(e.message, true); return; }
+  const fcUrl = document.getElementById("fastchannels-url");
+  if (!fcUrl.value) fcUrl.value = opts.fastchannels_url || "";
   form.innerHTML = "";
   const groups = {};
   for (const [id, title] of [["integrations", "Integrations"], ["tuning", "Tuning behavior"], ["relay", "Stream relay"]]) {
@@ -1968,11 +1969,24 @@ api.get("/api/status").then((d) => {
   }
 }).catch((e) => toast(e.message || "Could not load server status", true));
 
-// FastChannels uses only the server-side service token.
-document.getElementById("sync-fastchannels-btn").addEventListener("click", async () => {
+document.getElementById("fastchannels-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const url = document.getElementById("fastchannels-url");
+  const credential = document.getElementById("fastchannels-credential");
+  const button = document.getElementById("connect-fastchannels-btn");
+  const resultText = document.getElementById("fastchannels-result");
+  button.disabled = url.disabled = credential.disabled = true;
+  resultText.textContent = "Checking FastChannels…";
   try {
-    const result = await api.post("/api/fastchannels/sync", {});
-    toast(`FastChannels: ${result.available} available, ${result.added} added, ${result.unavailable} unavailable`);
-    loadChannels();
-  } catch (error) { toast(error.message, true); }
+    const result = await api.post("/api/fastchannels/connect", { url: url.value.trim(), credential: credential.value });
+    credential.value = "";
+    resultText.textContent = result.available
+      ? `${result.available} channels available (${result.added} new, ${result.unavailable} unavailable). Copy the M3U and XMLTV URLs from Connect to Channels DVR above.`
+      : "Connected. No compatible channels found. Enable Bridge mode in FastChannels, then scrape or audit the sources you want to import.";
+    api.get("/api/status").then(initSidebarUrls).catch(() => {});
+  } catch (error) {
+    resultText.textContent = error.message;
+  } finally {
+    button.disabled = url.disabled = credential.disabled = false;
+  }
 });

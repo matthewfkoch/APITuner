@@ -356,8 +356,8 @@ async def get_xmltv(
         if foreign:
             xml = merge_fdl_programmes(xml, rewrite_fdl_xmltv(foreign, channels))
     if fc:
-        from ..fastchannels import guide_programmes
-        xml = merge_fdl_programmes(xml, await guide_programmes(fc, channels))
+        from ..fastchannels import guide_programmes, service_token
+        xml = merge_fdl_programmes(xml, await guide_programmes(fc, channels, token=service_token(options)))
     _cache["key"] = cache_key
     _cache["xml"] = xml
     _cache["expires"] = now + max(30.0, float(options.xmltv_cache_seconds))

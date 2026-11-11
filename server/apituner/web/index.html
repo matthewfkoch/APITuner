@@ -215,10 +215,28 @@
         </div>
         <div class="sidebar-version" style="margin-top:4px">Use Copy M3U on Channels, or add <code>?provider=</code> to this URL.</div>
           </section>
+          <section class="connections-panel" aria-labelledby="fastchannels-title">
+            <h2 id="fastchannels-title">Connect FastChannels</h2>
+            <p class="page-desc">In FastChannels, open Bridge → External tuners to get the server URL and token. Enable Bridge mode and scrape the sources you want to import. Each tuner needs the FastChannels Player and an APITuner Agent with Notification Access.</p>
+            <form id="fastchannels-form" class="form-grid">
+              <div class="field">
+                <label for="fastchannels-url">FastChannels server URL</label>
+                <input id="fastchannels-url" type="url" placeholder="http://fastchannels:5523" required />
+              </div>
+              <div class="field">
+                <label for="fastchannels-credential">External player credential</label>
+                <input id="fastchannels-credential" type="password" autocomplete="new-password" maxlength="1024" aria-describedby="fastchannels-credential-help" />
+                <div id="fastchannels-credential-help" class="hint">Copy the token from External tuners. Leave blank to reuse the saved credential for this server.</div>
+              </div>
+              <div class="field full">
+                <button id="connect-fastchannels-btn" type="submit" class="btn btn-primary">Connect &amp; import</button>
+                <p id="fastchannels-result" class="hint" role="status"></p>
+              </div>
+            </form>
+          </section>
           <div class="options-card">
             <form id="options-form" class="form-grid"></form>
             <div class="form-actions">
-              <button id="sync-fastchannels-btn" class="btn btn-secondary">Sync FastChannels</button>
               <button id="sync-fdl-options-btn" class="btn btn-secondary" title="Sync lanes from the FruitDeepLinks URL">Sync FruitDeepLinks</button>
               <button id="save-options" class="btn btn-primary">Save changes</button>
             </div>

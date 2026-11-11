@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any, Optional
@@ -144,9 +145,19 @@ class ConfigStore:
 
     def save(self) -> None:
         with self._lock:
-            tmp = self.path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(self._config.model_dump(), indent=2))
-            tmp.replace(self.path)
+            data = self._config.model_dump()
+            token = self._config.options.fastchannels_token
+            if token:
+                data["options"]["fastchannels_token"] = token.get_secret_value()
+            # NamedTemporaryFile creates the new configuration with owner-only access.
+            file = tempfile.NamedTemporaryFile(mode="w", dir=self.data_dir, delete=False)
+            tmp = Path(file.name)
+            try:
+                with file:
+                    json.dump(data, file, indent=2)
+                tmp.replace(self.path)
+            finally:
+                tmp.unlink(missing_ok=True)
 
     @property
     def config(self) -> AppConfig:

@@ -13,6 +13,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, SecretStr
 
 from . import __version__
 from .adb_grant import AdbGrantError, grant_agent_permissions
@@ -26,7 +27,7 @@ from .deeplink_catalog import catalog_payload
 from .diagnostics import build_diagnostics
 from .discovery import discover
 from .fruitdeeplinks import FruitDeepLinksError, sync_fruitdeeplinks
-from .fastchannels import FastChannelsError, sync_fastchannels
+from .fastchannels import FastChannelsError, connection_url, sync_fastchannels
 from .hdhr.discovery import DiscoverIdentity, HdhrDiscoveryService
 from .hdhr.lineup import resolve_base_url
 from .hdhr.routes import router as hdhr_router
@@ -705,11 +706,22 @@ async def get_options(request: Request) -> dict:
 @app.put("/api/options")
 async def set_options(options: GlobalOptions, request: Request) -> dict:
     store = _store(request)
-    # Preserve DeviceID if the client omitted / cleared it.
-    if not options.hdhr_device_id:
-        options.hdhr_device_id = store.config.options.hdhr_device_id
-    store.config.options = options
-    store.save()
+    with store._lock:
+        previous = store.config.options
+        # Preserve DeviceID if the client omitted / cleared it.
+        if not options.hdhr_device_id:
+            options.hdhr_device_id = previous.hdhr_device_id
+        if "fastchannels_url" not in options.model_fields_set:
+            options.fastchannels_url = previous.fastchannels_url
+        # Only the verified connection endpoint can set credentials. Never
+        # carry a saved credential over to a different destination.
+        options.fastchannels_token = (
+            previous.fastchannels_token
+            if connection_url(options.fastchannels_url) == connection_url(previous.fastchannels_url)
+            else None
+        )
+        store.config.options = options
+        store.save()
     return options.model_dump()
 
 
@@ -729,6 +741,22 @@ async def fastchannels_sync(request: Request) -> dict:
     try:
         return await sync_fastchannels(_store(request))
     except FastChannelsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+class FastChannelsConnection(BaseModel):
+    url: str
+    credential: SecretStr = SecretStr("")
+
+
+@app.post("/api/fastchannels/connect")
+async def fastchannels_connect(connection: FastChannelsConnection, request: Request) -> dict:
+    credential = connection.credential.get_secret_value().strip()
+    if len(credential) > 1024 or any(not 33 <= ord(ch) <= 126 for ch in credential):
+        raise HTTPException(status_code=400, detail="Enter a valid FastChannels external player credential.")
+    try:
+        return await sync_fastchannels(_store(request), url=connection.url, credential=credential)
+    except (FastChannelsError, ChannelValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
 

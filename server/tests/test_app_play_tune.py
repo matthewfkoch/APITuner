@@ -206,3 +206,48 @@ async def test_package_only_tune_without_app_play_wakes_before_launch(tmp_path, 
         "launch:com.att.tv",
         "key:DPAD_CENTER",
     ]
+
+
+async def test_hybrid_package_only_tune_uses_remote_foreground(tmp_path):
+    from apituner.backends.hybrid import SplitControlBackend
+
+    package = "com.att.tv"
+
+    class Remote(DpadBackend):
+        capabilities = Capabilities(keys=True, dpad=True, current_app=True)
+        foreground = "launcher"
+
+        async def current_app(self):
+            return self.foreground
+
+        async def wake(self):
+            await self.send_key("WAKEUP")
+
+    class Agent(DpadBackend):
+        capabilities = Capabilities(current_app=True)
+
+        async def current_app(self):
+            return "launcher"
+
+        async def launch(self, **kwargs):
+            remote.foreground = kwargs["package"]
+
+    remote = Remote()
+    agent = Agent()
+    tuner = Tuner(
+        id="hybrid",
+        name="Hybrid",
+        control=ControlConfig(type="http_agent", host="192.0.2.1"),
+        keys_control=ControlConfig(type="androidtv_remote", host="192.0.2.1"),
+        stream_endpoint="http://192.0.2.2/s",
+    )
+    manager = TunerManager(ConfigStore(data_dir=tmp_path))
+    await manager._do_tune(
+        tuner,
+        agent,
+        Channel(number=1, name="DirecTV", package_name=package),
+        "test",
+        GlobalOptions(wait_for_playback=False, tune_timeout_seconds=2),
+        command_backend=SplitControlBackend(agent, remote),
+    )
+    assert remote.keys == ["WAKEUP"]

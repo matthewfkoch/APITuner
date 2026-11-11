@@ -911,6 +911,16 @@ class TunerManager:
         if package_only:
             await self._wake_device(cmd_backend)
 
+        remote_foreground = (
+            cmd_backend.keys_backend
+            if package_only
+            and tuner.keys_control is not None
+            and tuner.keys_control.type == "androidtv_remote"
+            and isinstance(cmd_backend, SplitControlBackend)
+            and cmd_backend.keys_backend.capabilities.current_app
+            else None
+        )
+
         if overlay is not None and overlay.pre_tune_commands:
             try:
                 await run_commands(
@@ -925,9 +935,10 @@ class TunerManager:
                 raise TuneFailed(str(exc)) from exc
 
         prior_app: Optional[str] = None
-        if backend.capabilities.current_app:
+        foreground_source = remote_foreground or backend
+        if foreground_source.capabilities.current_app:
             try:
-                prior_app = await backend.current_app()
+                prior_app = await foreground_source.current_app()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1034,7 +1045,8 @@ class TunerManager:
             relaunch=relaunch,
             leftover_title=leftover_title,
             failure=not_ready,
-            foreground_backend=cmd_backend,
+            foreground_backend=remote_foreground or cmd_backend,
+            prefer_foreground_backend=remote_foreground is not None,
         )
         if not ready:
             raise TuneFailed(
@@ -1264,6 +1276,7 @@ class TunerManager:
         leftover_title: Optional[str] = None,
         failure: Optional[list[str]] = None,
         foreground_backend: Optional[ControlBackend] = None,
+        prefer_foreground_backend: bool = False,
     ) -> bool:
         loop = asyncio.get_event_loop()
         caps = await self._effective_capabilities(backend)
@@ -1324,14 +1337,17 @@ class TunerManager:
             return text or None
 
         async def _foreground_package() -> Optional[str]:
-            # Agent first. A paired remote fills in when Usage Access has no
-            # package. A remote that is not connected must not fail the tune.
+            extra = foreground_backend if foreground_backend is not backend else None
+            if prefer_foreground_backend and extra is not None:
+                app = await _read_foreground(extra)
+                if app:
+                    return app
+                extra = None
             if caps.current_app:
                 app = await _read_foreground(backend)
                 if app:
                     return app
-            extra = foreground_backend
-            if extra is not None and extra is not backend:
+            if extra is not None:
                 return await _read_foreground(extra)
             return None
 

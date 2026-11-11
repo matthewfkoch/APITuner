@@ -26,6 +26,8 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 _CLIENT_NAME = "APITuner"
+_WAKE_TIMEOUT_SECONDS = 3.0
+_WAKE_SETTLE_SECONDS = 0.75
 
 # Remote launch of a missing package often opens the store listing instead.
 _STORE_OR_INSTALLER_PACKAGES = (
@@ -189,7 +191,19 @@ class AndroidTvRemoteBackend(ControlBackend):
         self._remote.send_key_command("HOME")
 
     async def wake(self) -> None:
+        await self.connect()
+        was_asleep = self._remote.is_on is False
         await self.send_key("WAKEUP")
+        if not was_asleep:
+            return
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _WAKE_TIMEOUT_SECONDS
+        while self._remote.is_on is not True and loop.time() < deadline:
+            await asyncio.sleep(0.1)
+        if self._remote.is_on is True:
+            # The launcher can still be resuming when the remote reports power on.
+            await asyncio.sleep(_WAKE_SETTLE_SECONDS)
 
     async def playback_state(self) -> PlaybackState:
         try:

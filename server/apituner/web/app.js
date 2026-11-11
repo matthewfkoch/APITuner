@@ -1799,7 +1799,7 @@ const OPTION_FIELDS = [
     { value: "fire", label: "Fire TV" },
   ], "Primary package on sync (ESPN differs on Fire vs Google TV)"],
   ["fruitdeeplinks_start_number", "FruitDeepLinks start number", "number", null, "First channel number for synced lanes (default 9000)"],
-  ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /xmltv/adb)"],
+  ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /out/adb_lanes.xml)"],
   ["fruitdeeplinks_sync_seconds", "FruitDeepLinks auto-sync (s)", "number", null, "0 = manual Sync only"],
 ];
 async function loadOptions() {

@@ -12,6 +12,7 @@ from xml.sax.saxutils import escape
 import httpx
 
 from ..deeplink_catalog import parse_lane_url, parse_whatson_url
+from ..fruitdeeplinks import fruitdeeplinks_base_url
 from ..m3u_import import SOURCE_FRUITDEEPLINKS
 from ..channels import sort_channels
 from ..models import Channel, GlobalOptions
@@ -177,11 +178,17 @@ def fdl_xmltv_aliases(channel: Channel) -> set[str]:
         code, number = lane
         aliases.update(
             {
+                f"{code} {number}",
                 f"adb-{code}-{number:03d}",
+                f"adb-{code}-{number:02d}",
                 f"adb-{code}-{number}",
+                f"adb-{code}{number:02d}",
+                f"adb-{code}{number}",
                 f"{code}-{number:03d}",
+                f"{code}-{number:02d}",
                 f"{code}-{number}",
-                code,
+                f"{code}{number:02d}",
+                f"{code}{number}",
             }
         )
     whatson = parse_whatson_url(channel.url or "")
@@ -269,12 +276,12 @@ def merge_fdl_programmes(xmltv: str, programme_xml: str) -> str:
 
 async def fetch_fdl_xmltv(options: GlobalOptions, *, timeout: float = 30.0) -> Optional[str]:
     """Fetch FruitDeepLinks XMLTV; try configured path then common fallbacks."""
-    base = (options.fruitdeeplinks_url or "").strip().rstrip("/")
+    base = fruitdeeplinks_base_url(options)
     if not base:
         return None
-    primary = options.fruitdeeplinks_xmltv_path or "/xmltv/adb"
+    primary = options.fruitdeeplinks_xmltv_path or "/out/adb_lanes.xml"
     paths: list[str] = []
-    for path in (primary, "/xmltv/adb", "/xmltv/lanes", "/xmltv/direct"):
+    for path in (primary, "/out/adb_lanes.xml", "/xmltv/adb", "/xmltv/lanes", "/xmltv/direct"):
         if path and path not in paths:
             paths.append(path)
     last_error: Optional[str] = None

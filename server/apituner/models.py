@@ -211,7 +211,7 @@ class GlobalOptions(BaseModel):
     fruitdeeplinks_url: Optional[str] = None
     fruitdeeplinks_profile: Literal["google_tv", "fire"] = "google_tv"
     fruitdeeplinks_start_number: int = 9000
-    fruitdeeplinks_xmltv_path: str = "/xmltv/adb"
+    fruitdeeplinks_xmltv_path: str = "/out/adb_lanes.xml"
     fruitdeeplinks_sync_seconds: float = 0.0
 
     @field_validator("dynamic_url_timeout", mode="before")
@@ -279,10 +279,10 @@ class GlobalOptions(BaseModel):
     @classmethod
     def _fdl_xmltv_path(cls, value: object) -> object:
         if value is None or value == "":
-            return "/xmltv/adb"
+            return "/out/adb_lanes.xml"
         if isinstance(value, str):
             stripped = value.strip()
-            return stripped or "/xmltv/adb"
+            return stripped or "/out/adb_lanes.xml"
         return value
 
     @field_validator("fruitdeeplinks_profile", mode="before")

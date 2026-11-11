@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from collections import Counter
+from collections.abc import Callable, Hashable
 from typing import Any, Optional
 from urllib.parse import urljoin
 
@@ -11,26 +14,39 @@ import httpx
 from .channel_numbers import occupied_integer_numbers
 from .channels import ChannelValidationError
 from .config import ConfigStore
-from .deeplink_catalog import code_from_display_name, packages_for
+from .deeplink_catalog import (
+    code_from_display_name,
+    packages_for,
+    parse_lane_url,
+    parse_whatson_url,
+)
 from .m3u_import import (
     SOURCE_FRUITDEEPLINKS,
     channels_from_m3u,
     normalize_resolver_url,
     whatson_resolver_url,
 )
-from .models import Channel
+from .models import Channel, GlobalOptions
 
 logger = logging.getLogger(__name__)
 
 FDL_SOURCE = SOURCE_FRUITDEEPLINKS
 
 
+def fdl_deterministic_channel_id(code: str, lane: int | str) -> str:
+    """Generate a stable 32-char hex channel ID for a FruitDeepLinks lane."""
+    return uuid.uuid5(uuid.NAMESPACE_DNS, f"fdl:{str(code).lower()}:{str(lane).lower()}").hex
+
+
 class FruitDeepLinksError(Exception):
     """Raised when FruitDeepLinks cannot be reached or parsed."""
 
 
-def _base_url(options) -> str:
-    return (options.fruitdeeplinks_url or "").strip().rstrip("/")
+def fruitdeeplinks_base_url(options: GlobalOptions) -> str:
+    url = (options.fruitdeeplinks_url or "").strip().rstrip("/")
+    if url and not url.lower().startswith(("http://", "https://")):
+        url = f"http://{url}"
+    return url
 
 
 def _next_free(number: int, taken: set[int]) -> tuple[int, int]:
@@ -87,6 +103,7 @@ def channels_from_adb_lanes(
             ch_number, number = _next_free(number, taken)
             channels.append(
                 Channel(
+                    id=fdl_deterministic_channel_id(code, lane),
                     number=ch_number,
                     name=f"{code} {lane}",
                     provider_name=code,
@@ -138,6 +155,7 @@ def channels_from_virtual_lanes(
             name = f"{name} ({display})"
         channels.append(
             Channel(
+                id=fdl_deterministic_channel_id("whatson", lane_id),
                 number=ch_number,
                 name=name,
                 provider_name=code or (display or None),
@@ -186,15 +204,110 @@ async def _get(
     return resp
 
 
+def _channel_lane_key(channel: Channel) -> Optional[tuple[str, int]]:
+    url = (channel.url or "").strip()
+    if not url:
+        return None
+    lane = parse_lane_url(url)
+    if lane is not None:
+        return lane
+    whatson = parse_whatson_url(url)
+    if whatson is not None:
+        return ("whatson", whatson)
+    return None
+
+
+def _provider_and_name(channel: Channel) -> tuple[str, str] | None:
+    provider = (channel.provider_name or "").strip().casefold()
+    name = channel.name.strip().casefold()
+    return (provider, name) if provider and name else None
+
+
+def _match_channels(
+    existing: list[Channel], incoming: list[Channel]
+) -> dict[int, Channel]:
+    # Complete stronger matches across the entire lineup before using names.
+    keys: tuple[Callable[[Channel], Hashable | None], ...] = (
+        lambda c: c.id.strip(),
+        lambda c: c.url.strip(),
+        _channel_lane_key,
+        _provider_and_name,
+        lambda c: c.name.strip().casefold(),
+    )
+    matches: dict[int, Channel] = {}
+    claimed: set[str] = set()
+    for key in keys:
+        old_keys = [key(c) for c in existing]
+        new_keys = [key(c) for c in incoming]
+        old_counts = Counter(old_keys)
+        new_counts = Counter(new_keys)
+        unique_existing = {
+            value: channel
+            for value, channel in zip(old_keys, existing)
+            if value and old_counts[value] == 1 and channel.id not in claimed
+        }
+        for index, value in enumerate(new_keys):
+            if index in matches or new_counts[value] != 1:
+                continue
+            match = unique_existing.get(value)
+            if match is not None:
+                matches[index] = match
+                claimed.add(match.id)
+    return matches
+
+
 def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
-    """Replace existing fruitdeeplinks-sourced channels with ``incoming``."""
-    return store.replace_source_channels(FDL_SOURCE, incoming)
+    """Replace FruitDeepLinks channels while preserving user customizations."""
+    existing_fdl = []
+    other_numbers = []
+    for channel in store.config.channels:
+        if (channel.source or "").strip() == FDL_SOURCE:
+            existing_fdl.append(channel)
+        else:
+            other_numbers.append(channel.number)
+    matches = _match_channels(existing_fdl, incoming)
+    reserved = set(other_numbers)
+    preserved_numbers: dict[int, str] = {}
+    for index, match in matches.items():
+        if match.number not in reserved:
+            preserved_numbers[index] = match.number
+            reserved.add(match.number)
+
+    taken = occupied_integer_numbers(list(reserved))
+    next_number = int(store.config.options.fruitdeeplinks_start_number or 9000)
+    merged = []
+    for index, channel in enumerate(incoming):
+        match = matches.get(index)
+        number = preserved_numbers.get(index, channel.number)
+        if index not in preserved_numbers:
+            if number in reserved or ("." not in number and int(number) in taken):
+                allocated, next_number = _next_free(next_number, taken)
+                number = str(allocated)
+            elif "." not in number:
+                taken.add(int(number))
+            reserved.add(number)
+
+        updates: dict[str, Any] = {"number": number}
+        if match is not None:
+            updates.update(
+                id=match.id,
+                name=match.name if match.name.strip() else channel.name,
+                compatibility_mode=match.compatibility_mode,
+            )
+            for field in (
+                "key_macro", "configuration_uuid", "tvc_guide_stationid", "tvg_id"
+            ):
+                value = getattr(match, field)
+                if value is not None:
+                    updates[field] = value
+        merged.append(channel.model_copy(update=updates))
+    return store.replace_source_channels(FDL_SOURCE, merged)
 
 
 async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
     """Sync FDL ADB provider lanes, or virtual /whatson lanes if ADB is not exported."""
     options = store.config.options
-    base = _base_url(options)
+    base = fruitdeeplinks_base_url(options)
     if not base:
         raise FruitDeepLinksError("fruitdeeplinks_url is not set")
     occupied = occupied_integer_numbers(
@@ -208,7 +321,9 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
     mode = ""
 
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        adb = await _get(client, base + "/api/adb/lanes")
+        adb = await _get(client, base + "/api/provider_lanes")
+        if adb is None:
+            adb = await _get(client, base + "/api/adb/lanes")
         if adb is not None:
             try:
                 providers = _parse_adb_providers(adb.json())
@@ -232,7 +347,13 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
                 dicts, skipped = channels_from_m3u(
                     m3u_adb.text, profile=profile, start_number=start
                 )
-                incoming = [Channel.model_validate(row) for row in dicts]
+                taken = set(occupied or ())
+                curr = start
+                incoming = []
+                for row in dicts:
+                    ch_number, curr = _next_free(curr, taken)
+                    row["number"] = str(ch_number)
+                    incoming.append(Channel.model_validate(row))
                 mode = "m3u_adb"
 
         if not incoming:
@@ -267,9 +388,8 @@ async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
 
     if not incoming:
         raise FruitDeepLinksError(
-            f"{base} has no ADB lanes API (404 on /api/adb/lanes) and no usable "
-            "/api/lanes or /m3u/lanes playlist. On FruitDeepLinks, either export "
-            "ADB lanes or use virtual lanes (this v2 layout)."
+            f"{base} has no ADB provider lanes API (/api/provider_lanes or /api/adb/lanes) "
+            "and no usable /m3u/adb, /api/lanes, or /m3u/lanes playlist."
         )
 
     try:

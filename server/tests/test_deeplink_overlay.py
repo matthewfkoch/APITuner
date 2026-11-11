@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Optional
 
 import pytest
@@ -112,7 +113,10 @@ def test_resolve_overlay_vs_app_play():
 
 
 @pytest.mark.asyncio
-async def test_deeplink_overlay_sends_key_macro_on_keys_backend(tmp_path, monkeypatch):
+@pytest.mark.parametrize("profile_status", ["ocr_absent", "prompt_unverified"])
+async def test_deeplink_overlay_sends_key_macro_on_keys_backend(
+    tmp_path, monkeypatch, profile_status
+):
     store = ConfigStore(data_dir=tmp_path)
     store.config.configurations = [_compat_cfg()]
     store.save()
@@ -123,7 +127,7 @@ async def test_deeplink_overlay_sends_key_macro_on_keys_backend(tmp_path, monkey
     split = SplitControlBackend(agent, remote)
 
     async def no_whos(**kwargs):
-        return "ocr_absent"
+        return profile_status
 
     monkeypatch.setattr(
         "apituner.tuner_manager.clear_whos_watching_prompt", no_whos
@@ -146,19 +150,29 @@ async def test_deeplink_overlay_sends_key_macro_on_keys_backend(tmp_path, monkey
         key_macro=["DPAD_CENTER;DPAD_CENTER"],
     )
 
-    await manager._do_tune(
-        tuner,
-        agent,
-        channel,
-        "tune1",
-        GlobalOptions(wait_for_playback=True, ready_settle_seconds=0),
-        app_play=None,
-        overlay=store.config.configurations[0],
-        command_backend=split,
+    unverified = profile_status == "prompt_unverified"
+    outcome = (
+        pytest.raises(TuneFailed, match="Could not verify profile selection")
+        if unverified
+        else nullcontext()
     )
+    with outcome:
+        await manager._do_tune(
+            tuner,
+            agent,
+            channel,
+            "tune1",
+            GlobalOptions(wait_for_playback=True, ready_settle_seconds=0),
+            app_play=None,
+            overlay=store.config.configurations[0],
+            command_backend=split,
+        )
 
     assert agent.launches == [("com.wbd.stream", "https://play.hbomax.com/channel/watch/abc")]
-    assert remote.keys == ["MEDIA_STOP", "DPAD_CENTER", "DPAD_CENTER"]
+    expected_keys = ["MEDIA_STOP"]
+    if not unverified:
+        expected_keys += ["DPAD_CENTER", "DPAD_CENTER"]
+    assert remote.keys == expected_keys
     assert agent.keys == []
 
 

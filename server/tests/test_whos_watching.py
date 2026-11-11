@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from apituner.whos_watching import (
@@ -100,7 +102,7 @@ async def test_whos_watching_one_click_prompt_clears_with_single_press(monkeypat
     monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.01)
     monkeypatch.setattr(
         "apituner.whos_watching.ocr_image_bytes",
-        lambda data: next(ocr_texts),
+        lambda data, *, timeout: next(ocr_texts),
     )
 
     status = await clear_whos_watching_prompt(
@@ -129,7 +131,7 @@ async def test_whos_watching_two_click_prompt_clears_with_two_presses(monkeypatc
     monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.01)
     monkeypatch.setattr(
         "apituner.whos_watching.ocr_image_bytes",
-        lambda data: next(ocr_texts),
+        lambda data, *, timeout: next(ocr_texts),
     )
 
     status = await clear_whos_watching_prompt(
@@ -158,7 +160,7 @@ async def test_whos_watching_second_grab_timeout_does_not_fire_fallback(monkeypa
     monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.01)
     monkeypatch.setattr(
         "apituner.whos_watching.ocr_image_bytes",
-        lambda data: "Who's Watching?",
+        lambda data, *, timeout: "Who's Watching?",
     )
 
     status = await clear_whos_watching_prompt(
@@ -166,7 +168,7 @@ async def test_whos_watching_second_grab_timeout_does_not_fire_fallback(monkeypa
         send_key=send,
         has_dpad=True,
     )
-    assert status == "ocr_cleared"
+    assert status == "prompt_unverified"
     assert keys == ["DPAD_CENTER"]
 
 
@@ -185,7 +187,7 @@ async def test_whos_watching_ocr_absent_fast_exit(monkeypatch):
     monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
     monkeypatch.setattr(
         "apituner.whos_watching.ocr_image_bytes",
-        lambda data: "Now Playing Live Sports",
+        lambda data, *, timeout: "Now Playing Live Sports",
     )
 
     status = await clear_whos_watching_prompt(
@@ -195,3 +197,40 @@ async def test_whos_watching_ocr_absent_fast_exit(monkeypatch):
     )
     assert status == "ocr_absent"
     assert keys == []
+
+
+async def test_verification_grab_is_bounded_by_remaining_budget(monkeypatch):
+    keys = []
+    timeouts = []
+
+    async def send(key):
+        keys.append(key)
+
+    async def grab(url, *, timeout):
+        timeouts.append(timeout)
+        if len(timeouts) == 1:
+            return b"jpeg"
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr("apituner.whos_watching.grab_encoder_frame", grab)
+    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.05)
+    monkeypatch.setattr(
+        "apituner.whos_watching.ocr_image_bytes",
+        lambda data, *, timeout: "Who's Watching?",
+    )
+
+    status = await asyncio.wait_for(
+        clear_whos_watching_prompt(
+            stream_url="http://192.0.2.1/s",
+            send_key=send,
+            has_dpad=True,
+            budget_seconds=0.5,
+        ),
+        timeout=2,
+    )
+    assert status == "prompt_unverified"
+    assert keys == ["DPAD_CENTER"]
+    assert len(timeouts) == 2
+    assert 0 < timeouts[1] < timeouts[0] <= 0.5

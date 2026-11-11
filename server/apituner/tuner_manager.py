@@ -1029,7 +1029,7 @@ class TunerManager:
 
         whos_status: Optional[str] = None
         if overlay is not None and overlay.global_options.check_for_and_clear_whos_watching_prompts:
-            whos_status = await self._clear_whos_watching(tuner, cmd_backend)
+            whos_status = await self._clear_whos_watching(tuner, cmd_backend, channel)
 
         if whos_status == "ocr_cleared" and channel.key_macro:
             await asyncio.sleep(3.0)
@@ -1150,7 +1150,7 @@ class TunerManager:
             raise TuneFailed(str(exc)) from exc
 
         if cfg_opts.check_for_and_clear_whos_watching_prompts:
-            await self._clear_whos_watching(tuner, cmd_backend)
+            await self._clear_whos_watching(tuner, cmd_backend, channel)
 
         await self._send_key_macro(channel, cmd_backend)
 
@@ -1183,7 +1183,7 @@ class TunerManager:
         return working_pkg
 
     async def _clear_whos_watching(
-        self, tuner: Tuner, cmd_backend: ControlBackend
+        self, tuner: Tuner, cmd_backend: ControlBackend, channel: Channel
     ) -> str:
         caps = await self._effective_capabilities(cmd_backend)
 
@@ -1204,6 +1204,11 @@ class TunerManager:
             raise TuneFailed(
                 f"Who's-watching clear on {tuner.name} requires a D-pad keys "
                 "backend; set keys_control to androidtv_remote, firetv_rest, or adb"
+            )
+        if status == "prompt_unverified" and channel.key_macro:
+            raise TuneFailed(
+                f"Could not verify profile selection on {tuner.name} "
+                f"before running the key macro for channel {channel.number}"
             )
         return status
 

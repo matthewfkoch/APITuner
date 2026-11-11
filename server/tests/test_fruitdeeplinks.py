@@ -55,15 +55,15 @@ def test_channels_from_virtual_lanes_whatson():
     assert "dynamic_url_json_key=deeplink_url" in url
 
 
-def test_base_url_normalizes_missing_scheme():
-    from apituner.fruitdeeplinks import _base_url
+def test_fruitdeeplinks_base_url_normalizes_missing_scheme():
+    from apituner.fruitdeeplinks import fruitdeeplinks_base_url
     from apituner.models import GlobalOptions
 
     opts = GlobalOptions(fruitdeeplinks_url="192.168.1.17:6655")
-    assert _base_url(opts) == "http://192.168.1.17:6655"
+    assert fruitdeeplinks_base_url(opts) == "http://192.168.1.17:6655"
 
     opts2 = GlobalOptions(fruitdeeplinks_url="https://fdl.lan:6655/")
-    assert _base_url(opts2) == "https://fdl.lan:6655"
+    assert fruitdeeplinks_base_url(opts2) == "https://fdl.lan:6655"
 
 
 def test_deeplink_catalog_includes_apple_f1():
@@ -139,3 +139,79 @@ def test_apply_fdl_channels_preserves_customizations(tmp_path):
     assert updated.tvc_guide_stationid == "99999"
 
 
+def test_duplicate_names_do_not_reuse_a_legacy_id(tmp_path):
+    from apituner.config import ConfigStore
+    from apituner.fruitdeeplinks import apply_fdl_channels
+    from apituner.models import Channel
+
+    store = ConfigStore(data_dir=tmp_path)
+    old = Channel(
+        number=9000, name="Game", package_name="com.example", source="fruitdeeplinks"
+    )
+    store.import_channels([old.model_dump()], replace=True)
+    incoming = [
+        old.model_copy(update={"id": f"lane-{lane}", "number": str(9000 + lane)})
+        for lane in (1, 2)
+    ]
+
+    assert apply_fdl_channels(store, incoming) == 2
+    assert [channel.id for channel in store.config.channels] == ["lane-1", "lane-2"]
+
+
+async def test_m3u_fallback_and_guide_preserve_lineup_on_resync(tmp_path, monkeypatch):
+    import httpx
+
+    from apituner.config import ConfigStore
+    from apituner.fruitdeeplinks import sync_fruitdeeplinks
+    from apituner.playlist import build_m3u
+    from apituner.hdhr.xmltv import fetch_fdl_xmltv
+    from apituner.models import Channel
+
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.options.fruitdeeplinks_url = "fdl.test:6655"
+    old = Channel(
+        number=9000,
+        name="Custom sports",
+        package_name="com.espn.score_center",
+        url="http://old.test:6655/api/adb/lanes/sportscenter/1/deeplink",
+        source="fruitdeeplinks",
+        key_macro=["DPAD_CENTER"],
+    )
+    manual = Channel(number=9001, name="Manual", package_name="com.example")
+    store.import_channels([old.model_dump(), manual.model_dump()], replace=True)
+    guide = '<tv><channel id="sportscenter01"/></tv>'
+    playlist = (
+        '#EXTM3U\n#EXTINF:-1 tvg-chno="1",New lane\n'
+        'http://fdl.test:6655/api/adb/lanes/aiv/1/deeplink\n'
+        '#EXTINF:-1 tvg-chno="1",Renamed sports\n'
+        'http://fdl.test:6655/api/adb/lanes/sportscenter/1/deeplink\n'
+    )
+
+    def respond(request):
+        assert request.url.scheme == "http"
+        assert request.url.host == "fdl.test"
+        if request.url.path == "/m3u/adb":
+            return httpx.Response(200, text=playlist)
+        if request.url.path == "/out/adb_lanes.xml":
+            return httpx.Response(200, text=guide)
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kwargs: client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    prior_lineup = build_m3u(store.config.channels, "http://apituner.test")
+    assert f'channel-id="{old.id}"' in prior_lineup
+    for _ in range(2):
+        assert (await sync_fruitdeeplinks(store))["mode"] == "m3u_adb"
+        assert await fetch_fdl_xmltv(store.config.options) == guide
+        channels = {channel.name: channel for channel in store.config.channels}
+        assert channels["Manual"].number == "9001"
+        assert channels["New lane"].number == "9002"
+        assert channels["Custom sports"].number == "9000"
+        assert channels["Custom sports"].id == old.id
+        assert channels["Custom sports"].key_macro == ["DPAD_CENTER"]
+        assert f'channel-id="{old.id}"' in build_m3u(
+            store.config.channels, "http://apituner.test"
+        )

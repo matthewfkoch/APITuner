@@ -12,6 +12,7 @@ from xml.sax.saxutils import escape
 import httpx
 
 from ..deeplink_catalog import parse_lane_url, parse_whatson_url
+from ..fruitdeeplinks import fruitdeeplinks_base_url
 from ..m3u_import import SOURCE_FRUITDEEPLINKS
 from ..channels import sort_channels
 from ..models import Channel, GlobalOptions
@@ -275,7 +276,7 @@ def merge_fdl_programmes(xmltv: str, programme_xml: str) -> str:
 
 async def fetch_fdl_xmltv(options: GlobalOptions, *, timeout: float = 30.0) -> Optional[str]:
     """Fetch FruitDeepLinks XMLTV; try configured path then common fallbacks."""
-    base = (options.fruitdeeplinks_url or "").strip().rstrip("/")
+    base = fruitdeeplinks_base_url(options)
     if not base:
         return None
     primary = options.fruitdeeplinks_xmltv_path or "/out/adb_lanes.xml"

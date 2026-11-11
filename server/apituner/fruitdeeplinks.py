@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import Counter
+from collections.abc import Callable, Hashable
 from typing import Any, Optional
 from urllib.parse import urljoin
 
@@ -24,7 +26,7 @@ from .m3u_import import (
     normalize_resolver_url,
     whatson_resolver_url,
 )
-from .models import Channel
+from .models import Channel, GlobalOptions
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +42,9 @@ class FruitDeepLinksError(Exception):
     """Raised when FruitDeepLinks cannot be reached or parsed."""
 
 
-def _base_url(options) -> str:
+def fruitdeeplinks_base_url(options: GlobalOptions) -> str:
     url = (options.fruitdeeplinks_url or "").strip().rstrip("/")
-    if url and not url.startswith(("http://", "https://")):
+    if url and not url.lower().startswith(("http://", "https://")):
         url = f"http://{url}"
     return url
 
@@ -215,77 +217,97 @@ def _channel_lane_key(channel: Channel) -> Optional[tuple[str, int]]:
     return None
 
 
+def _provider_and_name(channel: Channel) -> tuple[str, str] | None:
+    provider = (channel.provider_name or "").strip().casefold()
+    name = channel.name.strip().casefold()
+    return (provider, name) if provider and name else None
+
+
+def _match_channels(
+    existing: list[Channel], incoming: list[Channel]
+) -> dict[int, Channel]:
+    # Complete stronger matches across the entire lineup before using names.
+    keys: tuple[Callable[[Channel], Hashable | None], ...] = (
+        lambda c: c.id.strip(),
+        lambda c: c.url.strip(),
+        _channel_lane_key,
+        _provider_and_name,
+        lambda c: c.name.strip().casefold(),
+    )
+    matches: dict[int, Channel] = {}
+    claimed: set[str] = set()
+    for key in keys:
+        old_keys = [key(c) for c in existing]
+        new_keys = [key(c) for c in incoming]
+        old_counts = Counter(old_keys)
+        new_counts = Counter(new_keys)
+        unique_existing = {
+            value: channel
+            for value, channel in zip(old_keys, existing)
+            if value and old_counts[value] == 1 and channel.id not in claimed
+        }
+        for index, value in enumerate(new_keys):
+            if index in matches or new_counts[value] != 1:
+                continue
+            match = unique_existing.get(value)
+            if match is not None:
+                matches[index] = match
+                claimed.add(match.id)
+    return matches
+
+
 def apply_fdl_channels(store: ConfigStore, incoming: list[Channel]) -> int:
-    """Replace existing fruitdeeplinks channels while preserving user customizations."""
-    existing_fdl = [
-        c for c in store.config.channels if (c.source or "").strip() == FDL_SOURCE
-    ]
-    by_id: dict[str, Channel] = {c.id.strip(): c for c in existing_fdl if c.id}
-    by_url: dict[str, Channel] = {c.url.strip(): c for c in existing_fdl if c.url}
-    by_lane_key: dict[tuple[str, int], Channel] = {}
-    for c in existing_fdl:
-        lane_key = _channel_lane_key(c)
-        if lane_key is not None:
-            by_lane_key[lane_key] = c
-    by_name: dict[str, Channel] = {
-        c.name.strip().lower(): c for c in existing_fdl if c.name
-    }
-    by_provider_lane: dict[tuple[str, str], Channel] = {}
-    for c in existing_fdl:
-        if c.provider_name and c.name:
-            by_provider_lane[(c.provider_name.strip().lower(), c.name.strip().lower())] = c
-
-    merged: list[Channel] = []
-    for inc in incoming:
-        match: Optional[Channel] = None
-        inc_lane_key = _channel_lane_key(inc)
-        if inc.id and inc.id.strip() in by_id:
-            match = by_id[inc.id.strip()]
-        elif inc.url and inc.url.strip() in by_url:
-            match = by_url[inc.url.strip()]
-        elif inc_lane_key is not None and inc_lane_key in by_lane_key:
-            match = by_lane_key[inc_lane_key]
-        elif (
-            inc.provider_name
-            and inc.name
-            and (inc.provider_name.strip().lower(), inc.name.strip().lower())
-            in by_provider_lane
-        ):
-            match = by_provider_lane[
-                (inc.provider_name.strip().lower(), inc.name.strip().lower())
-            ]
-        elif inc.name and inc.name.strip().lower() in by_name:
-            match = by_name[inc.name.strip().lower()]
-
-        if match is not None:
-            data = inc.model_dump()
-            if match.id:
-                data["id"] = match.id
-            if match.number is not None:
-                data["number"] = match.number
-            if match.name and match.name.strip():
-                data["name"] = match.name
-            if match.key_macro is not None:
-                data["key_macro"] = match.key_macro
-            if match.configuration_uuid is not None:
-                data["configuration_uuid"] = match.configuration_uuid
-            if match.tvc_guide_stationid is not None:
-                data["tvc_guide_stationid"] = match.tvc_guide_stationid
-            if match.tvg_id is not None:
-                data["tvg_id"] = match.tvg_id
-            if match.compatibility_mode:
-                data["compatibility_mode"] = match.compatibility_mode
-            merged.append(Channel.model_validate(data))
+    """Replace FruitDeepLinks channels while preserving user customizations."""
+    existing_fdl = []
+    other_numbers = []
+    for channel in store.config.channels:
+        if (channel.source or "").strip() == FDL_SOURCE:
+            existing_fdl.append(channel)
         else:
-            merged.append(inc)
+            other_numbers.append(channel.number)
+    matches = _match_channels(existing_fdl, incoming)
+    reserved = set(other_numbers)
+    preserved_numbers: dict[int, str] = {}
+    for index, match in matches.items():
+        if match.number not in reserved:
+            preserved_numbers[index] = match.number
+            reserved.add(match.number)
 
+    taken = occupied_integer_numbers(list(reserved))
+    next_number = int(store.config.options.fruitdeeplinks_start_number or 9000)
+    merged = []
+    for index, channel in enumerate(incoming):
+        match = matches.get(index)
+        number = preserved_numbers.get(index, channel.number)
+        if index not in preserved_numbers:
+            if number in reserved or ("." not in number and int(number) in taken):
+                allocated, next_number = _next_free(next_number, taken)
+                number = str(allocated)
+            elif "." not in number:
+                taken.add(int(number))
+            reserved.add(number)
+
+        updates: dict[str, Any] = {"number": number}
+        if match is not None:
+            updates.update(
+                id=match.id,
+                name=match.name if match.name.strip() else channel.name,
+                compatibility_mode=match.compatibility_mode,
+            )
+            for field in (
+                "key_macro", "configuration_uuid", "tvc_guide_stationid", "tvg_id"
+            ):
+                value = getattr(match, field)
+                if value is not None:
+                    updates[field] = value
+        merged.append(channel.model_copy(update=updates))
     return store.replace_source_channels(FDL_SOURCE, merged)
 
 
 async def sync_fruitdeeplinks(store: ConfigStore) -> dict[str, Any]:
     """Sync FDL ADB provider lanes, or virtual /whatson lanes if ADB is not exported."""
     options = store.config.options
-    base = _base_url(options)
+    base = fruitdeeplinks_base_url(options)
     if not base:
         raise FruitDeepLinksError("fruitdeeplinks_url is not set")
     occupied = occupied_integer_numbers(

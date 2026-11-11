@@ -148,4 +148,3 @@ def test_rewrite_fdl_xmltv_maps_two_digit_unhyphenated_channel_ids():
     assert "College Football: Lindenwood vs Gardner-Webb" in programmes
     assert f'channel="{ch_aiv1.id}"' in programmes
     assert "Prime Game" in programmes
-

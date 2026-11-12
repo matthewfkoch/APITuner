@@ -37,7 +37,12 @@ from .dynamic_url import (
     looks_like_dynamic_url,
     resolve_dynamic_url,
 )
-from .keys import key_requires_dpad, normalize_key_macro
+from .keys import (
+    key_requires_dpad,
+    normalize_key_macro,
+    parse_key_macro_sleep,
+    validate_key_macro_waits,
+)
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
 from .packages import package_candidates, package_try_order
 from .whos_watching import clear_whos_watching_prompt
@@ -491,8 +496,8 @@ class TunerManager:
         configs = self._store.config.configurations
         if resolve_app_play_config(channel, configs) is not None:
             return True
-        if channel.key_macro:
-            return any(key_requires_dpad(k) for k in channel.key_macro)
+        if any(key_requires_dpad(key) for key in channel.key_macro or ()):
+            return True
         try:
             overlay = resolve_tune_configuration(channel, configs)
         except ConfigInterpreterError:
@@ -781,6 +786,11 @@ class TunerManager:
         overlay: Optional[TuneConfiguration] = None,
         command_backend: Optional[ControlBackend] = None,
     ) -> None:
+        try:
+            validate_key_macro_waits(normalize_key_macro(channel.key_macro))
+        except ValueError as exc:
+            raise TuneFailed(f"Channel {channel.number} ({channel.name}): {exc}") from exc
+
         loop = asyncio.get_event_loop()
         t0 = loop.time()
         cmd_be = command_backend or backend
@@ -1250,20 +1260,27 @@ class TunerManager:
         keys = normalize_key_macro(channel.key_macro)
         if not keys:
             return
-        caps = await self._effective_capabilities(cmd_backend)
-        needs_dpad = any(key_requires_dpad(k) for k in keys)
-        if needs_dpad and not caps.dpad:
-            raise TuneFailed(
-                f"Channel {channel.number} ({channel.name}) key_macro {keys} "
-                "requires a D-pad keys backend; set keys_control to "
-                "androidtv_remote, firetv_rest, or adb"
-            )
-        if not caps.keys and not caps.dpad:
-            raise TuneFailed(
-                f"Channel {channel.number} ({channel.name}) key_macro requires "
-                "a keys-capable backend"
-            )
+        real_keys = [k for k in keys if parse_key_macro_sleep(k) is None]
+        if real_keys:
+            caps = await self._effective_capabilities(cmd_backend)
+            needs_dpad = any(key_requires_dpad(k) for k in real_keys)
+            if needs_dpad and not caps.dpad:
+                raise TuneFailed(
+                    f"Channel {channel.number} ({channel.name}) key_macro {keys} "
+                    "requires a D-pad keys backend; set keys_control to "
+                    "androidtv_remote, firetv_rest, or adb"
+                )
+            if not caps.keys and not caps.dpad:
+                raise TuneFailed(
+                    f"Channel {channel.number} ({channel.name}) key_macro requires "
+                    "a keys-capable backend"
+                )
         for key in keys:
+            sleep_sec = parse_key_macro_sleep(key)
+            if sleep_sec is not None:
+                if sleep_sec > 0:
+                    await asyncio.sleep(float(sleep_sec))
+                continue
             try:
                 await cmd_backend.send_key(key)
             except Exception as exc:  # noqa: BLE001

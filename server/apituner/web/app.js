@@ -392,7 +392,7 @@ function channelNeedsDpad(ch, configByUuid) {
   // App Play: configuration + non-deeplink identifier (loop index).
   if (uuid && !urlLooksLikeDeeplink(ch.url)) return true;
   const keys = expandKeyMacroTokens(ch.key_macro);
-  if (keys.some((k) => !AGENT_ONLY_KEYS.has(k))) return true;
+  if (keys.some((k) => !/^(?:SLEEP|WAIT)[\s_:]+[0-9]+(?:\.[0-9]+)?$/i.test(k) && !AGENT_ONLY_KEYS.has(k))) return true;
   if (uuid && configByUuid[uuid]) {
     const opts = configByUuid[uuid].global_options || {};
     // Server default is true when the flag is present on Max / Compatibility configs.
@@ -1498,7 +1498,7 @@ function channelForm(existing) {
     <div class="field"><label>Action</label><input name="action" value="${escapeAttr(c.action || "android.intent.action.VIEW")}" /></div>
     <div class="field"><label>Component <span class="hint">(Android 12+)</span></label><input name="component" value="${escapeAttr(c.component || "")}" /></div>
     <div class="field full"><label>Intent extras <span class="hint">(key:value,key:value)</span></label><input name="extra_string" value="${escapeAttr(c.extra_string || "")}" /></div>
-    <div class="field full"><label>Key macro <span class="hint">(after launch; needs Keys / D-pad)</span></label><input name="key_macro" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
+    <div class="field full"><label>Key macro <span class="hint">(after launch; SLEEP or WAIT, up to 10 seconds total)</span></label><input name="key_macro" placeholder="e.g. SLEEP 4, DPAD_CENTER, DPAD_CENTER" value="${escapeAttr((c.key_macro || []).join(","))}" /></div>
     <div class="field checkbox full"><input type="checkbox" name="compatibility_mode" ${c.compatibility_mode ? "checked" : ""} /><label>Compatibility mode (stop app before launch)</label></div>
     <div class="field full"><label>Installed apps <span class="hint">(search, then set as package or alternate)</span></label>
       <select id="app-picker-tuner"><option value="">Select a tuner…</option></select>

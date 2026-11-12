@@ -124,7 +124,10 @@ class ConfigStore:
                         if isinstance(ch, dict) and not (ch.get("id") or "").strip():
                             needs_id_migration = True
                             break
-                config = AppConfig.model_validate(raw)
+                # Keep old channels loadable even if their macros now fail validation.
+                config = AppConfig.model_validate(
+                    raw, context={"loading_saved_config": True}
+                )
                 ensure_channel_ids(config.channels)
             except (json.JSONDecodeError, ValueError):
                 # Corrupt config: back it up rather than lose it, then start fresh.

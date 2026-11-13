@@ -7,16 +7,73 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+concurrency:
+  group: apituner-release
+  queue: max
 
 env:
   REGISTRY: ghcr.io
-  # GHCR requires lowercase image names (repository may be mixed-case).
-  IMAGE_NAME: ${{ github.repository_owner }}/apituner
+  RELEASES_REPO: matthewfkoch/APITuner-releases
 
 jobs:
+  validate:
+    name: Validate release candidate
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.name }}
+      code: ${{ steps.version.outputs.code }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate Agent version
+        id: version
+        run: |
+          gradle=agent/app/build.gradle.kts
+          version="$(sed -nE 's/^[[:space:]]*versionName = "([^"]+)"$/\1/p' "$gradle")"
+          code="$(sed -nE 's/^[[:space:]]*versionCode = ([1-9][0-9]*)$/\1/p' "$gradle")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ || ! "$code" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Set a valid versionName and positive versionCode in $gradle."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME must match Agent versionName $version (expected v$version)."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            # Stable and prerelease APKs share the same Android application ID.
+            while IFS= read -r tag; do
+              [[ "$tag" == "$GITHUB_REF_NAME" ]] && continue
+              previous_gradle="$(git show "refs/tags/$tag:$gradle" 2>/dev/null)" || continue
+              previous_code="$(sed -nE 's/^[[:space:]]*versionCode = ([1-9][0-9]*)$/\1/p' <<< "$previous_gradle")"
+              if [[ "$previous_code" =~ ^[1-9][0-9]*$ ]] && (( code <= previous_code )); then
+                echo "::error::Agent versionCode $code must be greater than $previous_code from $tag."
+                exit 1
+              fi
+            done < <(git tag --list 'v[0-9]*')
+          fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+          echo "name=$version" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Test server
+        run: |
+          pip install -r server/requirements.txt -r server/requirements-dev.txt
+          python -m pytest server/tests -q
+
   build-agent:
+    needs: validate
     name: Build Agent APK
     runs-on: ubuntu-latest
     defaults:
@@ -26,19 +83,6 @@ jobs:
       apk_name: ${{ steps.apk.outputs.name }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Resolve version
-        id: version
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            ver="${GITHUB_REF_NAME#v}"
-          else
-            ver="$(grep 'versionName' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
-          fi
-          code="$(grep 'versionCode' app/build.gradle.kts | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          echo "Building agent version $ver"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
@@ -96,6 +140,12 @@ jobs:
             echo "No keystore secret; will build debug APK"
           fi
 
+      - name: Require signing for published tags
+        if: github.ref_type == 'tag' && steps.signing.outputs.enabled != 'true'
+        run: |
+          echo "::error::Tagged releases require the existing release signing key."
+          exit 1
+
       - name: Build release APK
         if: steps.signing.outputs.enabled == 'true'
         env:
@@ -111,19 +161,26 @@ jobs:
 
       - name: Stage release artifact
         id: apk
+        shell: bash
         run: |
-          ver="${{ steps.version.outputs.version }}"
-          if [[ -f app/build/outputs/apk/release/app-release.apk ]]; then
+          ver="${{ needs.validate.outputs.version }}"
+          if [[ "${{ steps.signing.outputs.enabled }}" == "true" ]]; then
             name="apituner-agent-${ver}.apk"
             variant="release"
-            cp app/build/outputs/apk/release/app-release.apk "${GITHUB_WORKSPACE}/${name}"
             src="app/build/outputs/apk/release/app-release.apk"
+            tools="${ANDROID_HOME}/build-tools/36.0.0"
+            "$tools/apksigner" verify "$src"
+            badging="$("$tools/aapt" dump badging "$src")"
+            if [[ "$badging" != *"versionCode='${{ needs.validate.outputs.code }}' versionName='$ver'"* ]]; then
+              echo "::error::The signed APK version does not match the validated release version."
+              exit 1
+            fi
           else
             name="apituner-agent-${ver}-debug.apk"
             variant="debug"
-            cp app/build/outputs/apk/debug/app-debug.apk "${GITHUB_WORKSPACE}/${name}"
             src="app/build/outputs/apk/debug/app-debug.apk"
           fi
+          cp "$src" "${GITHUB_WORKSPACE}/${name}"
           echo "name=${name}" >> "$GITHUB_OUTPUT"
           echo "variant=${variant}" >> "$GITHUB_OUTPUT"
           echo "size=$(du -h "$src" | cut -f1)" >> "$GITHUB_OUTPUT"
@@ -163,7 +220,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Status** | ${status} |"
-            echo "| **Version** | ${{ steps.version.outputs.version }} (${{ steps.version.outputs.code }}) |"
+            echo "| **Version** | ${{ needs.validate.outputs.version }} (${{ needs.validate.outputs.code }}) |"
             echo "| **Variant** | ${{ steps.apk.outputs.variant || '—' }} |"
             echo "| **Signing** | ${signing} |"
             echo "| **APK size** | ${{ steps.apk.outputs.size || '—' }} |"
@@ -174,8 +231,15 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish-docker:
+    needs: validate
     name: Publish Docker image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.docker.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
 
@@ -185,9 +249,9 @@ jobs:
           image="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/apituner"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            ver="${GITHUB_REF_NAME#v}"
+            ver="${{ needs.validate.outputs.version }}"
             echo "version=${ver}" >> "$GITHUB_OUTPUT"
-            echo "tags=${{ env.REGISTRY }}/${image}:${ver},${{ env.REGISTRY }}/${image}:latest" >> "$GITHUB_OUTPUT"
+            echo "tags=${{ env.REGISTRY }}/${image}:${ver}" >> "$GITHUB_OUTPUT"
           else
             echo "version=dev" >> "$GITHUB_OUTPUT"
             echo "tags=${{ env.REGISTRY }}/${image}:dev" >> "$GITHUB_OUTPUT"
@@ -255,7 +319,7 @@ jobs:
 
   public-release:
     name: Publish public release
-    needs: [build-agent, publish-docker]
+    needs: [validate, build-agent, publish-docker]
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag'
     steps:
@@ -266,26 +330,14 @@ jobs:
         with:
           name: agent-apk
 
-      - name: Resolve version
-        id: version
-        run: |
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          echo "image=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/apituner" >> "$GITHUB_OUTPUT"
-          code="$(grep 'versionCode' agent/app/build.gradle.kts | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
-          echo "code=${code}" >> "$GITHUB_OUTPUT"
-
       - name: Build latest.json manifest
-        id: latest
+        shell: bash
         run: |
-          ver="${{ steps.version.outputs.version }}"
-          code="${{ steps.version.outputs.code }}"
-          apk="$(ls -1 apituner-agent-*.apk | head -1)"
-          if [[ -z "$apk" ]]; then
-            echo "::error::No APK found to describe in latest.json"
-            exit 1
-          fi
+          ver="${{ needs.validate.outputs.version }}"
+          code="${{ needs.validate.outputs.code }}"
+          apk="${{ needs.build-agent.outputs.apk_name }}"
           sha="$(sha256sum "$apk" | cut -d' ' -f1)"
-          apk_url="https://github.com/matthewfkoch/APITuner-releases/releases/download/${{ github.ref_name }}/${apk}"
+          apk_url="https://github.com/${RELEASES_REPO}/releases/download/${GITHUB_REF_NAME}/${apk}"
           python3 - <<PY
           import json
           manifest = {
@@ -315,31 +367,35 @@ jobs:
         id: release
         uses: softprops/action-gh-release@v3
         with:
-          repository: matthewfkoch/APITuner-releases
+          repository: ${{ env.RELEASES_REPO }}
           token: ${{ secrets.RELEASES_REPO_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          name: APITuner v${{ steps.version.outputs.version }}
+          name: APITuner v${{ needs.validate.outputs.version }}
+          prerelease: ${{ needs.validate.outputs.prerelease }}
+          make_latest: ${{ needs.validate.outputs.prerelease == 'true' && 'false' || 'true' }}
+          fail_on_unmatched_files: true
           body: |
             ## Agent APK
 
-            Download **apituner-agent-${{ steps.version.outputs.version }}.apk** below and install on each Android TV / Google TV device.
+            Download **${{ needs.build-agent.outputs.apk_name }}** below and install on each Android TV / Google TV device.
 
             Grant **Display over other apps**, **Usage Access**, and **Notification Access** (and **Accessibility** if you need BACK/HOME keys).
 
             In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and your HDMI encoder stream URL.
 
-            Machine-readable update metadata: **latest.json** (also available at
-            `…/releases/latest/download/latest.json`).
+            Machine-readable update metadata: **latest.json** is attached to this release.
+            The `releases/latest/download/latest.json` URL serves stable releases only.
 
             ## Server (Docker)
 
             ```bash
-            docker pull ${{ env.REGISTRY }}/${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
+            docker pull ${{ env.REGISTRY }}/${{ needs.publish-docker.outputs.image }}:${{ needs.validate.outputs.version }}
             ```
 
-            Or pull `:latest` for the most recent release.
+            Prereleases require the explicit version tag shown above.
+            `:latest` tracks stable releases only.
           files: |
-            apituner-agent-*.apk
+            ${{ needs.build-agent.outputs.apk_name }}
             latest.json
 
       - name: Job summary
@@ -366,10 +422,35 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Status** | ${status} |"
-            echo "| **Version** | v${{ steps.version.outputs.version }} |"
+            echo "| **Version** | v${{ needs.validate.outputs.version }} |"
             echo "| **Release** | [${release_url}](${release_url}) |"
             echo "| **APK attached** | ${apk_info} |"
-            echo "| **Docker image** | \`${{ env.REGISTRY }}/${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}\` |"
+            echo "| **Docker image** | \`${{ env.REGISTRY }}/${{ needs.publish-docker.outputs.image }}:${{ needs.validate.outputs.version }}\` |"
             echo ""
             echo "**Published to:** \`matthewfkoch/APITuner-releases\` (public APK downloads)."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  promote-docker:
+    name: Promote stable Docker image
+    needs: [validate, publish-docker, public-release]
+    if: github.ref_type == 'tag' && needs.validate.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Tag published digest as latest
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ needs.publish-docker.outputs.image }}
+          DIGEST: ${{ needs.publish-docker.outputs.digest }}
+        run: |
+          docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE@$DIGEST"

@@ -1205,7 +1205,13 @@ button, summary, a, input, select, textarea { -webkit-tap-highlight-color: trans
 #options-form { display: block; }
 .options-card { padding: 0; background: none; border: none; }
 .settings-group { min-width: 0; border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px 24px; margin: 0 0 24px; background: var(--surface); }
-.settings-group legend { font-size: 18px; font-weight: 600; padding: 0 8px; }
+.settings-group legend {
+  --legend-padding: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  padding-inline: var(--legend-padding);
+  margin-inline-start: calc(-1 * var(--legend-padding));
+}
 .field .hint { font-size: 12px; }
 .field.checkbox { display: grid; grid-template-columns: 18px 1fr; align-content: start; }
 .field.checkbox .hint { grid-column: 2; }

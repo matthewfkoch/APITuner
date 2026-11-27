@@ -10,6 +10,8 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
 import httpx
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import fromstring as defused_fromstring
 
 from ..deeplink_catalog import parse_lane_url, parse_whatson_url
 from ..fruitdeeplinks import fruitdeeplinks_base_url
@@ -18,6 +20,8 @@ from ..channels import sort_channels
 from ..models import Channel, GlobalOptions
 
 logger = logging.getLogger(__name__)
+
+MAX_FDL_XMLTV_BYTES = 64 * 1024 * 1024
 
 _cache: dict[str, Any] = {"key": None, "xml": None, "expires": 0.0}
 
@@ -228,8 +232,8 @@ def rewrite_fdl_xmltv(xml_text: str, channels: list[Channel]) -> str:
     if not xml_text.strip() or not mapping:
         return ""
     try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as exc:
+        root = defused_fromstring(xml_text)
+    except (ET.ParseError, DefusedXmlException) as exc:
         logger.warning("FruitDeepLinks XMLTV parse failed: %s", exc)
         return ""
 
@@ -291,15 +295,30 @@ async def fetch_fdl_xmltv(options: GlobalOptions, *, timeout: float = 30.0) -> O
         for path in paths:
             url = urljoin(base + "/", path.lstrip("/"))
             try:
-                resp = await client.get(url)
+                async with client.stream("GET", url) as resp:
+                    if resp.status_code >= 400:
+                        last_error = f"HTTP {resp.status_code}"
+                        continue
+                    buf = bytearray()
+                    too_large = False
+                    async for chunk in resp.aiter_bytes(64 * 1024):
+                        buf.extend(chunk)
+                        if len(buf) > MAX_FDL_XMLTV_BYTES:
+                            too_large = True
+                            break
+                    if too_large:
+                        last_error = "XMLTV response exceeded size limit"
+                        logger.warning(
+                            "FruitDeepLinks XMLTV fetch %s exceeded %d bytes",
+                            url,
+                            MAX_FDL_XMLTV_BYTES,
+                        )
+                        continue
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
                 logger.warning("FruitDeepLinks XMLTV fetch %s failed: %s", url, exc)
                 continue
-            if resp.status_code >= 400:
-                last_error = f"HTTP {resp.status_code}"
-                continue
-            body = (resp.text or "").strip()
+            body = buf.decode("utf-8", errors="replace").strip()
             if body.startswith("<"):
                 return body
             last_error = "not XML"

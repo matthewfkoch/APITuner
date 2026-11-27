@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -46,109 +45,42 @@ from .keys import (
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
 from .packages import package_candidates, package_try_order
 from .stream import StreamRelay
+from .tune_matching import (
+    _COLD_START_RESEND_SECONDS,
+    _GENERIC_TITLE_TOKENS,
+    _HOME_BEFORE_DEEPLINK_SECONDS,
+    _NONSTALE_SECOND_RESEND_SECONDS,
+    _PLACEHOLDER_TITLES,
+    _STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS,
+    _STALE_PLAYBACK_PACKAGES,
+    _STALE_SPLASH_GRACE_MIN_TIMEOUT,
+    _STALE_SPLASH_GRACE_SECONDS,
+    _title_is_placeholder,
+    _title_looks_like_channel,
+    _title_tokens,
+    _titles_equivalent,
+    tune_not_ready_message,
+)
+from .tune_readiness import ReadinessTimings, home_off_splash, wait_for_tune_ready
 from .whos_watching import clear_whos_watching_prompt
 
-_STALE_PLAYBACK_PACKAGES = frozenset(
-    {
-        "com.att.tv",
-        "com.att.tv.openvideo",
-        "com.att.ngc",
-    }
-)
-# After two idle relaunches DirecTV can still sit on splash with no
-# MediaSession. stream_during_tune already opened HDMI, so keep waiting
-# instead of failing at 30s and killing the proxy.
-_STALE_SPLASH_GRACE_SECONDS = 45.0
-_STALE_SPLASH_GRACE_MIN_TIMEOUT = 20.0
-_HOME_BEFORE_DEEPLINK_SECONDS = 0.8
 _RELEASE_TIMEOUT_SECONDS = 60.0
-# DirecTV often needs ~10s after a good deeplink before MediaSession flips
-# to PLAYING. A 2s idle HOME restarts that launch (MeTV log, 0.1.29).
-_STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS = 15.0
-# Cold start when the target app is not in front yet. Same-app switches and
-# an app that is already open wait the full deeplink_relaunch_seconds instead.
-_COLD_START_RESEND_SECONDS = 2.0
-# YouTube TV relaunch is CLEAR_TOP|SINGLE_TOP. A second intent at 6s lands
-# inside the window where a good first resend becomes PLAYING (5–9s). Wait
-# past that, then send one more time if playback is still idle. If the app
-# is still in front, that second CLEAR_TOP is ignored (Sports 1, BRAVO).
-# HOME first so the next VIEW starts clean, the way a retry after release does.
-_NONSTALE_SECOND_RESEND_SECONDS = 12.0
-_GENERIC_TITLE_TOKENS = frozenset(
-    {
-        "live",
-        "tv",
-        "hd",
-        "uhd",
-        "4k",
-        "video",
-        "directv",
-        "dtv",
-        "att",
-        "watch",
-        "playing",
-        "for",
-        "you",
-        "home",
-        "app",
-        "stream",
-        "the",
-        "and",
-        "network",
-        "unknown",
-        "untitled",
-        "loading",
-        "buffering",
-    }
-)
-_PLACEHOLDER_TITLES = frozenset(
-    {
-        "unknown title",
-        "unknown",
-        "untitled",
-        "null",
-        "none",
-        "n/a",
-    }
-)
 
-
-def _title_tokens(text: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) >= 3}
-
-
-def _title_is_placeholder(title: Optional[str]) -> bool:
-    """True for empty / splash MediaSession titles (DirecTV 'Unknown Title')."""
-    if not title or not str(title).strip():
-        return True
-    return str(title).strip().lower() in _PLACEHOLDER_TITLES
-
-
-def _title_looks_like_channel(title: Optional[str], channel_name: str) -> Optional[bool]:
-    """True if title overlaps the channel name, False if it looks like other content, None to ignore."""
-    if _title_is_placeholder(title):
-        return None
-    title_toks = _title_tokens(title)
-    name_toks = _title_tokens(channel_name)
-    specific = title_toks - _GENERIC_TITLE_TOKENS
-    if not specific or not (name_toks - _GENERIC_TITLE_TOKENS):
-        return None
-    if specific & name_toks:
-        return True
-    return False
-
-
-def _titles_equivalent(left: Optional[str], right: Optional[str]) -> bool:
-    """True when two MediaSession titles are the same leftover show."""
-    if not left or not str(left).strip() or not right or not str(right).strip():
-        return False
-    if str(left).strip().lower() == str(right).strip().lower():
-        return True
-    left_toks = _title_tokens(left) - _GENERIC_TITLE_TOKENS
-    right_toks = _title_tokens(right) - _GENERIC_TITLE_TOKENS
-    if not left_toks or not right_toks:
-        return False
-    return left_toks <= right_toks or right_toks <= left_toks
+__all__ = [
+    "Lease",
+    "NoTunerAvailable",
+    "TuneFailed",
+    "TunerInUse",
+    "TunerManager",
+    "TunerState",
+    "tune_not_ready_message",
+    "_GENERIC_TITLE_TOKENS",
+    "_PLACEHOLDER_TITLES",
+    "_title_tokens",
+    "_title_is_placeholder",
+    "_title_looks_like_channel",
+    "_titles_equivalent",
+]
 
 
 async def _backend_launch(backend: ControlBackend, **kwargs) -> None:
@@ -162,12 +94,7 @@ async def _backend_launch(backend: ControlBackend, **kwargs) -> None:
 
 async def _home_off_splash(backend: ControlBackend) -> None:
     """Best-effort HOME so a stuck splash does not swallow the next VIEW intent."""
-    try:
-        await backend.stop()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("HOME before deeplink failed: %s", exc)
-        return
-    await asyncio.sleep(_HOME_BEFORE_DEEPLINK_SECONDS)
+    await home_off_splash(backend, delay_seconds=_HOME_BEFORE_DEEPLINK_SECONDS)
 
 
 logger = logging.getLogger(__name__)
@@ -183,55 +110,6 @@ class TunerInUse(Exception):
 
 class TuneFailed(Exception):
     """The device failed to reach a playable state in time."""
-
-
-def tune_not_ready_message(
-    *,
-    number: str,
-    name: str,
-    playback: Optional[PlaybackState],
-    title: Optional[str],
-    relaunches: int,
-    relaunch_error: Optional[str] = None,
-    splash_extended: bool = False,
-    foreground: Optional[str] = None,
-) -> str:
-    """One line for the tuner card and diagnostics: what failed, and what to check."""
-    state = playback.name if isinstance(playback, PlaybackState) else "UNKNOWN"
-    detail = f"playback={state}, relaunches={relaunches}"
-    if splash_extended:
-        detail += ", splash wait extended"
-    if title:
-        detail += f", title={title!r}"
-    if foreground is not None:
-        detail += f", foreground={foreground or 'unknown'!r}"
-    head = f"channel {number} ({name}) not ready within timeout ({detail})"
-    err = (relaunch_error or "").strip()
-    if err:
-        if "HTTP verb" in err or "{}POST" in err:
-            why = (
-                "HOME ran, then the Agent rejected the next deeplink "
-                "(malformed HTTP verb). Update the APITuner server."
-            )
-        else:
-            why = (
-                "HOME ran, then the deeplink failed, so the TV may be on "
-                f"the Android home screen. {err}"
-            )
-        return f"{head}. {why}"
-    if playback == PlaybackState.UNKNOWN:
-        return (
-            f"{head}. Playback was unknown. On an Agent tuner grant "
-            "Notification access. Android TV Remote only sees Cast playback, "
-            "which apps like DirecTV do not report."
-        )
-    if playback == PlaybackState.IDLE:
-        return (
-            f"{head}. Notification access is working, but the channel never "
-            "started playing. Check that the app is installed and overlay "
-            "permission is granted."
-        )
-    return f"{head}."
 
 
 def _new_tune_id() -> str:
@@ -1362,420 +1240,32 @@ class TunerManager:
         foreground_backend: Optional[ControlBackend] = None,
         prefer_foreground_backend: bool = False,
     ) -> bool:
-        loop = asyncio.get_event_loop()
         caps = await self._effective_capabilities(backend)
-        targets = {chosen_pkg, channel.package_name}
-        if channel.alternate_package_name:
-            targets.add(channel.alternate_package_name)
-        targets.update(
-            package_candidates(channel.package_name, channel.alternate_package_name)
+        timings = ReadinessTimings(
+            stale_splash_grace_seconds=_STALE_SPLASH_GRACE_SECONDS,
+            stale_splash_grace_min_timeout=_STALE_SPLASH_GRACE_MIN_TIMEOUT,
+            home_before_deeplink_seconds=_HOME_BEFORE_DEEPLINK_SECONDS,
+            stale_foreground_idle_relaunch_seconds=_STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS,
+            cold_start_resend_seconds=_COLD_START_RESEND_SECONDS,
+            nonstale_second_resend_seconds=_NONSTALE_SECOND_RESEND_SECONDS,
         )
-
-        launch_at = launch_at or loop.time()
-        same_app_switch = (
-            prior_app is not None
-            and prior_app in targets
-            and bool(channel.url)
+        return await wait_for_tune_ready(
+            backend=backend,
+            caps=caps,
+            channel=channel,
+            chosen_pkg=chosen_pkg,
+            options=options,
+            deadline=deadline,
+            timings=timings,
+            prior_app=prior_app,
+            launch_at=launch_at,
+            relaunch=relaunch,
+            leftover_title=leftover_title,
+            failure=failure,
+            foreground_backend=foreground_backend,
+            prefer_foreground_backend=prefer_foreground_backend,
+            home_fn=_home_off_splash,
         )
-        same_app_ready_delay = 2.0
-
-        use_playback = options.wait_for_playback and caps.playback_state
-        playback_unknown_since: Optional[float] = None
-        playback_idle_since: Optional[float] = None
-        non_playing_since: Optional[float] = None
-        relaunch_sec = float(options.deeplink_relaunch_seconds or 0.0)
-        can_relaunch = relaunch is not None and relaunch_sec > 0
-        relaunch_count = 0
-        stale_pkg = any(p in _STALE_PLAYBACK_PACKAGES for p in targets)
-        # DirecTV and other deeplink apps both get two resends. The second
-        # non-DirecTV resend waits _NONSTALE_SECOND_RESEND_SECONDS so it does
-        # not CLEAR_TOP a launch that is about to play. If YouTube TV is still
-        # in front at that second send, HOME before the deeplink.
-        max_relaunches = 2
-        splash_extended = False
-        last_ps: Optional[PlaybackState] = None
-        last_title: Optional[str] = None
-        first_relaunch_sec = (
-            min(_COLD_START_RESEND_SECONDS, relaunch_sec)
-            if not same_app_switch
-            else relaunch_sec
-        )
-        relaunched = False
-        last_relaunch_ok = False
-        last_relaunch_error: Optional[str] = None
-        saw_playing = False
-        seen_non_playing = False
-        stale_playing = bool(same_app_switch and stale_pkg)
-
-        # No readiness signal at all: fixed short delay then accept.
-        if not use_playback and not caps.current_app:
-            await asyncio.sleep(min(3.0, max(0.0, deadline - loop.time())))
-            return True
-
-        async def _read_foreground(source: ControlBackend) -> Optional[str]:
-            try:
-                app = await source.current_app()
-            except Exception:  # noqa: BLE001
-                return None
-            text = str(app).strip() if app else ""
-            return text or None
-
-        async def _foreground_package() -> Optional[str]:
-            extra = foreground_backend if foreground_backend is not backend else None
-            if prefer_foreground_backend and extra is not None:
-                app = await _read_foreground(extra)
-                if app:
-                    return app
-                extra = None
-            if caps.current_app:
-                app = await _read_foreground(backend)
-                if app:
-                    return app
-            if extra is not None:
-                return await _read_foreground(extra)
-            return None
-
-        async def _foreground_in_targets() -> bool:
-            app = await _foreground_package()
-            return bool(app and app in targets)
-
-        async def _idle_resend_wait() -> float:
-            """Seconds from the last intent before the next non-DirecTV idle resend."""
-            if relaunch_count == 0:
-                # App already open: a 2s CLEAR_TOP can reset a launch that is
-                # about to produce a media session. Wait the full interval.
-                if await _foreground_in_targets():
-                    return relaunch_sec
-                return first_relaunch_sec
-            return _NONSTALE_SECOND_RESEND_SECONDS
-
-        async def _snapshot() -> tuple[PlaybackState, Optional[str], Optional[str]]:
-            snap_fn = getattr(backend, "playback_snapshot", None)
-            if callable(snap_fn):
-                try:
-                    out = await snap_fn()
-                    if isinstance(out, tuple) and len(out) == 3:
-                        return out[0], out[1], out[2]
-                except Exception:  # noqa: BLE001
-                    pass
-            return await backend.playback_state(), None, None
-
-        async def _not_ready() -> bool:
-            looked_up = caps.current_app or (
-                foreground_backend is not None and foreground_backend is not backend
-            )
-            foreground: Optional[str] = None
-            if looked_up:
-                foreground = await _foreground_package() or ""
-            message = tune_not_ready_message(
-                number=str(channel.number),
-                name=channel.name,
-                playback=last_ps,
-                title=last_title,
-                relaunches=relaunch_count,
-                relaunch_error=last_relaunch_error,
-                splash_extended=splash_extended,
-                foreground=foreground,
-            )
-            logger.warning("%s", message)
-            if failure is not None:
-                failure[:] = [message]
-            return False
-
-        async def _maybe_relaunch(reason: str) -> None:
-            nonlocal relaunched, relaunch_count, non_playing_since, launch_at, seen_non_playing
-            nonlocal last_relaunch_ok, last_relaunch_error
-            if not can_relaunch or relaunch_count >= max_relaunches:
-                return
-            # Splash / "Unknown Title" is still loading — use the full interval
-            # so a 2s cold-start retry does not kill a working first tune.
-            if reason == "generic_title":
-                wait = relaunch_sec
-            elif reason == "idle" and not stale_pkg:
-                wait = await _idle_resend_wait()
-            elif relaunch_count == 0:
-                wait = first_relaunch_sec
-            else:
-                wait = relaunch_sec
-            if (
-                reason == "idle"
-                and stale_pkg
-                and relaunch_count == 0
-                and not same_app_switch
-                and relaunch_sec >= 2.0
-                and await _foreground_in_targets()
-            ):
-                # App is open and still starting. HOME here restarts it.
-                wait = max(wait, _STALE_FOREGROUND_IDLE_RELAUNCH_SECONDS)
-            if loop.time() - launch_at < wait:
-                return
-            # A dropped deeplink stays on the launcher. Re-send it. DirecTV
-            # that is already open waits longer above so HOME does not restart it.
-            if (
-                reason != "idle"
-                and not stale_pkg
-                and not await _foreground_in_targets()
-            ):
-                return
-            foreground_pkg = await _foreground_package()
-            # Another CLEAR_TOP into an app that ignored the first resend stays
-            # IDLE. HOME, then the relaunch is a fresh VIEW. A second resend
-            # while the app never came forward (launcher) stays a plain intent.
-            if (
-                reason == "idle"
-                and not stale_pkg
-                and relaunch_count >= 1
-                and foreground_pkg in targets
-            ):
-                logger.info(
-                    "HOME before deeplink resend for channel %s (%s) — %s still idle in front",
-                    channel.number,
-                    channel.name,
-                    foreground_pkg,
-                )
-                await _home_off_splash(backend)
-            try:
-                await relaunch()  # type: ignore[misc]
-            except Exception as exc:  # noqa: BLE001
-                # HOME may already have run inside the relaunch. Count the
-                # attempt so we don't hammer it, but do not treat it as a
-                # delivered deeplink — that extended the splash wait while
-                # the TV sat on the launcher ("HTTP verb {}POST").
-                last_relaunch_error = str(exc)
-                logger.warning(
-                    "Deeplink relaunch failed for %s (%s) after HOME: %s. "
-                    "The TV may be on the Android home screen.",
-                    channel.number,
-                    channel.name,
-                    exc,
-                )
-                relaunch_count += 1
-                relaunched = True
-                last_relaunch_ok = False
-                launch_at = loop.time()
-                return
-            relaunch_count += 1
-            relaunched = True
-            last_relaunch_ok = True
-            non_playing_since = loop.time()
-            launch_at = loop.time()
-            seen_non_playing = False
-            logger.info(
-                "Re-sent deeplink for channel %s (%s) (%s, %s/%s, foreground=%s)",
-                channel.number,
-                channel.name,
-                reason,
-                relaunch_count,
-                max_relaunches,
-                foreground_pkg or "unknown",
-            )
-
-        if leftover_title is not None:
-            leftover_title = str(leftover_title).strip() or None
-        had_leftover = bool(leftover_title)
-        if use_playback and leftover_title is None:
-            try:
-                _ps0, _pkg0, leftover_title = await _snapshot()
-                if leftover_title is not None:
-                    leftover_title = str(leftover_title).strip() or None
-                # Same-app only. A cold start that is already PLAYING is the
-                # channel coming up, not a session left from before the launch.
-                if (
-                    _ps0 == PlaybackState.PLAYING
-                    and leftover_title
-                    and same_app_switch
-                ):
-                    had_leftover = True
-            except Exception:  # noqa: BLE001
-                leftover_title = None
-
-        while loop.time() < deadline:
-            if use_playback:
-                ps, sess_pkg, sess_title = await _snapshot()
-                last_ps, last_title = ps, sess_title
-                title_match = _title_looks_like_channel(sess_title, channel.name)
-                if ps == PlaybackState.PLAYING:
-                    accept = False
-                    # Remember splash / continue-watching so a later show
-                    # change counts (Unknown Title → Funny You Should Ask).
-                    if (
-                        leftover_title is None
-                        and sess_title
-                        and title_match is not True
-                        and (stale_pkg or relaunch_count > 0)
-                    ):
-                        leftover_title = str(sess_title).strip() or None
-                    still_leftover = _titles_equivalent(sess_title, leftover_title)
-                    title_changed = bool(
-                        leftover_title
-                        and sess_title
-                        and not still_leftover
-                        and not _title_is_placeholder(sess_title)
-                    )
-                    if title_match is True or title_changed:
-                        # Channel-name overlap, or DirecTV show title changed
-                        # (Chicago Fire leftover → Golden Girls on MeTV).
-                        accept = True
-                    elif title_match is False:
-                        if not stale_pkg:
-                            # YouTube TV reports the program (Nebraska at
-                            # Michigan State), not the guide name (BIG10HD).
-                            # Accept PLAYING unless this is the same show that
-                            # was already on before a same-app switch.
-                            if same_app_switch and had_leftover and still_leftover:
-                                logger.info(
-                                    "Ignoring playback title %r while tuning %s",
-                                    sess_title,
-                                    channel.name,
-                                )
-                                await _maybe_relaunch("title_mismatch")
-                            else:
-                                accept = True
-                        elif (
-                            stale_pkg
-                            and not had_leftover
-                            and not same_app_switch
-                            and relaunch_count == 0
-                            and sess_title
-                            and not _title_is_placeholder(sess_title)
-                        ):
-                            # Cold start: the first real program title is the
-                            # channel (Red Sparrow on MeTV), not a leftover.
-                            accept = True
-                        elif (
-                            stale_pkg
-                            and relaunch_count >= max_relaunches
-                            and not had_leftover
-                        ):
-                            # Idle splash with no pre-launch leftover
-                            # session: after two retries, take the show
-                            # that finally started (not the call sign).
-                            accept = True
-                        else:
-                            logger.info(
-                                "Ignoring playback title %r while tuning %s",
-                                sess_title,
-                                channel.name,
-                            )
-                            await _maybe_relaunch("title_mismatch")
-                    elif stale_playing and not seen_non_playing:
-                        if relaunch_count < max_relaunches:
-                            await _maybe_relaunch("stale_playing")
-                        elif loop.time() - launch_at >= 1.5:
-                            # No usable title after CLEAR_TASK relaunch — accept PLAYING.
-                            accept = True
-                    elif stale_pkg:
-                        # "Unknown Title" / empty session: wait for a real show.
-                        await _maybe_relaunch("generic_title")
-                    else:
-                        accept = True
-                    if accept:
-                        saw_playing = True
-                        settle = max(0.0, float(options.ready_settle_seconds))
-                        if settle:
-                            await asyncio.sleep(
-                                min(settle, max(0.0, deadline - loop.time()))
-                            )
-                        if sess_title:
-                            logger.info(
-                                "Playback ready for %s title=%r package=%s",
-                                channel.name,
-                                sess_title,
-                                sess_pkg,
-                            )
-                        return True
-                if ps in (PlaybackState.UNKNOWN, PlaybackState.IDLE):
-                    seen_non_playing = True
-                    if can_relaunch:
-                        if non_playing_since is None:
-                            non_playing_since = loop.time()
-                        idle_elapsed = loop.time() - non_playing_since
-                        if not stale_pkg:
-                            wait = await _idle_resend_wait()
-                        else:
-                            wait = (
-                                first_relaunch_sec
-                                if relaunch_count == 0
-                                else relaunch_sec
-                            )
-                        if relaunch_count < max_relaunches and idle_elapsed >= wait:
-                            await _maybe_relaunch("idle")
-                        if (
-                            stale_pkg
-                            and last_relaunch_ok
-                            and relaunch_count >= max_relaunches
-                            and not splash_extended
-                            and float(options.tune_timeout_seconds or 0)
-                            >= _STALE_SPLASH_GRACE_MIN_TIMEOUT
-                        ):
-                            extra = _STALE_SPLASH_GRACE_SECONDS
-                            deadline = max(deadline, loop.time() + extra)
-                            splash_extended = True
-                            logger.info(
-                                "Extending splash wait for %s by %.0fs after %s idle relaunches",
-                                channel.name,
-                                extra,
-                                relaunch_count,
-                            )
-                    elif ps == PlaybackState.UNKNOWN:
-                        non_playing_since = None
-                        if playback_unknown_since is None:
-                            playback_unknown_since = loop.time()
-                        elif loop.time() - playback_unknown_since > 3.0:
-                            use_playback = False
-                    else:
-                        playback_unknown_since = None
-                        if playback_idle_since is None:
-                            playback_idle_since = loop.time()
-                        elif loop.time() - playback_idle_since > 3.0:
-                            use_playback = False
-                else:
-                    playback_unknown_since = None
-                    playback_idle_since = None
-
-            # While still waiting on a usable playback signal, do not accept on
-            # foreground alone (avoids opening the HDMI stream on splash/home).
-            if not use_playback:
-                # In-app channel changes do not emit a fresh foreground event.
-                # DirecTV leftover PLAYING must not fall through to this path.
-                if (
-                    same_app_switch
-                    and not stale_playing
-                    and loop.time() - launch_at >= same_app_ready_delay
-                ):
-                    return True
-                if not stale_playing:
-                    app = await _foreground_package()
-                    if app and app in targets:
-                        return True
-
-            poll = 0.75
-            if can_relaunch and relaunch_count < max_relaunches:
-                if not stale_pkg:
-                    wait = await _idle_resend_wait()
-                else:
-                    wait = first_relaunch_sec if relaunch_count == 0 else relaunch_sec
-                due_in = wait - (loop.time() - launch_at)
-                if due_in > 0:
-                    poll = min(poll, max(0.05, due_in))
-            elif splash_extended:
-                poll = min(poll, 0.4)
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(poll, remaining))
-
-        # DirecTV leftover PLAYING / continue-watching / splash must not pass.
-        if stale_pkg and not saw_playing:
-            return await _not_ready()
-        if same_app_switch:
-            return True
-        if relaunched and not saw_playing:
-            return await _not_ready()
-        app = await _foreground_package()
-        if app and app in targets:
-            return True
-        return await _not_ready()
 
     async def _effective_capabilities(self, backend: ControlBackend) -> Capabilities:
         """Prefer live Agent permission flags when available; merge hybrid keys."""

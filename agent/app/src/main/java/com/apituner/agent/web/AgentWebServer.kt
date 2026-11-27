@@ -20,6 +20,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import fi.iki.elonen.NanoHTTPD
 import java.io.File
+import java.security.MessageDigest
 
 class AgentWebServer(
     port: Int,
@@ -104,9 +105,7 @@ class AgentWebServer(
 
     private fun authorized(session: IHTTPSession): Boolean {
         val token = AgentPrefs.getToken(context)
-        if (token.isEmpty()) return true
-        val provided = session.headers["x-auth-token"]
-        return provided == token
+        return tokensMatch(token, session.headers["x-auth-token"])
     }
 
     private fun body(posted: Map<String, String>): JsonObject {
@@ -281,6 +280,7 @@ class AgentWebServer(
             apkFile = File(apkDir, "uploaded_${System.currentTimeMillis()}.apk")
             File(temp).copyTo(apkFile!!, overwrite = true)
             File(temp).delete()
+            pruneOldApks(apkDir, keep = apkFile!!)
             val ok = appLauncher.installApkFromFile(apkFile!!)
             json(mapOf("success" to ok, "message" to if (ok) "install dialog opened" else "failed"))
         } catch (e: Exception) {
@@ -355,8 +355,8 @@ class AgentWebServer(
               <div class="card">
                 <h2>Device ready</h2>
                 <p>This Android TV device is controllable by APITuner over HTTP on port <code>${AgentPrefs.DEFAULT_PORT}</code>.</p>
-                <div class="row"><span class="label">Model</span><code>${Build.MANUFACTURER} ${Build.MODEL}</code></div>
-                <div class="row"><span class="label">Android</span><code>${Build.VERSION.RELEASE}</code></div>
+                <div class="row"><span class="label">Model</span><code>${escapeHtml("${Build.MANUFACTURER} ${Build.MODEL}")}</code></div>
+                <div class="row"><span class="label">Android</span><code>${escapeHtml(Build.VERSION.RELEASE)}</code></div>
                 <div class="row"><span class="label">Backend</span><code>http_agent</code></div>
               </div>
               <div class="card">
@@ -370,4 +370,43 @@ class AgentWebServer(
 
     private fun json(obj: Any?, status: Response.Status = Response.Status.OK): Response =
         newFixedLengthResponse(status, "application/json", gson.toJson(obj))
+
+    companion object {
+        internal fun tokensMatch(expected: String, provided: String?): Boolean {
+            if (expected.isEmpty()) return true
+            if (provided == null) return false
+            return MessageDigest.isEqual(
+                expected.toByteArray(Charsets.UTF_8),
+                provided.toByteArray(Charsets.UTF_8),
+            )
+        }
+
+        internal fun pruneOldApks(apkDir: File, keep: File) {
+            val keepPath = keep.absolutePath
+            apkDir.listFiles()?.forEach { file ->
+                if (file.isFile && file.name.endsWith(".apk") && file.absolutePath != keepPath) {
+                    try {
+                        file.delete()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        }
+
+        internal fun escapeHtml(raw: String?): String {
+            if (raw.isNullOrEmpty()) return ""
+            val sb = StringBuilder(raw.length)
+            for (ch in raw) {
+                when (ch) {
+                    '&' -> sb.append("&amp;")
+                    '<' -> sb.append("&lt;")
+                    '>' -> sb.append("&gt;")
+                    '"' -> sb.append("&quot;")
+                    '\'' -> sb.append("&#39;")
+                    else -> sb.append(ch)
+                }
+            }
+            return sb.toString()
+        }
+    }
 }

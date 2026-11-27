@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from .backends.base import ControlBackend
 from .models import Channel, Tuner

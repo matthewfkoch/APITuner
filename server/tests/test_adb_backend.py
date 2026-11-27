@@ -147,3 +147,30 @@ async def test_factory_builds_adb(tmp_path: Path):
         app_list=True,
         install=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_launch_shell_quotes_metacharacters():
+    """Single quotes and shell metacharacters must be safely quoted."""
+    backend = FakeAdbBackend()
+    await backend.launch(
+        package="com.example.app",
+        deeplink="https://example.com/watch?x=1'&y=$(id)",
+        extras="k:v';reboot",
+    )
+    assert len(backend.shell_cmds) == 1
+    cmd = backend.shell_cmds[0]
+    import shlex
+
+    tokens = shlex.split(cmd)
+    assert tokens[:6] == [
+        "am",
+        "start",
+        "-W",
+        "-a",
+        "android.intent.action.VIEW",
+        "-d",
+    ]
+    assert tokens[6] == "https://example.com/watch?x=1'&y=$(id)"
+    assert tokens[7] == "com.example.app"
+    assert tokens[8:] == ["--es", "k", "v';reboot"]

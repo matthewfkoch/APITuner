@@ -50,7 +50,7 @@ def test_validate_unique_ids_raises():
         validate_unique_ids(
             [_channel(5, "ESPN", cid="x" * 32), _channel(5, "NBC", cid="x" * 32)]
         )
-        assert False, "expected ChannelValidationError"
+        raise AssertionError("expected ChannelValidationError")
     except ChannelValidationError as exc:
         assert "x" * 32 in str(exc)
 
@@ -174,7 +174,7 @@ def test_import_null_number_without_sort_order_is_clear(tmp_path):
             ],
             replace=True,
         )
-        assert False, "expected ChannelValidationError"
+        raise AssertionError("expected ChannelValidationError")
     except ChannelValidationError as exc:
         msg = str(exc)
         assert "WSVN 7" in msg

@@ -148,3 +148,26 @@ def test_rewrite_fdl_xmltv_maps_two_digit_unhyphenated_channel_ids():
     assert "College Football: Lindenwood vs Gardner-Webb" in programmes
     assert f'channel="{ch_aiv1.id}"' in programmes
     assert "Prime Game" in programmes
+
+
+def test_rewrite_fdl_xmltv_rejects_xml_entities():
+    from apituner.hdhr.xmltv import rewrite_fdl_xmltv
+
+    xxe = """<?xml version="1.0"?>
+<!DOCTYPE tv [<!ENTITY boom "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">]>
+<tv>
+  <channel id="lane.1"><display-name>Fruit Lane 1</display-name></channel>
+  <programme start="20260812200000 +0000" stop="20260812230000 +0000" channel="lane.1">
+    <title>&boom;</title>
+  </programme>
+</tv>
+"""
+    ch_lane = Channel(
+        id="laneidlaneidlaneidlaneidlaneidlanei",
+        number=9000,
+        name="Fruit Lane 1",
+        package_name="com.apple.atve.androidtv.appletv",
+        url="http://192.0.2.40:6655/whatson/1?include=deeplink",
+        source="fruitdeeplinks",
+    )
+    assert rewrite_fdl_xmltv(xxe, [ch_lane]) == ""

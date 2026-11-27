@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import socket
 import struct
@@ -182,6 +183,18 @@ def _local_ipv4() -> str:
         sock.close()
 
 
+def _is_non_routable_host(host: Optional[str]) -> bool:
+    """True for empty, localhost, loopback, or wildcard hosts unsuitable for LAN SSDP."""
+    cleaned = (host or "").strip().lower()
+    if not cleaned or cleaned == "localhost":
+        return True
+    try:
+        addr = ipaddress.ip_address(cleaned)
+        return addr.is_loopback or addr.is_unspecified
+    except ValueError:
+        return False
+
+
 def _http_port_from_base(base_url: str, fallback: int) -> int:
     parts = urlsplit(base_url)
     if parts.port:
@@ -236,9 +249,11 @@ class HdhrDiscoveryService:
     def _build_ssdp_response(self, identity: DiscoverIdentity, st: str) -> bytes:
         usn_uuid = f"uuid:{identity.device_id_hex.upper()}"
         location = identity.device_xml_url
-        # Prefer advertised BaseURL host; fall back to detected LAN IP.
+        # Prefer a LAN-routable advertised BaseURL host; fall back to detected LAN IP
+        # when seeded with loopback (e.g. 127.0.0.1) or unspecified addresses.
         try:
-            host = urlsplit(identity.base_url).hostname or _local_ipv4()
+            parsed_host = urlsplit(identity.base_url).hostname
+            host = _local_ipv4() if _is_non_routable_host(parsed_host) else parsed_host
             port = _http_port_from_base(identity.base_url, self._http_port)
             location = f"http://{host}:{port}/device.xml"
         except Exception:  # noqa: BLE001

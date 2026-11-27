@@ -243,7 +243,7 @@ def _match_channels(
         new_counts = Counter(new_keys)
         unique_existing = {
             value: channel
-            for value, channel in zip(old_keys, existing)
+            for value, channel in zip(old_keys, existing, strict=True)
             if value and old_counts[value] == 1 and channel.id not in claimed
         }
         for index, value in enumerate(new_keys):

@@ -21,6 +21,10 @@ COPY apituner ./apituner
 VOLUME ["/data"]
 EXPOSE 6592
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${APITUNER_PORT}/api/status" >/dev/null || exit 1
+
 # Host networking is recommended (see docker-compose) so mDNS + device
 # discovery works; the app binds to APITUNER_PORT on all interfaces.
-CMD ["sh", "-c", "uvicorn apituner.main:app --host 0.0.0.0 --port ${APITUNER_PORT}"]
+# Use exec so uvicorn runs as PID 1 and receives SIGTERM for clean shutdown.
+CMD ["sh", "-c", "exec uvicorn apituner.main:app --host 0.0.0.0 --port ${APITUNER_PORT}"]

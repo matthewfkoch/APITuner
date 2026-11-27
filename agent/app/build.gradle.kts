@@ -51,6 +51,10 @@ android {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -63,4 +67,6 @@ dependencies {
 
     // JSON
     implementation("com.google.code.gson:gson:2.14.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

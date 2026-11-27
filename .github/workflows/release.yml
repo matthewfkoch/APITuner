@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: apituner-release
-  queue: max
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -44,6 +44,11 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME must match Agent versionName $version (expected v$version)."
             exit 1
           fi
+          server_version="$(sed -nE 's/^__version__ = "([^"]+)"$/\1/p' server/apituner/__init__.py)"
+          if [[ "$server_version" != "$version" ]]; then
+            echo "::error::Server __version__ ($server_version) must match Agent versionName ($version)."
+            exit 1
+          fi
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             # Stable and prerelease APKs share the same Android application ID.
             while IFS= read -r tag; do
@@ -67,10 +72,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - name: Test server and companion contract
+          cache: pip
+          cache-dependency-path: server/requirements*.txt
+      - name: Lint and test server, web UI, and companion contract
         run: |
           pip install -r server/requirements.txt -r server/requirements-dev.txt
+          (cd server && ruff check apituner tests)
           python -m pytest server/tests integrations/fastchannels/test_external_player.py -q
+          node --test server/tests/web/*.test.cjs
 
   build-agent:
     needs: validate
@@ -145,6 +154,9 @@ jobs:
         run: |
           echo "::error::Tagged releases require the existing release signing key."
           exit 1
+
+      - name: Run Agent unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
 
       - name: Build release APK
         if: steps.signing.outputs.enabled == 'true'

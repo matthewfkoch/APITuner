@@ -9,6 +9,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-11-12
+
+### Added
+- Channel key macros support bounded decimal waits.
+
+### Fixed
+- Settings section titles align with their field columns.
+- FruitDeepLinks sync preserves unique channel identities, dial positions, and guide mappings.
+- Package-only Google TV tuning wakes the device and verifies the foreground app.
+- Channel macros verify the selected profile before continuing.
+- Dragging a text selection onto a modal backdrop leaves the modal open.
+
+### Changed
+- Updated Agent build dependencies and server dependencies.
+
 ## [0.1.34] - 2026-10-19
 
 ### Changed
@@ -344,7 +359,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - mDNS discovery for Android TV Remote and Agent services
 - Tuner pool orchestration with capability-aware selection
 
-[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.32...HEAD
+[Unreleased]: https://github.com/matthewfkoch/APITuner/compare/v0.1.35...HEAD
+[0.1.35]: https://github.com/matthewfkoch/APITuner/compare/v0.1.34...v0.1.35
 [0.1.32]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.32
 [0.1.31]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.31
 [0.1.30]: https://github.com/matthewfkoch/APITuner/releases/tag/v0.1.30

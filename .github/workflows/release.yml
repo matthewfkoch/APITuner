@@ -64,7 +64,7 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Test server and companion contract
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -258,21 +258,21 @@ jobs:
           fi
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push
         id: docker
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./server
           file: ./server/Dockerfile
@@ -326,7 +326,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download APK
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: agent-apk
 
@@ -365,7 +365,7 @@ jobs:
 
       - name: Publish release
         id: release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: ${{ env.RELEASES_REPO }}
           token: ${{ secrets.RELEASES_REPO_TOKEN }}
@@ -394,7 +394,6 @@ jobs:
 
             Prereleases require the explicit version tag shown above.
             `:latest` tracks stable releases only.
-
             ## FastChannels (optional)
 
             Use a FastChannels build with **Bridge → External tuners** and install
@@ -406,8 +405,6 @@ jobs:
             ${{ needs.build-agent.outputs.apk_name }}
             latest.json
             docs/FASTCHANNELS.md
-            docs/RELEASE-0.1.35-fastchannels.1.md
-            integrations/fastchannels/external-player-v1.patch
 
       - name: Job summary
         if: always()
@@ -450,7 +447,7 @@ jobs:
       packages: write
     steps:
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}

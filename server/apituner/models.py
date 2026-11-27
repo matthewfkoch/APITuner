@@ -7,7 +7,7 @@ import secrets
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator, model_validator
 
 from .channel_numbers import normalize_channel_number
 from .dynamic_url import DEFAULT_ATTEMPTS, DEFAULT_TIMEOUT
@@ -130,12 +130,14 @@ class Channel(BaseModel):
 
     @field_validator("key_macro", mode="before")
     @classmethod
-    def _normalize_key_macro_field(cls, value: object) -> object:
-        from .keys import normalize_key_macro
+    def _normalize_key_macro_field(cls, value: object, info: ValidationInfo) -> object:
+        from .keys import normalize_key_macro, validate_key_macro_waits
 
         if value is None or value == "":
             return None
         normalized = normalize_key_macro(value)
+        if not (info.context or {}).get("loading_saved_config"):
+            validate_key_macro_waits(normalized)
         return normalized or None
 
 
@@ -220,7 +222,7 @@ class GlobalOptions(BaseModel):
     fruitdeeplinks_url: Optional[str] = None
     fruitdeeplinks_profile: Literal["google_tv", "fire"] = "google_tv"
     fruitdeeplinks_start_number: int = 9000
-    fruitdeeplinks_xmltv_path: str = "/xmltv/adb"
+    fruitdeeplinks_xmltv_path: str = "/out/adb_lanes.xml"
     fruitdeeplinks_sync_seconds: float = 0.0
 
     @field_validator("dynamic_url_timeout", mode="before")
@@ -288,10 +290,10 @@ class GlobalOptions(BaseModel):
     @classmethod
     def _fdl_xmltv_path(cls, value: object) -> object:
         if value is None or value == "":
-            return "/xmltv/adb"
+            return "/out/adb_lanes.xml"
         if isinstance(value, str):
             stripped = value.strip()
-            return stripped or "/xmltv/adb"
+            return stripped or "/out/adb_lanes.xml"
         return value
 
     @field_validator("fruitdeeplinks_profile", mode="before")

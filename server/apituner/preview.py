@@ -79,6 +79,14 @@ async def grab_preview_jpeg(
                 await proc.communicate()
                 logger.debug("preview jpeg timed out for %s", stream_url)
                 return None
+            except asyncio.CancelledError:
+                if proc.returncode is None:
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                await proc.communicate()
+                raise
             if proc.returncode != 0 or not out.is_file():
                 err = (stderr or b"").decode("utf-8", errors="replace")[:240]
                 logger.debug("preview jpeg failed: %s", err)

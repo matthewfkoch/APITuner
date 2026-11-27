@@ -37,7 +37,12 @@ from .dynamic_url import (
     looks_like_dynamic_url,
     resolve_dynamic_url,
 )
-from .keys import key_requires_dpad, normalize_key_macro
+from .keys import (
+    key_requires_dpad,
+    normalize_key_macro,
+    parse_key_macro_sleep,
+    validate_key_macro_waits,
+)
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
 from .packages import package_candidates, package_try_order
 from .stream import StreamRelay
@@ -499,8 +504,8 @@ class TunerManager:
         configs = self._store.config.configurations
         if resolve_app_play_config(channel, configs) is not None:
             return True
-        if channel.key_macro:
-            return any(key_requires_dpad(k) for k in channel.key_macro)
+        if any(key_requires_dpad(key) for key in channel.key_macro or ()):
+            return True
         try:
             overlay = resolve_tune_configuration(channel, configs)
         except ConfigInterpreterError:
@@ -838,6 +843,11 @@ class TunerManager:
         overlay: Optional[TuneConfiguration] = None,
         command_backend: Optional[ControlBackend] = None,
     ) -> None:
+        try:
+            validate_key_macro_waits(normalize_key_macro(channel.key_macro))
+        except ValueError as exc:
+            raise TuneFailed(f"Channel {channel.number} ({channel.name}): {exc}") from exc
+
         loop = asyncio.get_event_loop()
         t0 = loop.time()
         cmd_be = command_backend or backend
@@ -952,6 +962,32 @@ class TunerManager:
         inferred = packages_for(infer_provider(launch_url), profile=profile)
         fallbacks = merge_package_try_order(fallbacks, inferred)
 
+        package_only = not (
+            (launch_url and str(launch_url).strip())
+            or (channel.component and str(channel.component).strip())
+            or (channel.extra_string and str(channel.extra_string).strip())
+            or (
+                channel.action
+                and channel.action
+                not in (
+                    "android.intent.action.VIEW",
+                    "android.intent.action.MAIN",
+                )
+            )
+        )
+        if package_only:
+            await self._wake_device(cmd_backend)
+
+        remote_foreground = (
+            cmd_backend.keys_backend
+            if package_only
+            and tuner.keys_control is not None
+            and tuner.keys_control.type == "androidtv_remote"
+            and isinstance(cmd_backend, SplitControlBackend)
+            and cmd_backend.keys_backend.capabilities.current_app
+            else None
+        )
+
         if overlay is not None and overlay.pre_tune_commands:
             try:
                 await run_commands(
@@ -966,9 +1002,10 @@ class TunerManager:
                 raise TuneFailed(str(exc)) from exc
 
         prior_app: Optional[str] = None
-        if backend.capabilities.current_app:
+        foreground_source = remote_foreground or backend
+        if foreground_source.capabilities.current_app:
             try:
-                prior_app = await backend.current_app()
+                prior_app = await foreground_source.current_app()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -998,7 +1035,7 @@ class TunerManager:
             and prior_app in set(fallbacks)
             and leftover_state != PlaybackState.PLAYING
         )
-        if stuck_splash:
+        if stuck_splash and not package_only:
             logger.info(
                 "HOME before deeplink on %s — %s open but not playing",
                 tuner.name,
@@ -1075,7 +1112,8 @@ class TunerManager:
             relaunch=relaunch,
             leftover_title=leftover_title,
             failure=not_ready,
-            foreground_backend=cmd_backend,
+            foreground_backend=remote_foreground or cmd_backend,
+            prefer_foreground_backend=remote_foreground is not None,
         )
         if not ready:
             raise TuneFailed(
@@ -1084,8 +1122,12 @@ class TunerManager:
                 else f"channel {channel.number} not ready within timeout"
             )
 
+        whos_status: Optional[str] = None
         if overlay is not None and overlay.global_options.check_for_and_clear_whos_watching_prompts:
-            await self._clear_whos_watching(tuner, cmd_backend)
+            whos_status = await self._clear_whos_watching(tuner, cmd_backend, channel)
+
+        if whos_status == "ocr_cleared" and channel.key_macro:
+            await asyncio.sleep(3.0)
 
         await self._send_key_macro(channel, cmd_backend)
 
@@ -1109,12 +1151,8 @@ class TunerManager:
                 await asyncio.sleep(wait_after)
         return chosen_pkg
 
-    async def _prepare_device_for_app_play(self, backend: ControlBackend) -> None:
-        """Wake the stick and return to HOME before App Play D-pad scripts.
-
-        Google TV ambient / screensaver eats directional keys (often lands in
-        screensaver settings). Fire is usually fine but HOME is still cheap.
-        """
+    async def _wake_device(self, backend: ControlBackend) -> None:
+        """Wake the stick without navigating HOME."""
         try:
             wake = getattr(backend, "wake", None)
             if callable(wake):
@@ -1127,7 +1165,15 @@ class TunerManager:
                 except Exception:  # noqa: BLE001
                     pass
         except Exception as exc:  # noqa: BLE001
-            logger.debug("App Play wake skipped: %s", exc)
+            logger.debug("Wake skipped: %s", exc)
+
+    async def _prepare_device_for_app_play(self, backend: ControlBackend) -> None:
+        """Wake the stick and return to HOME before App Play D-pad scripts.
+
+        Google TV ambient / screensaver eats directional keys (often lands in
+        screensaver settings). Fire is usually fine but HOME is still cheap.
+        """
+        await self._wake_device(backend)
         try:
             await backend.send_key("HOME")
             await asyncio.sleep(1.0)
@@ -1203,7 +1249,7 @@ class TunerManager:
             raise TuneFailed(str(exc)) from exc
 
         if cfg_opts.check_for_and_clear_whos_watching_prompts:
-            await self._clear_whos_watching(tuner, cmd_backend)
+            await self._clear_whos_watching(tuner, cmd_backend, channel)
 
         await self._send_key_macro(channel, cmd_backend)
 
@@ -1236,8 +1282,8 @@ class TunerManager:
         return working_pkg
 
     async def _clear_whos_watching(
-        self, tuner: Tuner, cmd_backend: ControlBackend
-    ) -> None:
+        self, tuner: Tuner, cmd_backend: ControlBackend, channel: Channel
+    ) -> str:
         caps = await self._effective_capabilities(cmd_backend)
 
         async def _send(key: str) -> None:
@@ -1258,6 +1304,12 @@ class TunerManager:
                 f"Who's-watching clear on {tuner.name} requires a D-pad keys "
                 "backend; set keys_control to androidtv_remote, firetv_rest, or adb"
             )
+        if status == "prompt_unverified" and channel.key_macro:
+            raise TuneFailed(
+                f"Could not verify profile selection on {tuner.name} "
+                f"before running the key macro for channel {channel.number}"
+            )
+        return status
 
     async def _send_key_macro(
         self, channel: Channel, cmd_backend: ControlBackend
@@ -1265,20 +1317,27 @@ class TunerManager:
         keys = normalize_key_macro(channel.key_macro)
         if not keys:
             return
-        caps = await self._effective_capabilities(cmd_backend)
-        needs_dpad = any(key_requires_dpad(k) for k in keys)
-        if needs_dpad and not caps.dpad:
-            raise TuneFailed(
-                f"Channel {channel.number} ({channel.name}) key_macro {keys} "
-                "requires a D-pad keys backend; set keys_control to "
-                "androidtv_remote, firetv_rest, or adb"
-            )
-        if not caps.keys and not caps.dpad:
-            raise TuneFailed(
-                f"Channel {channel.number} ({channel.name}) key_macro requires "
-                "a keys-capable backend"
-            )
+        real_keys = [k for k in keys if parse_key_macro_sleep(k) is None]
+        if real_keys:
+            caps = await self._effective_capabilities(cmd_backend)
+            needs_dpad = any(key_requires_dpad(k) for k in real_keys)
+            if needs_dpad and not caps.dpad:
+                raise TuneFailed(
+                    f"Channel {channel.number} ({channel.name}) key_macro {keys} "
+                    "requires a D-pad keys backend; set keys_control to "
+                    "androidtv_remote, firetv_rest, or adb"
+                )
+            if not caps.keys and not caps.dpad:
+                raise TuneFailed(
+                    f"Channel {channel.number} ({channel.name}) key_macro requires "
+                    "a keys-capable backend"
+                )
         for key in keys:
+            sleep_sec = parse_key_macro_sleep(key)
+            if sleep_sec is not None:
+                if sleep_sec > 0:
+                    await asyncio.sleep(float(sleep_sec))
+                continue
             try:
                 await cmd_backend.send_key(key)
             except Exception as exc:  # noqa: BLE001
@@ -1301,6 +1360,7 @@ class TunerManager:
         leftover_title: Optional[str] = None,
         failure: Optional[list[str]] = None,
         foreground_backend: Optional[ControlBackend] = None,
+        prefer_foreground_backend: bool = False,
     ) -> bool:
         loop = asyncio.get_event_loop()
         caps = await self._effective_capabilities(backend)
@@ -1361,14 +1421,17 @@ class TunerManager:
             return text or None
 
         async def _foreground_package() -> Optional[str]:
-            # Agent first. A paired remote fills in when Usage Access has no
-            # package. A remote that is not connected must not fail the tune.
+            extra = foreground_backend if foreground_backend is not backend else None
+            if prefer_foreground_backend and extra is not None:
+                app = await _read_foreground(extra)
+                if app:
+                    return app
+                extra = None
             if caps.current_app:
                 app = await _read_foreground(backend)
                 if app:
                     return app
-            extra = foreground_backend
-            if extra is not None and extra is not backend:
+            if extra is not None:
                 return await _read_foreground(extra)
             return None
 

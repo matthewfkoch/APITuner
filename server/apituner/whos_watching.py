@@ -6,7 +6,6 @@ import asyncio
 import logging
 import re
 import shutil
-import time
 from typing import Awaitable, Callable, Optional
 
 from .preview import grab_preview_jpeg, have_ffmpeg
@@ -14,10 +13,11 @@ from .preview import grab_preview_jpeg, have_ffmpeg
 logger = logging.getLogger(__name__)
 
 # Wall-clock budget for the whole phase (grabs + OCR + key sleeps).
-DEFAULT_BUDGET_SECONDS = 3.5
-GRAB_TIMEOUT_SECONDS = 1.5
+DEFAULT_BUDGET_SECONDS = 6.5
+GRAB_TIMEOUT_SECONDS = 2.5
 MAX_SELECTS = 2
 SELECT_GAP_SECONDS = 0.45
+POST_SELECT_SETTLE_SECONDS = 1.8
 FALLBACK_SELECTS = 2
 
 SendKey = Callable[[str], Awaitable[None]]
@@ -56,24 +56,24 @@ async def grab_encoder_frame(
     """Capture one JPEG frame from an MPEG-TS HTTP encoder URL via ffmpeg."""
     return await grab_preview_jpeg(stream_url, timeout=timeout, width=960)
 
-def ocr_image_bytes(jpeg: bytes) -> str:
-    """OCR a JPEG/PNG byte blob; returns empty string when tesseract/Pillow unavailable."""
+def ocr_image_bytes(jpeg: bytes, *, timeout: float = 0) -> str | None:
+    """Return recognized text, or None when the frame could not be read."""
     if not jpeg or not _have_tesseract():
-        return ""
+        return None
     try:
         import pytesseract
         from PIL import Image
         import io
     except ImportError:
-        return ""
+        return None
     try:
         img = Image.open(io.BytesIO(jpeg))
         # Upscale a bit for TV UI text; grayscale helps tesseract.
         img = img.convert("L")
-        return pytesseract.image_to_string(img) or ""
+        return pytesseract.image_to_string(img, timeout=timeout) or ""
     except Exception as exc:  # noqa: BLE001
         logger.debug("OCR failed: %s", exc)
-        return ""
+        return None
 
 
 async def _timed_selects(send_key: SendKey, count: int, gap: float) -> None:
@@ -92,8 +92,7 @@ async def clear_whos_watching_prompt(
 ) -> str:
     """Attempt to clear a profile / who's-watching prompt.
 
-    Returns a short status token for logs:
-    ``ocr_cleared`` | ``ocr_absent`` | ``timed_fallback`` | ``skipped_no_dpad``.
+    Distinguish an unreadable initial frame from a known, unverified prompt.
     """
     if not has_dpad:
         logger.warning(
@@ -102,48 +101,54 @@ async def clear_whos_watching_prompt(
         )
         return "skipped_no_dpad"
 
-    deadline = time.monotonic() + max(0.5, float(budget_seconds))
     tools_ok = _have_ffmpeg() and _have_tesseract()
     if not tools_ok:
         logger.info("Who's-watching: ffmpeg/tesseract missing — timed DPAD fallback")
         await _timed_selects(send_key, FALLBACK_SELECTS, SELECT_GAP_SECONDS)
         return "timed_fallback"
 
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.5, float(budget_seconds))
     selects = 0
     saw_prompt = False
-    while time.monotonic() < deadline:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        frame = await grab_encoder_frame(
-            stream_url, timeout=min(GRAB_TIMEOUT_SECONDS, remaining)
-        )
-        if frame is None:
-            logger.info("Who's-watching: frame grab failed — timed DPAD fallback")
-            await _timed_selects(send_key, FALLBACK_SELECTS, SELECT_GAP_SECONDS)
-            return "timed_fallback"
+    retried_grab = False
+    try:
+        async with asyncio.timeout_at(deadline):
+            while (remaining := deadline - loop.time()) > 0:
+                frame = await grab_encoder_frame(
+                    stream_url, timeout=min(GRAB_TIMEOUT_SECONDS, remaining)
+                )
+                if frame is None:
+                    if saw_prompt or retried_grab:
+                        break
+                    retried_grab = True
+                    continue
 
-        text = await asyncio.to_thread(ocr_image_bytes, frame)
-        if not text_looks_like_whos_watching(text):
-            if saw_prompt:
-                logger.info("Who's-watching: prompt cleared via OCR")
-                return "ocr_cleared"
-            logger.info("Who's-watching: no prompt in frame (fast exit)")
-            return "ocr_absent"
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                text = await asyncio.to_thread(
+                    ocr_image_bytes, frame, timeout=remaining
+                )
+                if text is None:
+                    break
+                if not text_looks_like_whos_watching(text):
+                    if saw_prompt:
+                        logger.info("Who's-watching: prompt cleared after %d select(s)", selects)
+                        return "ocr_cleared"
+                    return "ocr_absent"
 
-        saw_prompt = True
-        if selects >= MAX_SELECTS:
-            break
-        if time.monotonic() >= deadline:
-            break
-        await send_key("DPAD_CENTER")
-        selects += 1
-        await asyncio.sleep(min(SELECT_GAP_SECONDS, max(0.0, deadline - time.monotonic())))
+                saw_prompt = True
+                if selects >= MAX_SELECTS or loop.time() >= deadline:
+                    break
+                await send_key("DPAD_CENTER")
+                selects += 1
+                await asyncio.sleep(POST_SELECT_SETTLE_SECONDS)
+    except TimeoutError:
+        logger.debug("Who's-watching: OCR deadline reached")
 
     if saw_prompt:
-        logger.info("Who's-watching: budget exhausted after %d select(s)", selects)
-        return "ocr_cleared" if selects else "timed_fallback"
-
-    # No successful OCR path — still try a quick fallback if we never got text.
-    await _timed_selects(send_key, FALLBACK_SELECTS, SELECT_GAP_SECONDS)
-    return "timed_fallback"
+        logger.warning("Who's-watching: prompt unverified after %d select(s)", selects)
+        return "prompt_unverified"
+    logger.warning("Who's-watching: encoder frame unreadable, skipping blind Select presses")
+    return "grab_failed"

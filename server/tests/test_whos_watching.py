@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from apituner.whos_watching import (
@@ -36,20 +38,14 @@ async def test_whos_watching_skipped_without_dpad():
 
 
 @pytest.mark.asyncio
-async def test_whos_watching_fallback_keys(monkeypatch):
+async def test_whos_watching_fallback_keys_when_tools_missing(monkeypatch):
     keys: list[str] = []
 
     async def send(k: str) -> None:
         keys.append(k)
 
-    async def no_frame(url: str, timeout: float = 1.5):
-        return None
-
-    monkeypatch.setattr(
-        "apituner.whos_watching.grab_encoder_frame", no_frame
-    )
-    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: True)
-    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: False)
+    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: False)
 
     status = await clear_whos_watching_prompt(
         stream_url="http://192.0.2.1/s",
@@ -59,6 +55,121 @@ async def test_whos_watching_fallback_keys(monkeypatch):
     )
     assert status == "timed_fallback"
     assert keys == ["DPAD_CENTER", "DPAD_CENTER"]
+
+
+@pytest.mark.asyncio
+async def test_whos_watching_grab_failed_skips_blind_keys(monkeypatch):
+    keys: list[str] = []
+    grabs = 0
+
+    async def send(k: str) -> None:
+        keys.append(k)
+
+    async def no_frame(url: str, timeout: float = 2.5):
+        nonlocal grabs
+        grabs += 1
+        return None
+
+    monkeypatch.setattr("apituner.whos_watching.grab_encoder_frame", no_frame)
+    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
+
+    status = await clear_whos_watching_prompt(
+        stream_url="http://192.0.2.1/s",
+        send_key=send,
+        has_dpad=True,
+        budget_seconds=2.0,
+    )
+    assert status == "grab_failed"
+    assert grabs == 2
+    assert keys == []
+
+
+@pytest.mark.asyncio
+async def test_whos_watching_one_click_prompt_clears_with_single_press(monkeypatch):
+    keys: list[str] = []
+    ocr_texts = iter(["Who's Watching?", "MLS Season Pass - Watch Live"])
+
+    async def send(k: str) -> None:
+        keys.append(k)
+
+    async def frame(url: str, timeout: float = 2.5):
+        return b"fake-jpeg"
+
+    monkeypatch.setattr("apituner.whos_watching.grab_encoder_frame", frame)
+    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "apituner.whos_watching.ocr_image_bytes",
+        lambda data, *, timeout: next(ocr_texts),
+    )
+
+    status = await clear_whos_watching_prompt(
+        stream_url="http://192.0.2.1/s",
+        send_key=send,
+        has_dpad=True,
+    )
+    assert status == "ocr_cleared"
+    assert keys == ["DPAD_CENTER"]
+
+
+@pytest.mark.asyncio
+async def test_whos_watching_two_click_prompt_clears_with_two_presses(monkeypatch):
+    keys: list[str] = []
+    ocr_texts = iter(["Who's Watching?", "Who's Watching?", "Now Playing HBO"])
+
+    async def send(k: str) -> None:
+        keys.append(k)
+
+    async def frame(url: str, timeout: float = 2.5):
+        return b"fake-jpeg"
+
+    monkeypatch.setattr("apituner.whos_watching.grab_encoder_frame", frame)
+    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "apituner.whos_watching.ocr_image_bytes",
+        lambda data, *, timeout: next(ocr_texts),
+    )
+
+    status = await clear_whos_watching_prompt(
+        stream_url="http://192.0.2.1/s",
+        send_key=send,
+        has_dpad=True,
+    )
+    assert status == "ocr_cleared"
+    assert keys == ["DPAD_CENTER", "DPAD_CENTER"]
+
+
+@pytest.mark.asyncio
+async def test_whos_watching_second_grab_timeout_does_not_fire_fallback(monkeypatch):
+    keys: list[str] = []
+    frames = iter([b"fake-jpeg", None])
+
+    async def send(k: str) -> None:
+        keys.append(k)
+
+    async def frame(url: str, timeout: float = 2.5):
+        return next(frames)
+
+    monkeypatch.setattr("apituner.whos_watching.grab_encoder_frame", frame)
+    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "apituner.whos_watching.ocr_image_bytes",
+        lambda data, *, timeout: "Who's Watching?",
+    )
+
+    status = await clear_whos_watching_prompt(
+        stream_url="http://192.0.2.1/s",
+        send_key=send,
+        has_dpad=True,
+    )
+    assert status == "prompt_unverified"
+    assert keys == ["DPAD_CENTER"]
 
 
 @pytest.mark.asyncio
@@ -76,7 +187,7 @@ async def test_whos_watching_ocr_absent_fast_exit(monkeypatch):
     monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
     monkeypatch.setattr(
         "apituner.whos_watching.ocr_image_bytes",
-        lambda data: "Now Playing Live Sports",
+        lambda data, *, timeout: "Now Playing Live Sports",
     )
 
     status = await clear_whos_watching_prompt(
@@ -86,3 +197,40 @@ async def test_whos_watching_ocr_absent_fast_exit(monkeypatch):
     )
     assert status == "ocr_absent"
     assert keys == []
+
+
+async def test_verification_grab_is_bounded_by_remaining_budget(monkeypatch):
+    keys = []
+    timeouts = []
+
+    async def send(key):
+        keys.append(key)
+
+    async def grab(url, *, timeout):
+        timeouts.append(timeout)
+        if len(timeouts) == 1:
+            return b"jpeg"
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr("apituner.whos_watching.grab_encoder_frame", grab)
+    monkeypatch.setattr("apituner.whos_watching._have_ffmpeg", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching._have_tesseract", lambda: True)
+    monkeypatch.setattr("apituner.whos_watching.POST_SELECT_SETTLE_SECONDS", 0.05)
+    monkeypatch.setattr(
+        "apituner.whos_watching.ocr_image_bytes",
+        lambda data, *, timeout: "Who's Watching?",
+    )
+
+    status = await asyncio.wait_for(
+        clear_whos_watching_prompt(
+            stream_url="http://192.0.2.1/s",
+            send_key=send,
+            has_dpad=True,
+            budget_seconds=0.5,
+        ),
+        timeout=2,
+    )
+    assert status == "prompt_unverified"
+    assert keys == ["DPAD_CENTER"]
+    assert len(timeouts) == 2
+    assert 0 < timeouts[1] < timeouts[0] <= 0.5

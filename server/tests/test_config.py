@@ -1,3 +1,8 @@
+import json
+
+import pytest
+from pydantic import ValidationError
+
 from apituner.channels import (
     ChannelValidationError,
     find_duplicate_ids,
@@ -5,7 +10,7 @@ from apituner.channels import (
     validate_unique_ids,
 )
 from apituner.config import ConfigStore
-from apituner.models import Channel
+from apituner.models import Channel, GlobalOptions
 
 
 def _channel(number: int, name: str = "Test", *, cid: str | None = None) -> Channel:
@@ -13,6 +18,24 @@ def _channel(number: int, name: str = "Test", *, cid: str | None = None) -> Chan
     if cid is not None:
         kwargs["id"] = cid
     return Channel(**kwargs)
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536])
+def test_config_load_recovers_legacy_invalid_hdhr_port(tmp_path, port):
+    store = ConfigStore(data_dir=tmp_path)
+    store.config.channels.append(_channel(5, cid="saved-channel"))
+    store.save()
+    config = json.loads(store.path.read_text())
+    config["options"]["hdhr_port"] = port
+    store.path.write_text(json.dumps(config))
+
+    restored = ConfigStore(data_dir=tmp_path)
+    assert restored.config.options.hdhr_port is None
+    assert restored.config.options.hdhr_device_id == store.config.options.hdhr_device_id
+    assert [channel.id for channel in restored.config.channels] == ["saved-channel"]
+    assert json.loads(store.path.read_text())["options"]["hdhr_port"] is None
+    with pytest.raises(ValidationError, match="hdhr_port"):
+        GlobalOptions(hdhr_port=port)
 
 
 def test_find_duplicate_ids():

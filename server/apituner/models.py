@@ -187,6 +187,7 @@ class GlobalOptions(BaseModel):
     # App Play / deeplink waits can exceed Channels' ~30s connect timeout. When on,
     # start the encoder MPEG-TS immediately while tune finishes (show tuning UI).
     stream_during_tune: bool = True
+    encoder_recovery_seconds: float = Field(default=10.0, ge=0, le=60)
     # When App Play channels are free on mixed fleets, prefer this D-pad path.
     # fire = adb / firetv_rest first; google_tv = androidtv_remote first; any = no preference.
     app_play_prefer: Literal["fire", "google_tv", "any"] = "fire"
@@ -199,7 +200,7 @@ class GlobalOptions(BaseModel):
     hdhr_friendly_name: str = "APITuner"
     hdhr_device_id: str = Field(default_factory=_new_hdhr_device_id)
     # When set, clients should use this port for HDHR URLs; None = same as main server.
-    hdhr_port: Optional[int] = None
+    hdhr_port: Optional[int] = Field(default=None, ge=1, le=65535)
     hdhr_ssdp_enabled: bool = True
     hdhr_udp_discovery_enabled: bool = True
 

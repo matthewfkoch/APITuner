@@ -115,14 +115,17 @@ class ConfigStore:
     def _load(self) -> AppConfig:
         had_device_id = False
         needs_id_migration = False
+        needs_port_migration = False
         if self.path.exists():
             try:
                 raw = json.loads(self.path.read_text())
-                had_device_id = bool(
-                    isinstance(raw, dict)
-                    and isinstance(raw.get("options"), dict)
-                    and raw["options"].get("hdhr_device_id")
-                )
+                options = raw.get("options") if isinstance(raw, dict) else None
+                if isinstance(options, dict):
+                    had_device_id = bool(options.get("hdhr_device_id"))
+                    port = options.get("hdhr_port")
+                    if isinstance(port, int) and not 1 <= port <= 65535:
+                        options["hdhr_port"] = None
+                        needs_port_migration = True
                 if isinstance(raw, dict):
                     for ch in raw.get("channels") or []:
                         if isinstance(ch, dict) and not (ch.get("id") or "").strip():
@@ -137,8 +140,7 @@ class ConfigStore:
                 config = AppConfig()
         else:
             config = AppConfig()
-        # Persist auto-generated HDHR DeviceID and migrated channel ids.
-        if not had_device_id or needs_id_migration:
+        if not had_device_id or needs_id_migration or needs_port_migration:
             self._config = config
             self.save()
         return config

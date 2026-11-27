@@ -40,6 +40,7 @@ from .dynamic_url import (
 from .keys import key_requires_dpad, normalize_key_macro
 from .models import Channel, GlobalOptions, TuneConfiguration, Tuner
 from .packages import package_candidates, package_try_order
+from .stream import StreamRelay
 from .whos_watching import clear_whos_watching_prompt
 
 _STALE_PLAYBACK_PACKAGES = frozenset(
@@ -273,6 +274,7 @@ class TunerManager:
         self._reaper_task: Optional[asyncio.Task] = None
         self._leases: dict[str, Lease] = {}
         self._release_tasks: dict[str, asyncio.Task] = {}
+        self.stream_relay = StreamRelay(self)
 
     # -- Config helpers --
 
@@ -1872,6 +1874,7 @@ class TunerManager:
             except asyncio.CancelledError:
                 pass
             self._reaper_task = None
+        await self.stream_relay.close()
         await asyncio.gather(*(self.release(lease) for lease in list(self._leases.values())))
         if self._release_tasks:
             await asyncio.gather(*list(self._release_tasks.values()))

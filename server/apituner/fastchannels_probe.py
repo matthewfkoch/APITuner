@@ -119,8 +119,15 @@ async def prepare_external(
         )
     except httpx.HTTPError:
         raise ProbeError("Could not reach the FastChannels external-player API") from None
+    if response.status_code == 503:
+        raise ProbeError(
+            "FastChannels returned HTTP 503. In FastChannels, open Bridge → External tuners "
+            "and enable Allow external tuners."
+        )
+    if response.status_code in (401, 403):
+        raise ProbeError(f"FastChannels rejected the external tuner token (HTTP {response.status_code}).")
     if response.status_code != 200:
-        raise ProbeError(f"External-player prepare returned HTTP {response.status_code}; check the companion patch and service token")
+        raise ProbeError(f"External-player prepare returned HTTP {response.status_code}")
     try:
         data = response.json()
     except ValueError:

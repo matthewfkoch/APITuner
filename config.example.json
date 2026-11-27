@@ -64,6 +64,7 @@
     "dynamic_url_attempts": 3,
     "stream_mode": "proxy",
     "stream_during_tune": true,
+    "encoder_recovery_seconds": 10.0,
     "app_play_prefer": "fire",
     "release_grace_seconds": 5.0,
     "stuck_tuner_timeout_seconds": 40.0,

@@ -143,7 +143,16 @@ document.getElementById("modal").addEventListener("keydown", (e) => {
   } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 document.querySelectorAll(".tools-disclosure").forEach((details) => {
-  details.addEventListener("toggle", () => { if (!details.open) closeCopyM3uMenu(); });
+  details.querySelector("summary").addEventListener("click", (event) => {
+    event.preventDefault();
+    details.open = !details.open;
+    if (details.open) positionChannelMenus();
+    else closeCopyM3uMenu();
+  });
+  details.addEventListener("toggle", () => {
+    if (details.open) positionChannelMenus();
+    else closeCopyM3uMenu();
+  });
   details.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { details.open = false; details.querySelector("summary").focus(); }
   });
@@ -279,6 +288,7 @@ function formatSkippedSummary(skipped, limit = 3) {
 
 function copyPlaylistUrl(url, okMessage) {
   closeCopyM3uMenu();
+  document.getElementById("copy-m3u-menu-btn").focus();
   copyToClipboard(url)
     .then(() => toast(okMessage))
     .catch(() => {
@@ -295,14 +305,31 @@ function closeCopyM3uMenu() {
   if (btn) btn.setAttribute("aria-expanded", "false");
 }
 
-function positionCopyM3uMenu() {
-  const btn = document.getElementById("copy-m3u-menu-btn");
+function positionMenu(button, menu) {
+  const anchor = button.getBoundingClientRect();
+  const viewport = document.documentElement;
+  const margin = 8;
+  const gap = 6;
+  const below = viewport.clientHeight - anchor.bottom - gap - margin;
+  const above = anchor.top - gap - margin;
+  menu.style.maxHeight = "";
+  const openAbove = menu.offsetHeight > below && above > below;
+  const height = Math.min(menu.offsetHeight, Math.max(0, openAbove ? above : below));
+  menu.style.maxHeight = `${height}px`;
+  menu.style.top = `${openAbove ? anchor.top - gap - height : anchor.bottom + gap}px`;
+  const maxLeft = viewport.clientWidth - menu.offsetWidth - margin;
+  const left = Math.min(anchor.right - menu.offsetWidth, maxLeft);
+  menu.style.left = `${Math.max(margin, left)}px`;
+}
+
+function positionChannelMenus() {
+  const tools = document.querySelector("#tab-channels.active .tools-disclosure[open]");
+  if (!tools) return;
+  positionMenu(tools.querySelector("summary"), tools.querySelector(".tools-panel"));
   const menu = document.getElementById("copy-m3u-menu");
-  if (!btn || !menu || menu.classList.contains("hidden")) return;
-  const r = btn.getBoundingClientRect();
-  menu.style.top = `${Math.round(r.bottom + 6)}px`;
-  menu.style.left = "auto";
-  menu.style.right = `${Math.max(8, Math.round(window.innerWidth - r.right))}px`;
+  if (!menu.classList.contains("hidden")) {
+    positionMenu(document.getElementById("copy-m3u-menu-btn"), menu);
+  }
 }
 
 function renderCopyM3uMenu(channels) {
@@ -339,7 +366,7 @@ document.getElementById("copy-m3u-menu-btn")?.addEventListener("click", (e) => {
   const willOpen = menu.classList.contains("hidden");
   menu.classList.toggle("hidden", !willOpen);
   btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
-  if (willOpen) positionCopyM3uMenu();
+  if (willOpen) positionChannelMenus();
 });
 document.addEventListener("click", (e) => {
   const wrap = document.getElementById("copy-m3u-menu-wrap");
@@ -351,13 +378,12 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeCopyM3uMenu();
 });
-window.addEventListener("resize", positionCopyM3uMenu);
-document.addEventListener("scroll", positionCopyM3uMenu, true);
+window.addEventListener("resize", positionChannelMenus);
+document.addEventListener("scroll", positionChannelMenus, true);
 
 // ============================ TUNERS ============================
 let cachedChannels = [];
 let cachedConfigs = [];
-let cachedAgentLatest = null;
 /** @type {null | {tuners: any[], channels: any[], summary: any}} */
 let packageCoverage = null;
 /** True when imported channels need D-pad (App Play, Max who’s-watching, key_macro). */
@@ -469,15 +495,6 @@ function updateDeviceState(card) {
   updateFleetSummary();
 }
 
-async function fetchAgentLatest() {
-  try {
-    cachedAgentLatest = await api.get("/api/agent/latest");
-  } catch (_) {
-    cachedAgentLatest = null;
-  }
-  return cachedAgentLatest;
-}
-
 async function loadTuners() {
   const list = document.getElementById("tuner-list");
   stopAllPreviews();
@@ -496,7 +513,6 @@ async function loadTuners() {
     toast(e.message, true);
     return;
   }
-  const latestPromise = fetchAgentLatest();
   document.getElementById("setup-help").open = !tuners.length;
   if (!tuners.length) {
     list.innerHTML = `
@@ -511,7 +527,11 @@ async function loadTuners() {
     list.querySelector("#empty-add-tuner")?.addEventListener("click", () => tunerForm(null));
     return;
   }
-  await latestPromise;
+  let agentLatest = null;
+  const latestPromise = tuners.some((t) => t.control.type === "http_agent")
+    ? api.get("/api/agent/latest").catch(() => null)
+    : Promise.resolve(null);
+  latestPromise.then((latest) => { agentLatest = latest; });
   list.innerHTML = "";
   fleetIssueSignature = "";
   for (const t of tuners) {
@@ -541,12 +561,11 @@ async function loadTuners() {
     card.dataset.needsKeys = String(needsKeysWarn);
     card.innerHTML = `
       <div class="device-overview">
-        <div class="device-identity"><h2>${escapeHtml(t.name)}</h2><span class="device-backend">${backendLabel}${keysLabel ? ` · ${keysLabel}` : ""}</span></div>
+        <div class="device-identity"><h2>${escapeHtml(t.name)}</h2><span class="device-backend">${backendLabel}${keysLabel ? ` · ${keysLabel}` : ""}</span><p class="device-issue hidden" data-issue></p></div>
         <div class="device-connection"><span class="eyebrow">Connection</span><span class="badge muted" data-health>Checking…</span>${t.enabled === false ? '<span class="badge">Disabled</span>' : ""}</div>
         <div class="device-activity"><span class="eyebrow">Activity</span><span data-activity>Checking…</span></div>
         <div class="device-actions"><button class="btn btn-sm hidden" data-next-action></button><button class="btn btn-sm" data-act="preview">Preview</button></div>
       </div>
-      <p class="device-issue hidden" data-issue></p>
       <details class="device-details"><summary>More <span class="sr-only">about ${escapeHtml(t.name)}</span></summary>
         <div class="device-detail-body">
           <div class="card-meta">
@@ -579,6 +598,7 @@ async function loadTuners() {
     const versionBadge = card.querySelector("[data-agent-version]");
     const updateBtn = card.querySelector('[data-act="update-agent"]');
     const grantBtn = card.querySelector('[data-act="grant-perms"]');
+    let agentInfo = null;
     const setHealth = (online) => {
       healthBadge.className = `badge ${online ? "on" : "off"}`;
       healthBadge.textContent = online ? "Reachable" : "Unreachable";
@@ -604,7 +624,7 @@ async function loadTuners() {
         if (updateBtn) updateBtn.classList.add("hidden");
         return;
       }
-      const latest = cachedAgentLatest;
+      const latest = agentLatest;
       const latestCode = latest && latest.versionCode != null ? Number(latest.versionCode) : null;
       const outdated = latestCode != null && code != null && code < latestCode;
       versionBadge.className = `badge ${outdated ? "warn" : ""}`;
@@ -618,7 +638,13 @@ async function loadTuners() {
         : `Installed Agent version ${name || "?"} (${code})`;
       if (updateBtn) updateBtn.classList.toggle("hidden", !outdated);
     };
+    if (isAgent) {
+      latestPromise.then((latest) => {
+        if (latest && agentInfo && card.isConnected) applyAgentVersion(agentInfo);
+      });
+    }
     const runHealthCheck = async () => {
+      agentInfo = null;
       healthBtn.disabled = true;
       healthBtn.textContent = "Checking…";
       healthBadge.className = "badge muted";
@@ -633,8 +659,8 @@ async function loadTuners() {
           await refreshCapabilityStatus(badges, t);
           if (isAgent) {
             try {
-              const info = await api.get(`/api/tuners/${t.id}/info`);
-              applyAgentVersion(info);
+              agentInfo = await api.get(`/api/tuners/${t.id}/info`);
+              applyAgentVersion(agentInfo);
             } catch (_) {
               applyAgentVersion(null);
             }
@@ -800,15 +826,12 @@ function openTunerPreview(tuner) {
 
   const img = node.querySelector(".preview-stream");
   const overlay = node.querySelector(".preview-overlay");
-  let pollTimer = null;
+  let previewTimer = null;
   let alive = true;
 
   const stop = () => {
     alive = false;
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
+    clearTimeout(previewTimer);
     if (img) {
       img.onload = null;
       img.onerror = null;
@@ -838,16 +861,21 @@ function openTunerPreview(tuner) {
       if (!alive || document.hidden) return;
       img.src = `/api/tuners/${encodeURIComponent(tuner.id)}/preview.jpg?t=${Date.now()}`;
     };
-    img.onload = () => markLive("Live");
-    img.onerror = () => markStatus("Preview unavailable — check encoder URL / ffmpeg", true);
+    img.onload = () => {
+      markLive("Live");
+      previewTimer = setTimeout(tick, 1500);
+    };
+    img.onerror = () => {
+      markStatus("Preview unavailable — check encoder URL / ffmpeg", true);
+      previewTimer = setTimeout(tick, 1500);
+    };
     tick();
-    pollTimer = setInterval(tick, 1500);
   };
 
   const startMjpeg = () => {
     markStatus("Connecting…");
     let settled = false;
-    const failTimer = setTimeout(() => {
+    previewTimer = setTimeout(() => {
       if (settled || !alive) return;
       img.removeAttribute("src");
       startJpegPoll();
@@ -855,13 +883,13 @@ function openTunerPreview(tuner) {
     img.onload = () => {
       if (!alive) return;
       settled = true;
-      clearTimeout(failTimer);
+      clearTimeout(previewTimer);
       markLive();
     };
     img.onerror = () => {
       if (!alive) return;
       settled = true;
-      clearTimeout(failTimer);
+      clearTimeout(previewTimer);
       img.removeAttribute("src");
       startJpegPoll();
     };
@@ -1316,11 +1344,6 @@ function channelMatchesQuery(c, q) {
   return hay.includes(q);
 }
 
-function coverageForChannel(c) {
-  if (!packageCoverage || !packageCoverage.channels) return null;
-  return packageCoverage.channels.find((r) => r.id === c.id) || null;
-}
-
 function packageWarnTitle(row) {
   if (!row) return "";
   if (row.status === "missing") {
@@ -1332,33 +1355,48 @@ function packageWarnTitle(row) {
   return "";
 }
 
-function renderChannels(channels) {
-  const tbody = document.querySelector("#channel-table tbody");
+function updateChannelCoverage(channels) {
   const q = (document.getElementById("channel-search")?.value || "").trim().toLowerCase();
-  const filtered = channels.filter((c) => channelMatchesQuery(c, q));
+  const rows = document.querySelectorAll("#channel-table [data-channel-id]");
   const countEl = document.getElementById("channel-count");
   const sum = packageCoverage && packageCoverage.summary;
   let countText = q
-    ? `Showing ${filtered.length} of ${channels.length}`
+    ? `Showing ${rows.length} of ${channels.length}`
     : `${channels.length} channel${channels.length === 1 ? "" : "s"}`;
   if (sum && (sum.channels_missing || sum.channels_partial)) {
     countText += ` · ${sum.channels_missing || 0} missing pkg · ${sum.channels_partial || 0} partial`;
   }
   if (countEl) countEl.textContent = countText;
+  const byId = new Map(channels.map((channel) => [channel.id, channel]));
+  const coverageById = new Map((packageCoverage?.channels || []).map((row) => [row.id, row]));
+  for (const row of rows) {
+    const channel = byId.get(row.dataset.channelId);
+    if (!channel) continue;
+    const coverage = coverageById.get(channel.id);
+    const warn = coverage?.status === "missing" || coverage?.status === "partial";
+    const configuration = APITunerUI.channelConfiguration(channel, coverage);
+    const badge = row.querySelector(".channel-config .badge");
+    row.classList.toggle("row-pkg-warn", warn);
+    badge.classList.toggle("warn", configuration.warning);
+    badge.textContent = configuration.label;
+    badge.title = warn ? packageWarnTitle(coverage) : "Package and deep link are available in Edit";
+  }
+}
+
+function renderChannels(channels) {
+  const tbody = document.querySelector("#channel-table tbody");
+  const q = (document.getElementById("channel-search")?.value || "").trim().toLowerCase();
+  const filtered = channels.filter((c) => channelMatchesQuery(c, q));
   tbody.innerHTML = "";
   if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="5"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import a list or add one."}</div></td></tr>`;
-    return;
   }
   for (const c of filtered) {
-    const cov = coverageForChannel(c);
-    const warn = cov && (cov.status === "missing" || cov.status === "partial");
-    const configuration = APITunerUI.channelConfiguration(c, cov);
-    const tr = el(`<tr class="row-clickable${warn ? " row-pkg-warn" : ""}" title="Edit channel">
+    const tr = el(`<tr class="row-clickable" data-channel-id="${escapeAttr(c.id)}" title="Edit channel">
       <td><span class="ch-num">${escapeHtml(c.number)}</span></td>
       <td><strong>${escapeHtml(c.name)}</strong></td>
       <td class="channel-provider">${escapeHtml(c.provider_name || "—")}</td>
-      <td class="channel-config"><span class="badge ${configuration.warning ? "warn" : ""}" title="${escapeAttr(warn ? packageWarnTitle(cov) : "Package and deep link are available in Edit")}">${configuration.label}</span></td>
+      <td class="channel-config"><span class="badge"></span></td>
       <td class="col-actions"><button class="btn btn-sm" data-edit aria-label="Edit ${escapeAttr(c.name)}">Edit</button> <button class="btn btn-sm btn-danger" data-del aria-label="Delete ${escapeAttr(c.name)}">Delete</button></td>
     </tr>`);
     tr.addEventListener("click", (e) => {
@@ -1377,6 +1415,7 @@ function renderChannels(channels) {
     });
     tbody.appendChild(tr);
   }
+  updateChannelCoverage(channels);
 }
 
 async function refreshPackageCoverage(quiet) {
@@ -1414,7 +1453,7 @@ async function loadChannels() {
   renderCopyM3uMenu(cachedChannels);
   renderChannels(cachedChannels);
   // Background package check (Agent app lists) — don't block the table.
-  refreshPackageCoverage(true).then(() => renderChannels(cachedChannels));
+  refreshPackageCoverage(true).then(() => updateChannelCoverage(cachedChannels));
 }
 
 document.getElementById("channel-search")?.addEventListener("input", () => {
@@ -1424,7 +1463,7 @@ document.getElementById("channel-search")?.addEventListener("input", () => {
 document.getElementById("check-packages-btn")?.addEventListener("click", async () => {
   toast("Checking installed apps on Agent tuners…");
   await refreshPackageCoverage(false);
-  renderChannels(cachedChannels);
+  updateChannelCoverage(cachedChannels);
 });
 
 function updatePackageFieldWarnings(form) {
@@ -1772,6 +1811,7 @@ const OPTION_FIELDS = [
   ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
   ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays the encoder; redirect sends clients to it"],
   ["stream_during_tune", "Stream during tune", "bool", null, "Start the encoder while App Play or deeplink playback wait runs so Channels does not time out"],
+  ["encoder_recovery_seconds", "Encoder recovery (s)", "number", null, "How long proxied streams wait for encoder video before ending (0–60 seconds, 0 disables recovery)"],
   ["app_play_prefer", "App Play stick preference", "select", [
     { value: "fire", label: "Fire Stick / ADB first" },
     { value: "google_tv", label: "Google TV / Chromecast first" },
@@ -1804,21 +1844,28 @@ const OPTION_FIELDS = [
   ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /xmltv/adb)"],
   ["fruitdeeplinks_sync_seconds", "FruitDeepLinks auto-sync (s)", "number", null, "0 = manual Sync only"],
 ];
+const optionsForm = document.getElementById("options-form");
+const saveOptionsButton = document.getElementById("save-options");
+let optionsDirty = false;
+let savingOptions = false;
+optionsForm.addEventListener("input", () => { optionsDirty = true; });
+
 async function loadOptions() {
-  const form = document.getElementById("options-form");
+  if (optionsDirty || savingOptions) return;
   let opts = {};
   try { opts = await api.get("/api/options"); } catch (e) { toast(e.message, true); return; }
+  if (optionsDirty || savingOptions) return;
   const fcUrl = document.getElementById("fastchannels-url");
   if (!fcUrl.value) fcUrl.value = opts.fastchannels_url || "";
-  form.innerHTML = "";
+  optionsForm.innerHTML = "";
   const groups = {};
   for (const [id, title] of [["integrations", "Integrations"], ["tuning", "Tuning behavior"], ["relay", "Stream relay"]]) {
     const group = el(`<fieldset class="settings-group"><legend>${title}</legend><div class="form-grid"></div></fieldset>`);
-    form.append(group); groups[id] = group.querySelector(".form-grid");
+    optionsForm.append(group); groups[id] = group.querySelector(".form-grid");
   }
   for (const [key, label, type, choices, hint] of OPTION_FIELDS) {
     const group = /^(hdhr_|channels_|xmltv_|fruitdeeplinks_|fastchannels_)/.test(key) ? groups.integrations
-      : /^(stream_mode|stream_during_tune|release_grace_seconds|stuck_tuner_timeout_seconds|tuner_idle_timeout_seconds)$/.test(key) ? groups.relay : groups.tuning;
+      : /^(stream_mode|stream_during_tune|encoder_recovery_seconds|release_grace_seconds|stuck_tuner_timeout_seconds|tuner_idle_timeout_seconds)$/.test(key) ? groups.relay : groups.tuning;
     if (type === "bool") {
       const row = el(`<div class="field checkbox"><input type="checkbox" name="${key}" ${opts[key] ? "checked" : ""} /><label>${label}</label></div>`);
       if (hint) row.appendChild(el(`<div class="hint">${hint}</div>`));
@@ -1838,30 +1885,39 @@ async function loadOptions() {
       group.appendChild(el(`<div class="field"><label>${label}</label><input type="text" name="${key}" value="${escapeAttr(val)}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
     } else {
       const val = opts[key] == null ? "" : opts[key];
-      group.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${val}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
+      const limits = key === "hdhr_port" ? 'min="1" max="65535" step="1"'
+        : key === "encoder_recovery_seconds" ? 'min="0" max="60" step="any"' : 'step="any"';
+      group.appendChild(el(`<div class="field"><label>${label}</label><input type="number" ${limits} name="${key}" value="${val}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
     }
   }
-  labelFields(form);
+  labelFields(optionsForm);
+  saveOptionsButton.disabled = false;
 }
-document.getElementById("save-options").addEventListener("click", async () => {
-  const form = document.getElementById("options-form");
+optionsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (saveOptionsButton.disabled) return;
   const payload = {};
   for (const [key, , type] of OPTION_FIELDS) {
-    const input = form.querySelector(`[name="${key}"]`);
+    const input = optionsForm.elements.namedItem(key);
     if (!input) continue;
     if (type === "bool") payload[key] = input.checked;
     else if (type === "number") {
-      const raw = String(input.value ?? "").trim();
-      const n = Number(raw);
-      payload[key] = Number.isFinite(n) ? n : null;
+      payload[key] = key === "hdhr_port" && input.value === "" ? null : Number(input.value);
     } else payload[key] = input.value;
   }
+  savingOptions = saveOptionsButton.disabled = true;
+  optionsDirty = false;
   try {
     await api.put("/api/options", payload);
-    toast("Settings saved (restart required for discovery changes)");
-    const status = await api.get("/api/status");
-    initSidebarUrls(status);
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    optionsDirty = true;
+    toast(e.message, true);
+    return;
+  } finally {
+    savingOptions = saveOptionsButton.disabled = false;
+  }
+  toast("Settings saved (restart required for discovery changes)");
+  api.get("/api/status").then(initSidebarUrls).catch((e) => toast(e.message, true));
 });
 
 document.getElementById("download-diagnostics").addEventListener("click", () => {
@@ -1885,7 +1941,7 @@ async function renderStatus() {
   }
 
   const active = data.tuners.filter((t) => t.locked).length;
-  const free = data.tuners.length - active;
+  const free = data.tuners.filter((t) => t.enabled !== false && !t.locked).length;
   const errors = data.tuners.filter((t) => t.last_error).length;
 
   const hdhrBits = data.hdhr && data.hdhr.enabled
@@ -1910,6 +1966,7 @@ async function renderStatus() {
   }
   list.innerHTML = "";
   for (const s of data.tuners) {
+    const activity = s.locked ? "In use" : s.enabled === false ? "Disabled" : "Idle";
     const card = el(`<article class="card ${s.locked ? "card-active" : ""}"></article>`);
     card.innerHTML = `
       <div class="card-head">
@@ -1920,7 +1977,7 @@ async function renderStatus() {
           </div>
           <div class="card-sub">${s.backend}${s.model ? " · " + escapeHtml(s.model) : ""}</div>
         </div>
-        <span class="badge ${s.locked ? "accent" : ""}">${s.locked ? "In use" : "Idle"}</span>
+        <span class="badge ${s.locked ? "accent" : ""}">${activity}</span>
       </div>
       <div class="card-meta">
         ${s.locked ? `<div class="card-row"><span class="label">Channel</span><span class="value"><strong>${s.channel_number ?? "?"}</strong> · ${escapeHtml(s.channel_name || "")}</span></div>` : ""}

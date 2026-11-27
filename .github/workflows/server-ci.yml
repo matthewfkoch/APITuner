@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "server/**"
+      - "integrations/fastchannels/**"
       - "docker-compose.yml"
       - ".github/workflows/server-ci.yml"
       - ".github/workflows/release.yml"
   pull_request:
     paths:
       - "server/**"
+      - "integrations/fastchannels/**"
       - "docker-compose.yml"
       - ".github/workflows/server-ci.yml"
       - ".github/workflows/release.yml"
@@ -28,6 +30,8 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: server/requirements*.txt
 
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
@@ -36,13 +40,46 @@ jobs:
         id: syntax
         run: python -m compileall -q apituner
 
-      - name: Tests
+      - name: Lint (ruff)
+        id: lint
+        run: ruff check apituner tests
+
+      - name: Python tests
         id: tests
-        run: pytest -q --junitxml=test-results.xml
+        run: python -m pytest -q tests ../integrations/fastchannels/test_external_player.py --junitxml=test-results.xml
+
+      - name: Web UI tests
+        id: web_tests
+        run: node --test tests/web/*.test.cjs
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
         id: docker
-        run: docker build -t apituner:ci .
+        uses: docker/build-push-action@v7
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          load: true
+          tags: apituner:ci
+          cache-from: type=gha,scope=server-ci
+          cache-to: type=gha,mode=max,scope=server-ci
+
+      - name: Smoke test Docker image
+        id: smoke
+        run: |
+          docker run --rm --entrypoint sh apituner:ci -c "command -v ffmpeg && command -v adb && command -v tesseract && python -c 'import apituner.main'"
+          cid="$(docker run -d -p 127.0.0.1:16592:6592 -e APITUNER_PORT=6592 apituner:ci)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:16592/api/status | grep -q '"version"'; then
+              exit 0
+            fi
+            sleep 0.5
+          done
+          docker logs "$cid"
+          exit 1
 
       - name: Job summary
         if: always()
@@ -78,8 +115,26 @@ jobs:
             test_line="❌ Tests did not complete"
           fi
 
-          if [[ "${{ steps.docker.outcome }}" == "success" ]]; then
-            docker_line="✅ Image built"
+          if [[ "${{ steps.lint.outcome }}" == "success" ]]; then
+            lint="✅ Clean"
+          elif [[ "${{ steps.lint.outcome }}" == "skipped" ]]; then
+            lint="⏭️ Skipped"
+          else
+            lint="❌ Issues"
+          fi
+
+          if [[ "${{ steps.web_tests.outcome }}" == "success" ]]; then
+            web_line="✅ Passed"
+          elif [[ "${{ steps.web_tests.outcome }}" == "skipped" ]]; then
+            web_line="⏭️ Skipped"
+          else
+            web_line="❌ Failed"
+          fi
+
+          if [[ "${{ steps.docker.outcome }}" == "success" && "${{ steps.smoke.outcome }}" == "success" ]]; then
+            docker_line="✅ Built & smoke-tested"
+          elif [[ "${{ steps.docker.outcome }}" == "success" ]]; then
+            docker_line="⚠️ Built (smoke test failed)"
           elif [[ "${{ steps.docker.outcome }}" == "skipped" ]]; then
             docker_line="⏭️ Skipped"
           else
@@ -94,7 +149,9 @@ jobs:
             echo "| **Status** | ${status} |"
             echo "| **Python** | 3.11 |"
             echo "| **Syntax check** | ${syntax} |"
-            echo "| **Docker build** | ${docker_line} |"
+            echo "| **Ruff lint** | ${lint} |"
+            echo "| **Web UI tests** | ${web_line} |"
+            echo "| **Docker** | ${docker_line} |"
             echo "| **Trigger** | \`${{ github.event_name }}\` on \`${{ github.ref_name }}\` |"
             echo "| **Commit** | [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
             echo ""

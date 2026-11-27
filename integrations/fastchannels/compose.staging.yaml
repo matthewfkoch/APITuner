@@ -1,0 +1,50 @@
+# Integrated staging: separately tagged companion and APITuner candidate images.
+# Deploy as a NEW Portainer stack named apituner-fc-staging.
+services:
+  fastchannels:
+    image: ${FC_STAGING_IMAGE:?Set the separately built patched image tag or digest}
+    pull_policy: never
+    restart: "no"
+    ports:
+      - "${FC_STAGING_BIND_IP:?Set the staging host LAN address}:5524:5523"
+    environment:
+      FC_EXTERNAL_PLAYER_TOKEN: ${FC_EXTERNAL_PLAYER_TOKEN:?Set a staging-only token}
+      DATABASE_URL: sqlite:////data/fastchannels.db
+      REDIS_URL: redis://localhost:6379/0
+      VERSION_CHECK_ENABLED: "0"
+    volumes:
+      - staging_data:/data
+    # Override upstream startup: no scheduler, scrapers, maintenance workers,
+    # source purge, shared Redis, production mounts or persistent ADB keys.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /data
+        redis-server --daemonize yes --save '' --appendonly no
+        attempts=0
+        until redis-cli ping >/dev/null 2>&1; do
+          attempts=$$((attempts + 1))
+          if [ "$$attempts" -ge 30 ]; then
+            echo 'Redis startup failed' >&2
+            exit 1
+          fi
+          sleep 1
+        done
+        cd /app
+        python -c 'from app import create_app; create_app()'
+        python /app/run_migrations.py
+        export FC_SCHEMA_READY=1
+        exec gunicorn --bind 0.0.0.0:5523 --worker-class gevent --workers 1 --timeout 120 --preload wsgi:app
+  apituner:
+    image: ${APITUNER_STAGING_IMAGE:-apituner:fastchannels-staging}
+    pull_policy: never
+    restart: "no"
+    ports:
+      - "${FC_STAGING_BIND_IP:?Set the staging host LAN address}:6593:6592"
+    environment:
+      FASTCHANNELS_TOKEN: ${FC_EXTERNAL_PLAYER_TOKEN:?Set a staging-only token}
+    volumes:
+      - apituner_staging_data:/data
+volumes:
+  staging_data:
+  apituner_staging_data:

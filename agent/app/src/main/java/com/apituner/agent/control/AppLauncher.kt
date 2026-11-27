@@ -100,7 +100,7 @@ class AppLauncher(val context: Context) {
         action: String?,
         data: String?,
         component: String?,
-        extras: Map<String, String>?,
+        extras: Map<String, Any>?,
         clearTask: Boolean = false,
     ): LaunchResult {
         return try {
@@ -126,7 +126,13 @@ class AppLauncher(val context: Context) {
                         Intent.FLAG_ACTIVITY_SINGLE_TOP
                 },
             )
-            extras?.forEach { (k, v) -> intent.putExtra(k, v) }
+            extras?.forEach { (k, v) ->
+                when (v) {
+                    is Boolean -> intent.putExtra(k, v)
+                    is String -> intent.putExtra(k, v)
+                    else -> return LaunchResult(false, "unsupported intent extra: $k")
+                }
+            }
 
             // Fall back to the plain launch intent if the explicit intent can't resolve.
             if (intent.resolveActivity(context.packageManager) == null && component.isNullOrEmpty()) {
@@ -188,17 +194,24 @@ class AppLauncher(val context: Context) {
     }
 
     private fun resolveComponent(packageName: String, component: String): ComponentName {
-        return if (component.contains("/")) {
-            val parts = component.split("/", limit = 2)
-            ComponentName(parts[0], expandClass(parts[0], parts[1]))
-        } else {
-            ComponentName(packageName, expandClass(packageName, component))
-        }
+        val (pkg, cls) = parseComponentParts(packageName, component)
+        return ComponentName(pkg, cls)
     }
 
-    private fun expandClass(pkg: String, cls: String): String = when {
-        cls.startsWith(".") -> pkg + cls
-        !cls.contains(".") -> "$pkg.$cls"
-        else -> cls
+    companion object {
+        internal fun parseComponentParts(packageName: String, component: String): Pair<String, String> {
+            return if (component.contains("/")) {
+                val parts = component.split("/", limit = 2)
+                parts[0] to expandClass(parts[0], parts[1])
+            } else {
+                packageName to expandClass(packageName, component)
+            }
+        }
+
+        internal fun expandClass(pkg: String, cls: String): String = when {
+            cls.startsWith(".") -> pkg + cls
+            !cls.contains(".") -> "$pkg.$cls"
+            else -> cls
+        }
     }
 }

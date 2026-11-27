@@ -273,3 +273,24 @@ def test_api_status_includes_hdhr(hdhr_client: TestClient):
     assert hdhr["device_id"] == "AABBCCDD"
     assert hdhr["xmltv_url"].endswith("/xmltv.xml")
     assert hdhr["epg_source"] is False
+
+
+def test_ssdp_response_replaces_loopback_with_lan_ip():
+    from apituner.hdhr.discovery import HdhrDiscoveryService
+
+    identity = DiscoverIdentity(
+        device_id_hex="AABBCCDD",
+        tuner_count=2,
+        base_url="http://127.0.0.1:6592",
+    )
+    svc = HdhrDiscoveryService(lambda: identity, http_port=6592)
+    with patch("apituner.hdhr.discovery._local_ipv4", return_value="192.0.2.50"):
+        reply = svc._build_ssdp_response(identity, "upnp:rootdevice").decode("utf-8")
+    assert "LOCATION: http://192.0.2.50:6592/device.xml" in reply
+    assert "127.0.0.1" not in reply
+
+
+def test_import_rejects_non_http_url(hdhr_client: TestClient):
+    resp = hdhr_client.post("/api/import", json={"url": "file:///etc/passwd"})
+    assert resp.status_code == 400
+    assert "http://" in resp.json()["detail"]

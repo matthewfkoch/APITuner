@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import shutil
 from typing import Optional
 
@@ -177,23 +178,32 @@ class AdbBackend(ControlBackend):
         act = action or "android.intent.action.VIEW"
         if deeplink:
             # Package-pinned VIEW, same spirit as ADBTuner am start -d … pkg
-            cmd = f"am start -W -a {act} -d '{deeplink}'"
+            parts = [
+                "am",
+                "start",
+                "-W",
+                "-a",
+                shlex.quote(act),
+                "-d",
+                shlex.quote(deeplink),
+            ]
             if component:
-                cmd += f" -n '{package}/{component}'" if "/" not in component else f" -n '{component}'"
+                comp = component if "/" in component else f"{package}/{component}"
+                parts.extend(["-n", shlex.quote(comp)])
             else:
-                cmd += f" '{package}'"
+                parts.append(shlex.quote(package))
             if extras:
                 for pair in extras.split(","):
                     if ":" not in pair:
                         continue
                     k, v = pair.split(":", 1)
-                    cmd += f" --es '{k.strip()}' '{v.strip()}'"
-            await self.run_shell(cmd)
+                    parts.extend(["--es", shlex.quote(k.strip()), shlex.quote(v.strip())])
+            await self.run_shell(" ".join(parts))
             return
 
         if component:
             comp = component if "/" in component else f"{package}/{component}"
-            await self.run_shell(f"am start -W -n '{comp}'")
+            await self.run_shell(f"am start -W -n {shlex.quote(comp)}")
             return
 
         # Launch launcher activity for the package (App Play open_app).
@@ -213,7 +223,9 @@ class AdbBackend(ControlBackend):
         last_out = ""
         for category in categories:
             try:
-                out = await self.run_shell(f"monkey -p {package} -c {category} 1")
+                out = await self.run_shell(
+                    f"monkey -p {shlex.quote(package)} -c {shlex.quote(category)} 1"
+                )
             except BackendUnavailable as exc:
                 # Some devices return non-zero on abort; keep trying the next category.
                 last_out = str(exc)
@@ -246,10 +258,10 @@ class AdbBackend(ControlBackend):
             code = raw
         else:
             code = f"KEYCODE_{raw.upper()}"
-        await self.run_shell(f"input keyevent {code}")
+        await self.run_shell(f"input keyevent {shlex.quote(code)}")
 
     async def force_stop(self, package: str) -> None:
-        await self.run_shell(f"am force-stop {package}")
+        await self.run_shell(f"am force-stop {shlex.quote(package)}")
 
     async def current_app(self) -> Optional[str]:
         await self.connect()

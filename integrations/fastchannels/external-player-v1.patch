@@ -1,0 +1,228 @@
+diff --git a/app/__init__.py b/app/__init__.py
+index b5ccc3c..e5d6c8a 100644
+--- a/app/__init__.py
++++ b/app/__init__.py
+@@ -218,6 +218,8 @@ def create_app(config_class=Config):
+     app.register_blueprint(playlists_bp, url_prefix='/api')
+     app.register_blueprint(channels_bp, url_prefix='/api')
+     app.register_blueprint(playback_bp, url_prefix='/api')
++    from .routes.external_player import external_player_bp
++    app.register_blueprint(external_player_bp, url_prefix='/api/external-player/v1')
+     app.register_blueprint(gracenote_bp, url_prefix='/api')
+     app.register_blueprint(system_bp, url_prefix='/api')
+     app.register_blueprint(settings_bp, url_prefix='/api')
+diff --git a/app/admin_auth.py b/app/admin_auth.py
+index 3bac55d..05304bf 100644
+--- a/app/admin_auth.py
++++ b/app/admin_auth.py
+@@ -30,6 +30,8 @@ SESSION_LIFETIME = timedelta(days=30)
+ # stay open. Everything not listed here — including any route added later —
+ # requires a session.
+ _PUBLIC_PREFIXES = (
++    # This opt-in API has its own mandatory bearer-token authentication.
++    '/api/external-player/v1/',
+     '/m3u',          # master playlists (/m3u, /m3u/gracenote, /m3u/fc-player/...)
+     '/epg.xml',
+     '/feeds/',       # per-feed playlists/guides; the feeds admin API is /api/feeds
+diff --git a/app/fc_player_bridge.py b/app/fc_player_bridge.py
+index 89c4d68..edbb1f4 100644
+--- a/app/fc_player_bridge.py
++++ b/app/fc_player_bridge.py
+@@ -1910,3 +1910,37 @@ def trigger_channel(manifest_url: str, license_url: str | None = None, *, name:
+         logger.warning('[fc-player] trigger_channel am start failed: rc=%s stdout=%s stderr=%s',
+                         result.returncode, (result.stdout or '').strip(), (result.stderr or '').strip())
+     return ok
++
++
++def prepare_player_channel(channel) -> dict:
++    """Prepare intent extras without invoking ADB or registering a device.
++
++    Shared by the legacy bridge and external controllers. Keep manifest and
++    license preparation paired, including provider-specific playback settings.
++    """
++    from urllib.parse import quote, urljoin, urlsplit
++    from flask import request
++    from .routes.api_playback import _get_playback_info
++
++    info = _get_playback_info(channel, fast_mode=False)
++    manifest = info.get('preview_url') or info.get('play_url') or ''
++    license_url = info.get('license_url') or None
++    source = channel.source.name
++    if source == 'amazon_prime_free':
++        encoded_id = quote(channel.source_channel_id, safe='')
++        manifest = f'/play/amazon_prime_free/{encoded_id}/dash.mpd?hd=1'
++        license_url = f'/play/amazon_prime_free/license?channel_id={encoded_id}&hd=1'
++    if not manifest:
++        raise ValueError('No player manifest available')
++    if channel.requires_drm_bridge and not license_url:
++        raise ValueError('Protected channel has no license URL')
++    manifest = urljoin(request.host_url, manifest)
++    if any(part in urlsplit(manifest).path for part in
++           ('/play/fc-player/', '/play/auto/', '/play/prismcast/', '/play/tuner/')):
++        raise ValueError('Resolved URL points to a capture bridge')
++    result = dict(stream_url=manifest, title=channel.name or 'FastChannels',
++                  channel_key=f'{source}:{channel.source_channel_id}',
++                  drm=bool(license_url), captions=captions_enabled(), audio_mode=audio_mode())
++    if license_url:
++        result['license_url'] = urljoin(request.host_url, license_url)
++    return result
+diff --git a/app/routes/play.py b/app/routes/play.py
+index b6e7f30..65c6495 100644
+--- a/app/routes/play.py
++++ b/app/routes/play.py
+@@ -3535,22 +3535,13 @@ def play_fc_player_bridge(source_name: str, channel_id: str):
+         )
+         return Response('Hardware capture is not enabled or configured.\n', status=503, mimetype='text/plain')
+ 
+-    info = _get_playback_info(channel, fast_mode=False)
+-    manifest_url = info.get('preview_url') or info.get('play_url') or ''
+-    if source_name == 'amazon_prime_free':
+-        from urllib.parse import quote as _quote
+-        encoded_id = _quote(channel.source_channel_id, safe='')
+-        manifest_url = f'/play/amazon_prime_free/{encoded_id}/dash.mpd?hd=1'
+-        license_url = (f'{request.host_url.rstrip("/")}/play/amazon_prime_free/license'
+-                       f'?channel_id={encoded_id}&hd=1')
+-    else:
+-        license_url = info.get('license_url') or None
+-    if manifest_url.startswith('/'):
+-        manifest_url = urljoin(request.host_url, manifest_url.lstrip('/'))
+-
+-    if not manifest_url:
+-        logger.error('[fc-player] no manifest URL resolved for %s/%s', source_name, channel_id)
++    try:
++        prepared = fc_player_bridge.prepare_player_channel(channel)
++    except Exception:
++        logger.warning('[fc-player] could not prepare playback for %s', source_name)
+         return _unavailable_response()
++    manifest_url = prepared['stream_url']
++    license_url = prepared.get('license_url')
+ 
+     adb_override = _fc_player_adb_override(request.args.get('adb'))
+     if not adb_override and not settings.effective_fc_player_bridge_adb_address():
+diff --git a/app/routes/external_player.py b/app/routes/external_player.py
+new file mode 100644
+--- /dev/null
++++ b/app/routes/external_player.py
+@@ -0,0 +1,122 @@
++"""Opt-in, resolve-only API for external Android player controllers.
++
++This API never connects to a device, allocates capture hardware, or registers an
++ADB watchdog. The external controller owns playback and its tuner lifecycle.
++Set FC_EXTERNAL_PLAYER_TOKEN to enable it; browser admin sessions are not used.
++"""
++from __future__ import annotations
++
++import hmac
++import os
++
++from flask import Blueprint, jsonify, request
++
++external_player_bp = Blueprint('external_player', __name__)
++
++
++@external_player_bp.before_request
++def authorize():
++    expected = os.environ.get('FC_EXTERNAL_PLAYER_TOKEN', '')
++    if not expected:
++        return jsonify(error='External player API is disabled'), 503
++    actual = request.headers.get('Authorization', '')
++    if not hmac.compare_digest(actual.encode(), ('Bearer ' + expected).encode()):
++        return jsonify(error='External player token required'), 401
++
++
++@external_player_bp.after_request
++def prevent_caching(response):
++    response.headers['Cache-Control'] = 'no-store'
++    return response
++
++
++@external_player_bp.get('/capabilities')
++def capabilities():
++    return jsonify(version=1, capabilities=['catalog', 'prepare', 'xmltv'],
++                   controls_devices=False, package='com.fastchannels.player')
++
++
++def _catalog_channels():
++    from ..models import Channel, Source
++    from ..drm_bridge import DRM_BRIDGE_TRUSTED_SOURCES
++    from sqlalchemy import or_
++    # Do not require a legacy ADB bridge configuration to expose candidates.
++    # Keep source/channel enablement and retirement policy authoritative.
++    from .play import _channel_is_retired
++    rows = (Channel.query.join(Source)
++            .filter(Source.is_enabled == True, Source.epg_only == False,
++                    Channel.review_state == 'approved', Channel.is_enabled == True,
++                    Channel.is_active == True,
++                    Source.name.in_(DRM_BRIDGE_TRUSTED_SOURCES),
++                    or_(Channel.requires_drm_bridge == True, Channel.stream_type == 'dash'))
++            .order_by(Source.name, Channel.source_channel_id).all())
++    return [ch for ch in rows if not _channel_is_retired(ch)]
++
++
++def _catalog_row(ch):
++    from ..generators.m3u import _tvg_id, _parse_gracenote_id
++    return dict(source=ch.source.name, channel_id=ch.source_channel_id,
++                name=ch.name, tvg_id=_tvg_id(ch),
++                gracenote_id=_parse_gracenote_id(ch),
++                logo_url=ch.logo_url, group=ch.category)
++
++
++@external_player_bp.get('/channels')
++def channels():
++    return jsonify(version=1, channels=[_catalog_row(ch) for ch in _catalog_channels()])
++
++
++def _load_channel(source, channel_id):
++    from ..models import Channel, Source
++    from ..drm_bridge import DRM_BRIDGE_TRUSTED_SOURCES
++    if source not in DRM_BRIDGE_TRUSTED_SOURCES:
++        return None
++    return (Channel.query.join(Source)
++            .filter(Source.name == source, Channel.source_channel_id == channel_id,
++                    Source.is_enabled == True, Source.epg_only == False,
++                    Channel.review_state == 'approved', Channel.is_enabled == True,
++                    Channel.is_active == True).first())
++
++
++def _resolve(ch):
++    from ..fc_player_bridge import prepare_player_channel
++    return prepare_player_channel(ch)
++
++
++def _is_retired(channel):
++    from .play import _channel_is_retired
++    return _channel_is_retired(channel)
++
++
++@external_player_bp.post('/prepare')
++def prepare():
++    body = request.get_json(silent=True)
++    if not isinstance(body, dict) or set(body) != {'source', 'channel_id'}:
++        return jsonify(error='Expected source and channel_id only'), 400
++    if any(not isinstance(body[k], str) or not body[k].strip() or len(body[k]) > 512
++           for k in ('source', 'channel_id')):
++        return jsonify(error='Invalid channel identity'), 400
++    channel = _load_channel(body['source'], body['channel_id'])
++    if channel is None:
++        return jsonify(error='Channel is unavailable or not player-compatible'), 404
++    if _is_retired(channel):
++        return jsonify(error='Channel has retired'), 410
++    try:
++        extras = _resolve(channel)
++    except Exception:
++        # Resolver errors can include tokens, license URLs, or provider credentials.
++        return jsonify(error='Could not prepare channel playback'), 502
++    return jsonify(version=1, package='com.fastchannels.player',
++                   component='com.fastchannels.player/.PlaybackActivity',
++                   intent_extras=extras)
++
++
++@external_player_bp.get('/xmltv')
++def xmltv():
++    from flask import Response, stream_with_context
++    from ..generators.xmltv import generate_xmltv_stream
++    ids = [ch.id for ch in _catalog_channels()]
++    if not ids:
++        return Response('<?xml version="1.0"?><tv/>', mimetype='application/xml')
++    return Response(stream_with_context(generate_xmltv_stream(
++        {'channel_ids': ids}, base_url=request.host_url, native=True)), mimetype='application/xml')

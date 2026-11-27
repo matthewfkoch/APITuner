@@ -30,10 +30,30 @@ class AgentService : Service() {
     private var webServer: AgentWebServer? = null
     private var nsdManager: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
+    private var monitoringStarted = false
     private val tag = "AgentService"
     private val handler = Handler(Looper.getMainLooper())
     private val updateExecutor = Executors.newSingleThreadExecutor()
     private val appLauncher by lazy { AppLauncher(applicationContext) }
+    private val pendingStartRunnable = Runnable {
+        startWebServer()
+        registerService()
+        startMonitoring()
+        scheduleUpdateCheck(delayMs = 30_000)
+    }
+    private val updateCheckRunnable = Runnable { runUpdateCheck() }
+    private val monitorRunnable = object : Runnable {
+        override fun run() {
+            if (webServer == null || webServer?.isAlive != true) {
+                Log.w(tag, "Web server down; restarting")
+                startWebServer()
+            }
+            if (AgentPrefs.shouldAutoCheckNow(applicationContext)) {
+                runUpdateCheck()
+            }
+            handler.postDelayed(this, 60_000)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -44,10 +64,14 @@ class AgentService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundNotification()
-        startWebServer()
-        registerService()
-        startMonitoring()
-        scheduleUpdateCheck(delayMs = 30_000)
+        val delayMs = (intent?.getLongExtra(EXTRA_START_DELAY_MS, 0L) ?: 0L).coerceAtLeast(0L)
+        handler.removeCallbacks(pendingStartRunnable)
+        if (delayMs > 0L && webServer?.isAlive != true) {
+            Log.i(tag, "Deferring Agent HTTP/mDNS start by ${delayMs}ms")
+            handler.postDelayed(pendingStartRunnable, delayMs)
+        } else {
+            pendingStartRunnable.run()
+        }
         return START_STICKY
     }
 
@@ -73,6 +97,7 @@ class AgentService : Service() {
     }
 
     private fun startWebServer() {
+        if (webServer?.isAlive == true) return
         try {
             webServer?.stop()
             webServer = AgentWebServer(
@@ -85,7 +110,17 @@ class AgentService : Service() {
         }
     }
 
+    private fun unregisterService() {
+        val listener = registrationListener ?: return
+        registrationListener = null
+        try {
+            nsdManager?.unregisterService(listener)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun registerService() {
+        if (registrationListener != null) return
         try {
             nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
             val info = NsdServiceInfo().apply {
@@ -93,41 +128,39 @@ class AgentService : Service() {
                 serviceType = "_apituner._tcp."
                 port = AgentPrefs.DEFAULT_PORT
             }
-            registrationListener = object : NsdManager.RegistrationListener {
+            val listener = object : NsdManager.RegistrationListener {
                 override fun onServiceRegistered(info: NsdServiceInfo) {
                     Log.d(tag, "mDNS registered: ${info.serviceName}")
                 }
                 override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
                     Log.w(tag, "mDNS registration failed: $errorCode")
+                    if (registrationListener === this) {
+                        registrationListener = null
+                    }
                 }
                 override fun onServiceUnregistered(info: NsdServiceInfo) {}
                 override fun onUnregistrationFailed(info: NsdServiceInfo, errorCode: Int) {}
             }
+            registrationListener = listener
             nsdManager?.registerService(
-                info, NsdManager.PROTOCOL_DNS_SD, registrationListener
+                info, NsdManager.PROTOCOL_DNS_SD, listener
             )
         } catch (e: Exception) {
+            registrationListener = null
             Log.w(tag, "mDNS registration error: ${e.message}")
         }
     }
 
     private fun startMonitoring() {
-        handler.postDelayed(object : Runnable {
-            override fun run() {
-                if (webServer == null || webServer?.isAlive != true) {
-                    Log.w(tag, "Web server down; restarting")
-                    startWebServer()
-                }
-                if (AgentPrefs.shouldAutoCheckNow(applicationContext)) {
-                    runUpdateCheck()
-                }
-                handler.postDelayed(this, 60_000)
-            }
-        }, 60_000)
+        if (monitoringStarted) return
+        monitoringStarted = true
+        handler.removeCallbacks(monitorRunnable)
+        handler.postDelayed(monitorRunnable, 60_000)
     }
 
     private fun scheduleUpdateCheck(delayMs: Long) {
-        handler.postDelayed({ runUpdateCheck() }, delayMs)
+        handler.removeCallbacks(updateCheckRunnable)
+        handler.postDelayed(updateCheckRunnable, delayMs)
     }
 
     private fun runUpdateCheck() {
@@ -170,10 +203,10 @@ class AgentService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        monitoringStarted = false
         try { webServer?.stop() } catch (_: Exception) {}
-        try {
-            registrationListener?.let { nsdManager?.unregisterService(it) }
-        } catch (_: Exception) {}
+        webServer = null
+        unregisterService()
         handler.removeCallbacksAndMessages(null)
         updateExecutor.shutdownNow()
     }
@@ -185,9 +218,14 @@ class AgentService : Service() {
     companion object {
         const val NOTIFICATION_ID = 1
         const val CHANNEL_ID = "ApiTunerAgentChannel"
+        const val EXTRA_START_DELAY_MS = "com.apituner.agent.EXTRA_START_DELAY_MS"
 
-        fun start(context: Context) {
-            val intent = Intent(context, AgentService::class.java)
+        fun start(context: Context, startDelayMs: Long = 0L) {
+            val intent = Intent(context, AgentService::class.java).apply {
+                if (startDelayMs > 0L) {
+                    putExtra(EXTRA_START_DELAY_MS, startDelayMs)
+                }
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {

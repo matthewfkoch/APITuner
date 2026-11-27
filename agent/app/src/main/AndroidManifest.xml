@@ -26,6 +26,8 @@
          Settings intents returns null on Google TV / Android 14 and our
          permission buttons never open the matching Settings screens. -->
     <queries>
+        <!-- FC Player has an exported playback activity but no launcher entry. -->
+        <package android:name="com.fastchannels.player" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
         </intent>
@@ -78,7 +80,7 @@
     </queries>
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:banner="@drawable/tv_banner"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"

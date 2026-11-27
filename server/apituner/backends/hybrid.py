@@ -98,11 +98,12 @@ class SplitControlBackend(ControlBackend):
         action: Optional[str] = None,
         extras: Optional[str] = None,
         clear_task: bool = False,
+        intent_extras: Optional[dict[str, str | bool]] = None,
     ) -> None:
         package_only = _is_package_only_launch(
             deeplink=deeplink, component=component, action=action, extras=extras
         )
-        if package_only:
+        if package_only and intent_extras is None:
             # Prefer Agent launcher open; fall back to Remote/ADB if Agent fails.
             try:
                 await self._launch.launch(package=package)
@@ -124,6 +125,8 @@ class SplitControlBackend(ControlBackend):
             extras=extras,
             clear_task=clear_task,
         )
+        if intent_extras is not None:
+            kwargs["intent_extras"] = intent_extras
         try:
             await self._launch.launch(**kwargs)
         except TypeError:

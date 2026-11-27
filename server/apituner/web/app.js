@@ -1,89 +1,9 @@
 "use strict";
 
-// ---- API helpers ----
-const api = {
-  async get(path) { return handle(await fetch(path)); },
-  async post(path, body) { return handle(await fetch(path, jsonOpts("POST", body))); },
-  async put(path, body) { return handle(await fetch(path, jsonOpts("PUT", body))); },
-  async del(path) { return handle(await fetch(path, { method: "DELETE" })); },
-};
-function jsonOpts(method, body) {
-  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) };
-}
-function formatDetail(detail) {
-  if (detail == null) return null;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    return detail.map((e) => {
-      if (!e || typeof e !== "object") return String(e);
-      const loc = Array.isArray(e.loc) ? e.loc.filter((x) => x !== "body").join(".") : "";
-      return loc ? `${loc}: ${e.msg || "invalid"}` : (e.msg || JSON.stringify(e));
-    }).join("; ");
-  }
-  return String(detail);
-}
-async function handle(resp) {
-  const text = await resp.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!resp.ok) throw new Error(formatDetail(data && data.detail) || resp.statusText || "Request failed");
-  return data;
-}
-
-function channelNumberSortKey(number) {
-  const text = String(number ?? "").trim();
-  const dot = text.indexOf(".");
-  if (dot >= 0) {
-    return [parseInt(text.slice(0, dot), 10) || 0, parseInt(text.slice(dot + 1), 10) || 0, text];
-  }
-  return [parseInt(text, 10) || 0, 0, text];
-}
-
-function compareChannelNumbers(a, b) {
-  const ka = channelNumberSortKey(a);
-  const kb = channelNumberSortKey(b);
-  for (let i = 0; i < 3; i += 1) {
-    if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1;
-  }
-  return 0;
-}
-
-// ---- Capability definitions (label + tooltip; optional live status from /api/info) ----
-const CAP_DEFS = {
-  http_agent: [
-    { label: "Launch channels", hint: "Opens the streaming app when a station is tuned.", always: true },
-    { label: "Foreground app", hint: "Sees which app is on screen. Needs Usage Access.", cap: "current_app" },
-    { label: "Playback check", hint: "Waits for playback before the HDMI stream. Needs Notification Access.", cap: "playback_state" },
-    { label: "Send keys", hint: "Back, Home, and Recents. Needs Accessibility. Not full D-pad.", cap: "keys" },
-    { label: "App list", hint: "Lists installed apps for the channel editor.", cap: "app_list" },
-    { label: "Install APKs", hint: "Can sideload APKs.", cap: "install" },
-  ],
-  androidtv_remote: [
-    { label: "Send keys", hint: "Full remote including D-pad.", cap: "keys" },
-    { label: "D-pad / App Play", hint: "Runs App Play navigation without ADB.", always: true },
-    { label: "Foreground app", hint: "Sees which app is in the foreground.", cap: "current_app" },
-    { label: "Playback check", hint: "Best-effort playback detection.", cap: "playback_state" },
-  ],
-  firetv_rest: [
-    { label: "Send keys", hint: "D-pad, Home, and Back. No ADB.", cap: "keys" },
-    { label: "D-pad / App Play", hint: "App Play on Fire Stick / Fire TV.", always: true },
-    { label: "Launch apps", hint: "Opens apps by package name.", always: true },
-  ],
-  adb: [
-    { label: "Send keys", hint: "Full keys including D-pad over network ADB.", cap: "keys" },
-    { label: "D-pad / App Play", hint: "App Play fallback on Fire OS 7.", always: true },
-    { label: "Force-stop", hint: "Force-stops the app (stronger than Home).", always: true },
-    { label: "App list", hint: "Lists installed packages.", cap: "app_list" },
-  ],
-};
+// Core shell, navigation, tuners, channels, and App Play views.
+// Shared pure helpers live in ui-utils.js; Settings + Live Status live in settings-status.js.
 
 // ---- UI utilities ----
-function looksLikeFireTv(info) {
-  if (!info) return false;
-  const text = `${info.manufacturer || ""} ${info.model || ""}`.toLowerCase();
-  return text.includes("amazon") || text.includes("fire") || /\baft[a-z0-9]*/.test(text);
-}
-
 function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
 function toast(msg, isErr, ms) {
   const t = document.getElementById("toast");
@@ -143,7 +63,16 @@ document.getElementById("modal").addEventListener("keydown", (e) => {
   } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 document.querySelectorAll(".tools-disclosure").forEach((details) => {
-  details.addEventListener("toggle", () => { if (!details.open) closeCopyM3uMenu(); });
+  details.querySelector("summary").addEventListener("click", (event) => {
+    event.preventDefault();
+    details.open = !details.open;
+    if (details.open) positionChannelMenus();
+    else closeCopyM3uMenu();
+  });
+  details.addEventListener("toggle", () => {
+    if (details.open) positionChannelMenus();
+    else closeCopyM3uMenu();
+  });
   details.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { details.open = false; details.querySelector("summary").focus(); }
   });
@@ -270,15 +199,9 @@ function m3uUrlForProvider(provider) {
   return `${base}?provider=${encodeURIComponent(provider)}`;
 }
 
-function formatSkippedSummary(skipped, limit = 3) {
-  if (!skipped || !skipped.length) return "";
-  const bits = skipped.slice(0, limit).map((s) => s.name || s.reason || "row");
-  const more = skipped.length > limit ? ` +${skipped.length - limit} more` : "";
-  return ` (${skipped.length} skipped: ${bits.join(", ")}${more})`;
-}
-
 function copyPlaylistUrl(url, okMessage) {
   closeCopyM3uMenu();
+  document.getElementById("copy-m3u-menu-btn").focus();
   copyToClipboard(url)
     .then(() => toast(okMessage))
     .catch(() => {
@@ -295,14 +218,31 @@ function closeCopyM3uMenu() {
   if (btn) btn.setAttribute("aria-expanded", "false");
 }
 
-function positionCopyM3uMenu() {
-  const btn = document.getElementById("copy-m3u-menu-btn");
+function positionMenu(button, menu) {
+  const anchor = button.getBoundingClientRect();
+  const viewport = document.documentElement;
+  const margin = 8;
+  const gap = 6;
+  const below = viewport.clientHeight - anchor.bottom - gap - margin;
+  const above = anchor.top - gap - margin;
+  menu.style.maxHeight = "";
+  const openAbove = menu.offsetHeight > below && above > below;
+  const height = Math.min(menu.offsetHeight, Math.max(0, openAbove ? above : below));
+  menu.style.maxHeight = `${height}px`;
+  menu.style.top = `${openAbove ? anchor.top - gap - height : anchor.bottom + gap}px`;
+  const maxLeft = viewport.clientWidth - menu.offsetWidth - margin;
+  const left = Math.min(anchor.right - menu.offsetWidth, maxLeft);
+  menu.style.left = `${Math.max(margin, left)}px`;
+}
+
+function positionChannelMenus() {
+  const tools = document.querySelector("#tab-channels.active .tools-disclosure[open]");
+  if (!tools) return;
+  positionMenu(tools.querySelector("summary"), tools.querySelector(".tools-panel"));
   const menu = document.getElementById("copy-m3u-menu");
-  if (!btn || !menu || menu.classList.contains("hidden")) return;
-  const r = btn.getBoundingClientRect();
-  menu.style.top = `${Math.round(r.bottom + 6)}px`;
-  menu.style.left = "auto";
-  menu.style.right = `${Math.max(8, Math.round(window.innerWidth - r.right))}px`;
+  if (!menu.classList.contains("hidden")) {
+    positionMenu(document.getElementById("copy-m3u-menu-btn"), menu);
+  }
 }
 
 function renderCopyM3uMenu(channels) {
@@ -339,7 +279,7 @@ document.getElementById("copy-m3u-menu-btn")?.addEventListener("click", (e) => {
   const willOpen = menu.classList.contains("hidden");
   menu.classList.toggle("hidden", !willOpen);
   btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
-  if (willOpen) positionCopyM3uMenu();
+  if (willOpen) positionChannelMenus();
 });
 document.addEventListener("click", (e) => {
   const wrap = document.getElementById("copy-m3u-menu-wrap");
@@ -351,63 +291,16 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeCopyM3uMenu();
 });
-window.addEventListener("resize", positionCopyM3uMenu);
-document.addEventListener("scroll", positionCopyM3uMenu, true);
+window.addEventListener("resize", positionChannelMenus);
+document.addEventListener("scroll", positionChannelMenus, true);
 
 // ============================ TUNERS ============================
 let cachedChannels = [];
 let cachedConfigs = [];
-let cachedAgentLatest = null;
 /** @type {null | {tuners: any[], channels: any[], summary: any}} */
 let packageCoverage = null;
 /** True when imported channels need D-pad (App Play, Max who’s-watching, key_macro). */
 let catalogNeedsDpadKeys = false;
-
-const AGENT_ONLY_KEYS = new Set(["BACK", "HOME", "RECENTS", "APP_SWITCH"]);
-
-function urlLooksLikeDeeplink(url) {
-  const u = String(url || "").trim();
-  if (!u) return false;
-  return u.includes("://") || u.startsWith("http:") || u.startsWith("https:");
-}
-
-function expandKeyMacroTokens(value) {
-  if (value == null) return [];
-  const parts = Array.isArray(value) ? value : [value];
-  const tokens = [];
-  for (const part of parts) {
-    if (part == null) continue;
-    for (const piece of String(part).replace(/;/g, ",").split(",")) {
-      let key = piece.trim();
-      if (!key) continue;
-      if (key.toUpperCase().startsWith("KEYCODE_")) key = key.slice(8);
-      tokens.push(key.toUpperCase());
-    }
-  }
-  return tokens;
-}
-
-function channelNeedsDpad(ch, configByUuid) {
-  const uuid = String(ch.configuration_uuid || "").trim();
-  // App Play: configuration + non-deeplink identifier (loop index).
-  if (uuid && !urlLooksLikeDeeplink(ch.url)) return true;
-  const keys = expandKeyMacroTokens(ch.key_macro);
-  if (keys.some((k) => !/^(?:SLEEP|WAIT)[\s_:]+[0-9]+(?:\.[0-9]+)?$/i.test(k) && !AGENT_ONLY_KEYS.has(k))) return true;
-  if (uuid && configByUuid[uuid]) {
-    const opts = configByUuid[uuid].global_options || {};
-    // Server default is true when the flag is present on Max / Compatibility configs.
-    if (opts.check_for_and_clear_whos_watching_prompts) return true;
-  }
-  return false;
-}
-
-function computeCatalogNeedsDpad(channels, configs) {
-  const byUuid = {};
-  for (const cfg of configs || []) {
-    if (cfg && cfg.uuid) byUuid[cfg.uuid] = cfg;
-  }
-  return (channels || []).some((ch) => channelNeedsDpad(ch, byUuid));
-}
 
 function tunerIssues(card) { return APITunerUI.tunerIssues(card.dataset); }
 let fleetSummarySignature = "";
@@ -469,15 +362,6 @@ function updateDeviceState(card) {
   updateFleetSummary();
 }
 
-async function fetchAgentLatest() {
-  try {
-    cachedAgentLatest = await api.get("/api/agent/latest");
-  } catch (_) {
-    cachedAgentLatest = null;
-  }
-  return cachedAgentLatest;
-}
-
 async function loadTuners() {
   const list = document.getElementById("tuner-list");
   stopAllPreviews();
@@ -496,7 +380,6 @@ async function loadTuners() {
     toast(e.message, true);
     return;
   }
-  const latestPromise = fetchAgentLatest();
   document.getElementById("setup-help").open = !tuners.length;
   if (!tuners.length) {
     list.innerHTML = `
@@ -511,7 +394,11 @@ async function loadTuners() {
     list.querySelector("#empty-add-tuner")?.addEventListener("click", () => tunerForm(null));
     return;
   }
-  await latestPromise;
+  let agentLatest = null;
+  const latestPromise = tuners.some((t) => t.control.type === "http_agent")
+    ? api.get("/api/agent/latest").catch(() => null)
+    : Promise.resolve(null);
+  latestPromise.then((latest) => { agentLatest = latest; });
   list.innerHTML = "";
   fleetIssueSignature = "";
   for (const t of tuners) {
@@ -541,12 +428,11 @@ async function loadTuners() {
     card.dataset.needsKeys = String(needsKeysWarn);
     card.innerHTML = `
       <div class="device-overview">
-        <div class="device-identity"><h2>${escapeHtml(t.name)}</h2><span class="device-backend">${backendLabel}${keysLabel ? ` · ${keysLabel}` : ""}</span></div>
+        <div class="device-identity"><h2>${escapeHtml(t.name)}</h2><span class="device-backend">${backendLabel}${keysLabel ? ` · ${keysLabel}` : ""}</span><p class="device-issue hidden" data-issue></p></div>
         <div class="device-connection"><span class="eyebrow">Connection</span><span class="badge muted" data-health>Checking…</span>${t.enabled === false ? '<span class="badge">Disabled</span>' : ""}</div>
         <div class="device-activity"><span class="eyebrow">Activity</span><span data-activity>Checking…</span></div>
         <div class="device-actions"><button class="btn btn-sm hidden" data-next-action></button><button class="btn btn-sm" data-act="preview">Preview</button></div>
       </div>
-      <p class="device-issue hidden" data-issue></p>
       <details class="device-details"><summary>More <span class="sr-only">about ${escapeHtml(t.name)}</span></summary>
         <div class="device-detail-body">
           <div class="card-meta">
@@ -579,6 +465,7 @@ async function loadTuners() {
     const versionBadge = card.querySelector("[data-agent-version]");
     const updateBtn = card.querySelector('[data-act="update-agent"]');
     const grantBtn = card.querySelector('[data-act="grant-perms"]');
+    let agentInfo = null;
     const setHealth = (online) => {
       healthBadge.className = `badge ${online ? "on" : "off"}`;
       healthBadge.textContent = online ? "Reachable" : "Unreachable";
@@ -604,7 +491,7 @@ async function loadTuners() {
         if (updateBtn) updateBtn.classList.add("hidden");
         return;
       }
-      const latest = cachedAgentLatest;
+      const latest = agentLatest;
       const latestCode = latest && latest.versionCode != null ? Number(latest.versionCode) : null;
       const outdated = latestCode != null && code != null && code < latestCode;
       versionBadge.className = `badge ${outdated ? "warn" : ""}`;
@@ -618,7 +505,13 @@ async function loadTuners() {
         : `Installed Agent version ${name || "?"} (${code})`;
       if (updateBtn) updateBtn.classList.toggle("hidden", !outdated);
     };
+    if (isAgent) {
+      latestPromise.then((latest) => {
+        if (latest && agentInfo && card.isConnected) applyAgentVersion(agentInfo);
+      });
+    }
     const runHealthCheck = async () => {
+      agentInfo = null;
       healthBtn.disabled = true;
       healthBtn.textContent = "Checking…";
       healthBadge.className = "badge muted";
@@ -633,8 +526,8 @@ async function loadTuners() {
           await refreshCapabilityStatus(badges, t);
           if (isAgent) {
             try {
-              const info = await api.get(`/api/tuners/${t.id}/info`);
-              applyAgentVersion(info);
+              agentInfo = await api.get(`/api/tuners/${t.id}/info`);
+              applyAgentVersion(agentInfo);
             } catch (_) {
               applyAgentVersion(null);
             }
@@ -800,15 +693,12 @@ function openTunerPreview(tuner) {
 
   const img = node.querySelector(".preview-stream");
   const overlay = node.querySelector(".preview-overlay");
-  let pollTimer = null;
+  let previewTimer = null;
   let alive = true;
 
   const stop = () => {
     alive = false;
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
+    clearTimeout(previewTimer);
     if (img) {
       img.onload = null;
       img.onerror = null;
@@ -838,16 +728,21 @@ function openTunerPreview(tuner) {
       if (!alive || document.hidden) return;
       img.src = `/api/tuners/${encodeURIComponent(tuner.id)}/preview.jpg?t=${Date.now()}`;
     };
-    img.onload = () => markLive("Live");
-    img.onerror = () => markStatus("Preview unavailable — check encoder URL / ffmpeg", true);
+    img.onload = () => {
+      markLive("Live");
+      previewTimer = setTimeout(tick, 1500);
+    };
+    img.onerror = () => {
+      markStatus("Preview unavailable — check encoder URL / ffmpeg", true);
+      previewTimer = setTimeout(tick, 1500);
+    };
     tick();
-    pollTimer = setInterval(tick, 1500);
   };
 
   const startMjpeg = () => {
     markStatus("Connecting…");
     let settled = false;
-    const failTimer = setTimeout(() => {
+    previewTimer = setTimeout(() => {
       if (settled || !alive) return;
       img.removeAttribute("src");
       startJpegPoll();
@@ -855,13 +750,13 @@ function openTunerPreview(tuner) {
     img.onload = () => {
       if (!alive) return;
       settled = true;
-      clearTimeout(failTimer);
+      clearTimeout(previewTimer);
       markLive();
     };
     img.onerror = () => {
       if (!alive) return;
       settled = true;
-      clearTimeout(failTimer);
+      clearTimeout(previewTimer);
       img.removeAttribute("src");
       startJpegPoll();
     };
@@ -1316,11 +1211,6 @@ function channelMatchesQuery(c, q) {
   return hay.includes(q);
 }
 
-function coverageForChannel(c) {
-  if (!packageCoverage || !packageCoverage.channels) return null;
-  return packageCoverage.channels.find((r) => r.id === c.id) || null;
-}
-
 function packageWarnTitle(row) {
   if (!row) return "";
   if (row.status === "missing") {
@@ -1332,33 +1222,48 @@ function packageWarnTitle(row) {
   return "";
 }
 
-function renderChannels(channels) {
-  const tbody = document.querySelector("#channel-table tbody");
+function updateChannelCoverage(channels) {
   const q = (document.getElementById("channel-search")?.value || "").trim().toLowerCase();
-  const filtered = channels.filter((c) => channelMatchesQuery(c, q));
+  const rows = document.querySelectorAll("#channel-table [data-channel-id]");
   const countEl = document.getElementById("channel-count");
   const sum = packageCoverage && packageCoverage.summary;
   let countText = q
-    ? `Showing ${filtered.length} of ${channels.length}`
+    ? `Showing ${rows.length} of ${channels.length}`
     : `${channels.length} channel${channels.length === 1 ? "" : "s"}`;
   if (sum && (sum.channels_missing || sum.channels_partial)) {
     countText += ` · ${sum.channels_missing || 0} missing pkg · ${sum.channels_partial || 0} partial`;
   }
   if (countEl) countEl.textContent = countText;
+  const byId = new Map(channels.map((channel) => [channel.id, channel]));
+  const coverageById = new Map((packageCoverage?.channels || []).map((row) => [row.id, row]));
+  for (const row of rows) {
+    const channel = byId.get(row.dataset.channelId);
+    if (!channel) continue;
+    const coverage = coverageById.get(channel.id);
+    const warn = coverage?.status === "missing" || coverage?.status === "partial";
+    const configuration = APITunerUI.channelConfiguration(channel, coverage);
+    const badge = row.querySelector(".channel-config .badge");
+    row.classList.toggle("row-pkg-warn", warn);
+    badge.classList.toggle("warn", configuration.warning);
+    badge.textContent = configuration.label;
+    badge.title = warn ? packageWarnTitle(coverage) : "Package and deep link are available in Edit";
+  }
+}
+
+function renderChannels(channels) {
+  const tbody = document.querySelector("#channel-table tbody");
+  const q = (document.getElementById("channel-search")?.value || "").trim().toLowerCase();
+  const filtered = channels.filter((c) => channelMatchesQuery(c, q));
   tbody.innerHTML = "";
   if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="5"><div class="empty">${channels.length ? "No channels match your search." : "No channels yet — import a list or add one."}</div></td></tr>`;
-    return;
   }
   for (const c of filtered) {
-    const cov = coverageForChannel(c);
-    const warn = cov && (cov.status === "missing" || cov.status === "partial");
-    const configuration = APITunerUI.channelConfiguration(c, cov);
-    const tr = el(`<tr class="row-clickable${warn ? " row-pkg-warn" : ""}" title="Edit channel">
+    const tr = el(`<tr class="row-clickable" data-channel-id="${escapeAttr(c.id)}" title="Edit channel">
       <td><span class="ch-num">${escapeHtml(c.number)}</span></td>
       <td><strong>${escapeHtml(c.name)}</strong></td>
       <td class="channel-provider">${escapeHtml(c.provider_name || "—")}</td>
-      <td class="channel-config"><span class="badge ${configuration.warning ? "warn" : ""}" title="${escapeAttr(warn ? packageWarnTitle(cov) : "Package and deep link are available in Edit")}">${configuration.label}</span></td>
+      <td class="channel-config"><span class="badge"></span></td>
       <td class="col-actions"><button class="btn btn-sm" data-edit aria-label="Edit ${escapeAttr(c.name)}">Edit</button> <button class="btn btn-sm btn-danger" data-del aria-label="Delete ${escapeAttr(c.name)}">Delete</button></td>
     </tr>`);
     tr.addEventListener("click", (e) => {
@@ -1377,6 +1282,7 @@ function renderChannels(channels) {
     });
     tbody.appendChild(tr);
   }
+  updateChannelCoverage(channels);
 }
 
 async function refreshPackageCoverage(quiet) {
@@ -1414,7 +1320,7 @@ async function loadChannels() {
   renderCopyM3uMenu(cachedChannels);
   renderChannels(cachedChannels);
   // Background package check (Agent app lists) — don't block the table.
-  refreshPackageCoverage(true).then(() => renderChannels(cachedChannels));
+  refreshPackageCoverage(true).then(() => updateChannelCoverage(cachedChannels));
 }
 
 document.getElementById("channel-search")?.addEventListener("input", () => {
@@ -1424,7 +1330,7 @@ document.getElementById("channel-search")?.addEventListener("input", () => {
 document.getElementById("check-packages-btn")?.addEventListener("click", async () => {
   toast("Checking installed apps on Agent tuners…");
   await refreshPackageCoverage(false);
-  renderChannels(cachedChannels);
+  updateChannelCoverage(cachedChannels);
 });
 
 function updatePackageFieldWarnings(form) {
@@ -1761,180 +1667,6 @@ document.getElementById("import-config-btn")?.addEventListener("click", () => {
   openModal("Import configurations", node);
 });
 
-// ============================ OPTIONS ============================
-const OPTION_FIELDS = [
-  ["tune_timeout_seconds", "Tune timeout (s)", "number", null, "How long to wait for a channel to become ready"],
-  ["request_timeout", "Request timeout (s)", "number", null, "HTTP timeout for Agent API calls"],
-  ["dynamic_url_timeout", "Lane URL timeout (s)", "number", null, "Per try for /whatson and FruitDeepLinks. Hung connects stop at 5s; a hung read can still be timeout × attempts (15 × 3 = 45s). Stay near Channels' ~30s window. Applies on next tune."],
-  ["dynamic_url_attempts", "Lane URL attempts", "number", null, "Tries on timeout or connection error (1–10, default 3). Hung reads add another full timeout each try."],
-  ["release_grace_seconds", "Release grace (s)", "number", null, "Hold the tuner briefly after the stream disconnects"],
-  ["stuck_tuner_timeout_seconds", "Stuck tuner timeout (s)", "number", null, "Reclaim tuners that stop making progress"],
-  ["tuner_idle_timeout_seconds", "Idle reclaim (redirect) (s)", "number", null, "Reclaim tuners in redirect mode after idle"],
-  ["stream_mode", "Stream mode", "select", ["proxy", "redirect"], "proxy relays the encoder; redirect sends clients to it"],
-  ["stream_during_tune", "Stream during tune", "bool", null, "Start the encoder while App Play or deeplink playback wait runs so Channels does not time out"],
-  ["app_play_prefer", "App Play stick preference", "select", [
-    { value: "fire", label: "Fire Stick / ADB first" },
-    { value: "google_tv", label: "Google TV / Chromecast first" },
-    { value: "any", label: "No preference" },
-  ], "When several tuners can run App Play, prefer this path"],
-  ["wait_for_playback", "Wait for playback signal", "bool", null, "Wait until playback is detected before accepting the tune"],
-  ["deeplink_relaunch_seconds", "Deeplink relaunch (s)", "number", null, "If playback never starts, wait this long then re-send the channel intent (DirecTV up to twice; 0 = off). Cold start retries after 2s. Helps after device reboot. Needs Notification access."],
-  ["ready_settle_seconds", "Ready settle (s)", "number", null, "Extra wait after playback before opening the HDMI stream"],
-  ["stop_on_release", "Stop app on release", "bool", null, "Send Home when the stream ends"],
-  ["keep_apps_running", "Keep apps running", "bool", null, "When off, always send Home on release"],
-  ["retry_on_other_tuner", "Retry on another tuner", "bool", null, "Try another tuner if a tune fails"],
-  ["hdhr_enabled", "HDHomeRun emulation", "bool", null, "Appear as an HDHomeRun tuner in Channels DVR"],
-  ["hdhr_friendly_name", "HDHomeRun name", "text", null, "Name shown in the Channels / Plex source list"],
-  ["hdhr_device_id", "HDHomeRun DeviceID", "text", null, "Stable 8-character hex ID — do not change lightly"],
-  ["hdhr_port", "HDHomeRun port (optional)", "number", null, "Leave blank to use the main APITuner port"],
-  ["hdhr_ssdp_enabled", "SSDP discovery", "bool", null, "SSDP/UPnP multicast (needs host networking in Docker)"],
-  ["hdhr_udp_discovery_enabled", "UDP 65001 discovery", "bool", null, "SiliconDust discovery (needs host networking in Docker)"],
-  ["channels_dvr_url", "Channels DVR URL", "text", null, "LAN URL, e.g. http://192.0.2.30:8089"],
-  ["xmltv_source_device", "XMLTV source device", "text", null, "Channels device ID used as the schedule source"],
-  ["xmltv_duration_seconds", "XMLTV duration (s)", "number", null, "How far ahead to pull listings (default 3 days)"],
-  ["xmltv_cache_seconds", "XMLTV cache (s)", "number", null, "How long to reuse a built XMLTV response"],
-  ["fruitdeeplinks_url", "FruitDeepLinks URL", "text", null, "LAN URL. Sync imports lanes; XMLTV remaps their guide"],
-  ["fruitdeeplinks_profile", "FruitDeepLinks device profile", "select", [
-    { value: "google_tv", label: "Google TV / Android TV" },
-    { value: "fire", label: "Fire TV" },
-  ], "Primary package on sync (ESPN differs on Fire vs Google TV)"],
-  ["fruitdeeplinks_start_number", "FruitDeepLinks start number", "number", null, "First channel number for synced lanes (default 9000)"],
-  ["fruitdeeplinks_xmltv_path", "FruitDeepLinks XMLTV path", "text", null, "Path on the FDL server (default /out/adb_lanes.xml)"],
-  ["fruitdeeplinks_sync_seconds", "FruitDeepLinks auto-sync (s)", "number", null, "0 = manual Sync only"],
-];
-async function loadOptions() {
-  const form = document.getElementById("options-form");
-  let opts = {};
-  try { opts = await api.get("/api/options"); } catch (e) { toast(e.message, true); return; }
-  form.innerHTML = "";
-  const groups = {};
-  for (const [id, title] of [["integrations", "Integrations"], ["tuning", "Tuning behavior"], ["relay", "Stream relay"]]) {
-    const group = el(`<fieldset class="settings-group"><legend>${title}</legend><div class="form-grid"></div></fieldset>`);
-    form.append(group); groups[id] = group.querySelector(".form-grid");
-  }
-  for (const [key, label, type, choices, hint] of OPTION_FIELDS) {
-    const group = /^(hdhr_|channels_|xmltv_|fruitdeeplinks_)/.test(key) ? groups.integrations
-      : /^(stream_mode|stream_during_tune|release_grace_seconds|stuck_tuner_timeout_seconds|tuner_idle_timeout_seconds)$/.test(key) ? groups.relay : groups.tuning;
-    if (type === "bool") {
-      const row = el(`<div class="field checkbox"><input type="checkbox" name="${key}" ${opts[key] ? "checked" : ""} /><label>${label}</label></div>`);
-      if (hint) row.appendChild(el(`<div class="hint">${hint}</div>`));
-      group.appendChild(row);
-    } else if (type === "select") {
-      const f = el(`<div class="field"><label>${label}</label><select name="${key}"></select>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`);
-      choices.forEach((ch) => {
-        const value = typeof ch === "object" && ch ? ch.value : ch;
-        const text = typeof ch === "object" && ch ? (ch.label || ch.value) : ch;
-        const o = el(`<option value="${escapeAttr(value)}">${escapeHtml(text)}</option>`);
-        if (opts[key] === value) o.selected = true;
-        f.querySelector("select").appendChild(o);
-      });
-      group.appendChild(f);
-    } else if (type === "text") {
-      const val = opts[key] == null ? "" : opts[key];
-      group.appendChild(el(`<div class="field"><label>${label}</label><input type="text" name="${key}" value="${escapeAttr(val)}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
-    } else {
-      const val = opts[key] == null ? "" : opts[key];
-      group.appendChild(el(`<div class="field"><label>${label}</label><input type="number" step="any" name="${key}" value="${val}" />${hint ? `<div class="hint">${hint}</div>` : ""}</div>`));
-    }
-  }
-  labelFields(form);
-}
-document.getElementById("save-options").addEventListener("click", async () => {
-  const form = document.getElementById("options-form");
-  const payload = {};
-  for (const [key, , type] of OPTION_FIELDS) {
-    const input = form.querySelector(`[name="${key}"]`);
-    if (!input) continue;
-    if (type === "bool") payload[key] = input.checked;
-    else if (type === "number") {
-      const raw = String(input.value ?? "").trim();
-      const n = Number(raw);
-      payload[key] = Number.isFinite(n) ? n : null;
-    } else payload[key] = input.value;
-  }
-  try {
-    await api.put("/api/options", payload);
-    toast("Settings saved (restart required for discovery changes)");
-    const status = await api.get("/api/status");
-    initSidebarUrls(status);
-  } catch (e) { toast(e.message, true); }
-});
-
-document.getElementById("download-diagnostics").addEventListener("click", () => {
-  // Navigating to the endpoint triggers Content-Disposition download.
-  window.location.href = "/api/diagnostics";
-  toast("Downloading diagnostics…", false, 2500);
-});
-
-// ============================ STATUS ============================
-let statusTimer = null;
-function startStatusPolling() { stopStatusPolling(); renderStatus(); statusTimer = setInterval(renderStatus, 3000); }
-function stopStatusPolling() { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } }
-async function renderStatus() {
-  const list = document.getElementById("status-list");
-  const stats = document.getElementById("status-stats");
-  let data;
-  try { data = await api.get("/api/status"); } catch (e) {
-    list.innerHTML = `<div class="empty-state"><p>${escapeHtml(e.message)}</p></div>`;
-    stats.innerHTML = "";
-    return;
-  }
-
-  const active = data.tuners.filter((t) => t.locked).length;
-  const free = data.tuners.length - active;
-  const errors = data.tuners.filter((t) => t.last_error).length;
-
-  const hdhrBits = data.hdhr && data.hdhr.enabled
-    ? ` · HDHR ${data.hdhr.tuner_count} tuner${data.hdhr.tuner_count === 1 ? "" : "s"}`
-    : "";
-  document.getElementById("status-meta").textContent =
-    `v${data.version} · ${data.options.stream_mode} stream mode${hdhrBits}`;
-
-  document.getElementById("app-version").textContent = `v${data.version}`;
-  initSidebarUrls(data);
-
-  stats.innerHTML = `
-    <div class="stat-card"><div class="stat-label">Tuners</div><div class="stat-value">${data.tuners.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value accent">${active}</div></div>
-    <div class="stat-card"><div class="stat-label">Available</div><div class="stat-value green">${free}</div></div>
-    <div class="stat-card"><div class="stat-label">Channels</div><div class="stat-value accent">${data.channel_count}</div></div>
-    ${errors ? `<div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value" style="color:var(--red)">${errors}</div></div>` : ""}`;
-
-  if (!data.tuners.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-state-icon">●</div><h3>No tuners</h3><p>Add tuners to see live activity here.</p></div>`;
-    return;
-  }
-  list.innerHTML = "";
-  for (const s of data.tuners) {
-    const card = el(`<article class="card ${s.locked ? "card-active" : ""}"></article>`);
-    card.innerHTML = `
-      <div class="card-head">
-        <div>
-          <div class="card-title">
-            <span class="dot ${s.locked ? "locked pulse" : "free"}"></span>
-            ${escapeHtml(s.name)}
-          </div>
-          <div class="card-sub">${s.backend}${s.model ? " · " + escapeHtml(s.model) : ""}</div>
-        </div>
-        <span class="badge ${s.locked ? "accent" : ""}">${s.locked ? "In use" : "Idle"}</span>
-      </div>
-      <div class="card-meta">
-        ${s.locked ? `<div class="card-row"><span class="label">Channel</span><span class="value"><strong>${s.channel_number ?? "?"}</strong> · ${escapeHtml(s.channel_name || "")}</span></div>` : ""}
-        ${s.last_tune_seconds != null ? `<div class="card-row"><span class="label">Last tune</span><span class="value">${s.last_tune_seconds.toFixed(1)}s</span></div>` : ""}
-        ${s.locked && s.bytes_transferred ? `<div class="card-row"><span class="label">Streamed</span><span class="value">${fmtBytes(s.bytes_transferred)}</span></div>` : ""}
-        ${s.locked && s.lock_seconds != null ? `<div class="card-row"><span class="label">Lock time</span><span class="value">${s.lock_seconds}s</span></div>` : ""}
-        ${s.last_error ? `<div class="card-row"><span class="label">Error</span><span class="value"><span class="badge off">${escapeHtml(s.last_error)}</span></span></div>` : ""}
-      </div>`;
-    list.appendChild(card);
-  }
-}
-function fmtBytes(n) {
-  if (n < 1024) return n + " B";
-  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
-  if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
-  return (n / 1073741824).toFixed(2) + " GB";
-}
-
 // ---- misc ----
 document.getElementById("modal-close").addEventListener("click", closeModal);
 let modalBackdropMouseDown = false;
@@ -1945,8 +1677,6 @@ document.getElementById("modal").addEventListener("click", (e) => {
   if (modalBackdropMouseDown && e.target.id === "modal") closeModal();
   modalBackdropMouseDown = false;
 });
-function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function escapeAttr(s) { return escapeHtml(s); }
 
 function downloadJson(data, filename) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });

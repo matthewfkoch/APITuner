@@ -97,6 +97,8 @@ The Docker image includes `adb` so the grant button works from the container whe
 
 3. In the APITuner dashboard, add a tuner with backend `http_agent`, device IP, port `9092`, and the HDMI encoder stream URL (do this before or after the Fire grant step above).
 
+For FastChannels Player channels, see [Connect FastChannels](docs/FASTCHANNELS.md#connect-fastchannels).
+
 ---
 
 ## Quick start (Docker)
@@ -231,6 +233,16 @@ Custom Channels does **not** support Tuner Sharing — each TV typically opens i
 
 ## Global options
 
+Proxied M3U and HDHomeRun requests for the same channel share an active tuner
+and encoder connection. An explicit HDHomeRun tuner index only joins a stream
+on that tuner. The tuner stays reserved through the last viewer's release grace
+period, so a quick reconnect can resume without tuning again.
+
+During a brief encoder outage, the proxy sends MPEG-TS null packets and retries
+the encoder. The HTTP connection stays open, but any video missed during the
+outage is lost. Encoder recovery and tuner sharing require proxying. HDHomeRun
+and FastChannels requests are always proxied.
+
 Configurable in the dashboard:
 
 | Option | Description |
@@ -247,6 +259,7 @@ Configurable in the dashboard:
 | Lane URL attempts | Retry count on timeout or connection error (default 3, max 10). Keep timeout × attempts near Channels' ~30s connect window (15s × 3 = 45s) |
 | Stream mode | `proxy` (default, like ADBTuner) or `redirect` (Channels hits encoder directly; M3U only) |
 | Stream during tune | Start the encoder while App Play or deeplink playback wait runs so Channels does not hit its connect timeout (on by default). Does **not** apply to lane URL fetches |
+| Encoder recovery | Seconds a proxied stream waits for encoder video at startup or after an interruption (default `10`, `0` disables) |
 | App Play stick preference | When several tuners can run App Play, prefer Fire / ADB, Google TV, or no preference |
 | Release grace | Seconds to hold tuner lock after stream disconnect |
 | Stuck / idle timeouts | Reclaim tuners that stop making progress |

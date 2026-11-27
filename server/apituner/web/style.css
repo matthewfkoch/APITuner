@@ -686,6 +686,7 @@ code {
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .menu-item:hover,
@@ -1192,7 +1193,7 @@ button, summary, a, input, select, textarea { -webkit-tap-highlight-color: trans
 .device-detail-body .card-row .value { text-align: left; }
 .tools-disclosure { position: relative; }
 .tools-disclosure > summary { list-style-position: inside; cursor: pointer; }
-.tools-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 8; width: 230px; padding: 8px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 6px; }
+.tools-panel { position: fixed; z-index: 8; width: 230px; max-width: calc(100vw - 16px); padding: 8px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 6px; overflow: auto; }
 .tools-panel .btn { width: 100%; justify-content: flex-start; background: none; border-color: transparent; text-align: left; white-space: normal; }
 .tools-panel .btn:hover { background: var(--surface-hover); }
 .tools-panel .menu-wrap { width: 100%; }
@@ -1252,6 +1253,7 @@ button, summary, a, input, select, textarea { -webkit-tap-highlight-color: trans
   #channel-table tbody tr { display: grid; grid-template-columns: 64px minmax(0, 1fr); padding: 14px 12px; gap: 8px 12px; border-bottom: 1px solid var(--border); }
   #channel-table td { display: block; padding: 0; border: 0; overflow-wrap: anywhere; }
   #channel-table td:first-child { grid-row: 1 / 4; }
+  #channel-table td[colspan] { grid-column: 1 / -1; grid-row: auto; }
   #channel-table .channel-provider, #channel-table .channel-config, #channel-table .col-actions { grid-column: 2; }
   #channel-table .col-actions { position: static; min-width: 0; width: auto; text-align: left !important; box-shadow: none; background: transparent; }
   #channel-table .col-actions .btn { min-height: 44px; }

@@ -154,12 +154,14 @@ class HttpAgentBackend(ControlBackend):
         action: Optional[str] = None,
         extras: Optional[str] = None,
         clear_task: bool = False,
+        intent_extras: Optional[dict[str, str | bool]] = None,
     ) -> None:
         # Package-only open (App Play adbtuner_open_app): use launcher intent, not VIEW.
         needs_intent = bool(
             (deeplink and str(deeplink).strip())
             or (component and str(component).strip())
             or (extras and str(extras).strip())
+            or intent_extras is not None
             or (
                 action
                 and action not in (
@@ -187,6 +189,13 @@ class HttpAgentBackend(ControlBackend):
             payload["component"] = component
         if extras:
             payload["extra_string"] = extras
+        if intent_extras is not None:
+            if any(type(value) not in (str, bool) for value in intent_extras.values()):
+                raise BackendUnavailable("Intent extras must be strings or booleans")
+            capabilities = await self.get_live_capabilities()
+            if not capabilities.get("typed_intent_extras"):
+                raise BackendUnavailable("Update APITuner Agent: typed intent extras are required")
+            payload["intent_extras"] = intent_extras
         if clear_task:
             payload["clearTask"] = True
         data = await self._post("/api/launch-intent", payload)
@@ -215,6 +224,10 @@ class HttpAgentBackend(ControlBackend):
     async def playback_state(self) -> PlaybackState:
         snap, _, _ = await self.playback_snapshot()
         return snap
+
+    async def playback_details(self) -> dict[str, Any]:
+        """Raw Agent state, including the distinction between buffering and playing."""
+        return await self._get("/api/playback")
 
     async def playback_snapshot(
         self,

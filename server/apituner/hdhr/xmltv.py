@@ -10,6 +10,8 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
 import httpx
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import fromstring as defused_fromstring
 
 from ..deeplink_catalog import parse_lane_url, parse_whatson_url
 from ..fruitdeeplinks import fruitdeeplinks_base_url
@@ -18,6 +20,8 @@ from ..channels import sort_channels
 from ..models import Channel, GlobalOptions
 
 logger = logging.getLogger(__name__)
+
+MAX_FDL_XMLTV_BYTES = 64 * 1024 * 1024
 
 _cache: dict[str, Any] = {"key": None, "xml": None, "expires": 0.0}
 
@@ -105,6 +109,8 @@ def build_xmltv(
 
     programme_count = 0
     for ch in sort_channels(channels):
+        if ch.source == "fastchannels":
+            continue  # Companion XMLTV is authoritative for this source.
         station = str(ch.tvc_guide_stationid) if ch.tvc_guide_stationid else ""
         if not station:
             continue
@@ -226,8 +232,8 @@ def rewrite_fdl_xmltv(xml_text: str, channels: list[Channel]) -> str:
     if not xml_text.strip() or not mapping:
         return ""
     try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as exc:
+        root = defused_fromstring(xml_text)
+    except (ET.ParseError, DefusedXmlException) as exc:
         logger.warning("FruitDeepLinks XMLTV parse failed: %s", exc)
         return ""
 
@@ -289,15 +295,30 @@ async def fetch_fdl_xmltv(options: GlobalOptions, *, timeout: float = 30.0) -> O
         for path in paths:
             url = urljoin(base + "/", path.lstrip("/"))
             try:
-                resp = await client.get(url)
+                async with client.stream("GET", url) as resp:
+                    if resp.status_code >= 400:
+                        last_error = f"HTTP {resp.status_code}"
+                        continue
+                    buf = bytearray()
+                    too_large = False
+                    async for chunk in resp.aiter_bytes(64 * 1024):
+                        buf.extend(chunk)
+                        if len(buf) > MAX_FDL_XMLTV_BYTES:
+                            too_large = True
+                            break
+                    if too_large:
+                        last_error = "XMLTV response exceeded size limit"
+                        logger.warning(
+                            "FruitDeepLinks XMLTV fetch %s exceeded %d bytes",
+                            url,
+                            MAX_FDL_XMLTV_BYTES,
+                        )
+                        continue
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
                 logger.warning("FruitDeepLinks XMLTV fetch %s failed: %s", url, exc)
                 continue
-            if resp.status_code >= 400:
-                last_error = f"HTTP {resp.status_code}"
-                continue
-            body = (resp.text or "").strip()
+            body = buf.decode("utf-8", errors="replace").strip()
             if body.startswith("<"):
                 return body
             last_error = "not XML"
@@ -314,9 +335,11 @@ async def get_xmltv(
     force_refresh: bool = False,
 ) -> str:
     """Return cached or freshly built XMLTV (Gracenote remap and/or FDL lanes)."""
+    channels = [ch for ch in channels if ch.available]
+    fc = (options.fastchannels_url or "").strip()
     dvr = (options.channels_dvr_url or "").strip().rstrip("/")
     fdl = (options.fruitdeeplinks_url or "").strip().rstrip("/")
-    if not dvr and not fdl:
+    if not dvr and not fdl and not fc:
         raise ValueError(
             "Set Channels DVR URL (Gracenote remap) and/or FruitDeepLinks URL "
             "in Options so /xmltv.xml has a guide source."
@@ -326,7 +349,8 @@ async def get_xmltv(
     device = options.xmltv_source_device or "M3U-YouTubeTV"
     ids = ",".join(ch.id for ch in sorted(channels, key=lambda c: c.id))
     cache_key = (
-        f"{dvr}|{fdl}|{options.fruitdeeplinks_xmltv_path}|{device}|{duration}|{ids}"
+        f"{dvr}|{fdl}|{fc}|{options.fruitdeeplinks_xmltv_path}|{device}|{duration}|{ids}|"
+        + repr([(ch.id, ch.name, ch.number, ch.tvg_id, ch.tvc_guide_stationid) for ch in channels])
     )
     now = time.time()
     if (
@@ -346,7 +370,7 @@ async def get_xmltv(
                 duration_seconds=duration,
             )
         except Exception:
-            if not fdl:
+            if not fdl and not fc:
                 raise
             logger.exception(
                 "Channels DVR guide fetch failed; continuing with FDL XMLTV"
@@ -357,6 +381,9 @@ async def get_xmltv(
         foreign = await fetch_fdl_xmltv(options)
         if foreign:
             xml = merge_fdl_programmes(xml, rewrite_fdl_xmltv(foreign, channels))
+    if fc:
+        from ..fastchannels import guide_programmes, service_token
+        xml = merge_fdl_programmes(xml, await guide_programmes(fc, channels, token=service_token(options)))
     _cache["key"] = cache_key
     _cache["xml"] = xml
     _cache["expires"] = now + max(30.0, float(options.xmltv_cache_seconds))

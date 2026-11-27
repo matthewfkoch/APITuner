@@ -124,10 +124,8 @@ class UpdateChecker(
         }
     }
 
-    private fun signingVariantMismatch(current: AgentVersionInfo, latest: LatestManifest): Boolean {
-        val remoteDebug = latest.apkName.contains("-debug", ignoreCase = true)
-        return current.isDebugBuild != remoteDebug
-    }
+    private fun signingVariantMismatch(current: AgentVersionInfo, latest: LatestManifest): Boolean =
+        isSigningVariantMismatch(current, latest)
 
     private fun downloadApk(latest: LatestManifest): File {
         val apkDir = File(context.cacheDir, "apk").apply { if (!exists()) mkdirs() }
@@ -177,5 +175,13 @@ class UpdateChecker(
 
         /** Shared lock so service + UI don't race. */
         fun isBusy(): Boolean = inFlight.get()
+
+        internal fun isSigningVariantMismatch(
+            current: AgentVersionInfo,
+            latest: LatestManifest,
+        ): Boolean {
+            val remoteDebug = latest.apkName.contains("-debug", ignoreCase = true)
+            return current.isDebugBuild != remoteDebug
+        }
     }
 }

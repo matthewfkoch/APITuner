@@ -9,6 +9,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- Native FastChannels external-player integration (authenticated catalog sync, typed intent extras, XMLTV remapping, and companion contract tests).
+- Shared MPEG-TS `StreamRelay` with bounded per-viewer buffers and configurable encoder recovery (`encoder_recovery_seconds`).
+- Docker container `HEALTHCHECK` against `/api/status`, `server/pyproject.toml`, `ruff` linting, Node web UI tests, and Docker smoke testing in CI.
+- Android Agent JVM unit test suite (`AgentLogicTest`) and `lintDebug` checks in Agent CI.
+- Dependabot tracking for `server/Dockerfile` base images.
+
+### Fixed
+- Docker container now uses `exec uvicorn` so `SIGTERM` triggers clean FastAPI lifespan shutdown and tuner lease cleanup.
+- HDHomeRun SSDP discovery replaces loopback/unspecified `BaseURL` hosts with a LAN-routable IPv4 address.
+- Shell-quoted `AdbBackend` command arguments with `shlex.quote` to prevent shell metacharacter injection.
+- Hardened FruitDeepLinks XMLTV parsing with `defusedxml` and streaming byte caps (plus scheme and size limits on `/api/import` URL fetches).
+- Guarded mutating `ConfigStore` API endpoints with `store._lock` and included redacted `keys_control` in diagnostics bundles.
+- Validated `hdhr_port` bounds (`1–65535`) with safe config migration on load.
+- Android Agent: prevented duplicate `AgentService` monitoring loops and `NsdManager` registrations on repeated starts, eliminated the 15s `BootReceiver` `goAsync()` ANR window, pruned stale uploaded APKs from cache, switched token comparison to constant-time `MessageDigest.isEqual`, disabled `android:allowBackup`, and updated `InstallActivity` for API 29+.
+
+### Changed
+- Modularized `server/apituner/main.py` into FastAPI route modules (`routes/tuners.py`, `routes/channels.py`, `routes/system.py`), extracted `tune_matching.py` and `tune_readiness.py` from `tuner_manager.py`, and split `ui-utils.js` + `settings-status.js` out of `web/app.js`.
+- Release CI now enforces server/Agent version parity, runs `ruff`, Python, Node, and Agent unit tests, and uses standard `concurrency.cancel-in-progress: false`.
+- Prepared server and Agent versions at `0.1.36` (`versionCode` 36).
+
 ## [0.1.35] - 2026-11-12
 
 ### Added

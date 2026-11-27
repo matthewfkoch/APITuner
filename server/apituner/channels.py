@@ -68,6 +68,7 @@ def resolve_channel(
     Returns ``(channel, None)`` on success, ``(None, 'ambiguous')`` when the
     token matches multiple channels by number, or ``(None, 'not_found')``.
     """
+    channels = [ch for ch in channels if ch.available]
     token = (token or "").strip()
     if not token:
         return None, "not_found"

@@ -88,6 +88,11 @@ async def build_diagnostics(
             "name": tuner.name,
             "enabled": tuner.enabled,
             "control": _redact_control(tuner.control.model_dump()),
+            "keys_control": (
+                _redact_control(tuner.keys_control.model_dump())
+                if tuner.keys_control is not None
+                else None
+            ),
             "stream_endpoint": tuner.stream_endpoint,
             "status": status_by_id.get(tuner.id),
         }

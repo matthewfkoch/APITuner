@@ -3,8 +3,6 @@ package com.apituner.agent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 
 /**
@@ -19,19 +17,14 @@ class BootReceiver : BroadcastReceiver() {
 
         val appContext = context.applicationContext
         val delayMs = if (action == Intent.ACTION_MY_PACKAGE_REPLACED) 0L else BOOT_DELAY_MS
-        Log.i(TAG, "Scheduling AgentService start (${delayMs}ms delay) after $action")
-
-        val pending = goAsync()
-        Handler(Looper.getMainLooper()).postDelayed({
-            try {
-                AgentService.start(appContext)
-                Log.i(TAG, "AgentService start requested after $action")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start AgentService after $action: ${e.message}", e)
-            } finally {
-                pending.finish()
-            }
-        }, delayMs)
+        Log.i(TAG, "Starting AgentService (${delayMs}ms server bind delay) after $action")
+        // Start the foreground service immediately rather than holding goAsync()
+        // past Android's 10-second BroadcastReceiver ANR window.
+        try {
+            AgentService.start(appContext, startDelayMs = delayMs)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start AgentService after $action: ${e.message}", e)
+        }
     }
 
     private fun isBootAction(action: String): Boolean =

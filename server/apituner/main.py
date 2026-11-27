@@ -86,6 +86,23 @@ async def _fruitdeeplinks_sync_loop(store: ConfigStore) -> None:
             await asyncio.sleep(30.0)
 
 
+async def _warm_tuner_info(store: ConfigStore, manager: TunerManager) -> None:
+    """Best-effort concurrent warmup so startup never blocks on offline tuners."""
+    enabled = [t.id for t in store.config.tuners if t.enabled]
+    if not enabled:
+        return
+
+    async def _one(tuner_id: str) -> None:
+        try:
+            await manager.refresh_info(tuner_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            pass
+
+    await asyncio.gather(*(_one(tid) for tid in enabled))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = ConfigStore()
@@ -94,13 +111,8 @@ async def lifespan(app: FastAPI):
     app.state.manager = manager
     app.state.hdhr_discovery = None
     await manager.start_reaper()
-    # Best-effort: warm device info so tuner selection is app-aware.
-    for tuner in store.config.tuners:
-        if tuner.enabled:
-            try:
-                await manager.refresh_info(tuner.id)
-            except Exception:  # noqa: BLE001
-                pass
+    warm_task = asyncio.create_task(_warm_tuner_info(store, manager))
+    app.state.warm_task = warm_task
 
     options = store.config.options
     if options.hdhr_enabled and (
@@ -125,16 +137,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        fc_sync_task.cancel()
-        try:
-            await fc_sync_task
-        except asyncio.CancelledError:
-            pass
-        sync_task.cancel()
-        try:
-            await sync_task
-        except asyncio.CancelledError:
-            pass
+        for bg in (warm_task, fc_sync_task, sync_task):
+            bg.cancel()
+            try:
+                await bg
+            except asyncio.CancelledError:
+                pass
         discovery = getattr(app.state, "hdhr_discovery", None)
         if discovery is not None:
             await discovery.stop()

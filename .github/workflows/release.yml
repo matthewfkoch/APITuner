@@ -88,8 +88,6 @@ jobs:
     defaults:
       run:
         working-directory: agent
-    outputs:
-      apk_name: ${{ steps.apk.outputs.name }}
     steps:
       - uses: actions/checkout@v7
 
@@ -343,13 +341,20 @@ jobs:
           name: agent-apk
 
       - name: Build latest.json manifest
+        id: manifest
         shell: bash
         run: |
           ver="${{ needs.validate.outputs.version }}"
           code="${{ needs.validate.outputs.code }}"
-          apk="${{ needs.build-agent.outputs.apk_name }}"
+          apk="apituner-agent-${ver}.apk"
+          if [[ ! -f "$apk" ]]; then
+            echo "::error::Expected downloaded signed APK ${apk} was not found."
+            ls -la
+            exit 1
+          fi
           sha="$(sha256sum "$apk" | cut -d' ' -f1)"
           apk_url="https://github.com/${RELEASES_REPO}/releases/download/${GITHUB_REF_NAME}/${apk}"
+          echo "apk_name=${apk}" >> "$GITHUB_OUTPUT"
           python3 - <<PY
           import json
           manifest = {
@@ -389,7 +394,7 @@ jobs:
           body: |
             ## Agent APK
 
-            Download **${{ needs.build-agent.outputs.apk_name }}** below and install on each Android TV / Google TV device.
+            Download **${{ steps.manifest.outputs.apk_name }}** below and install on each Android TV / Google TV device.
 
             Grant **Display over other apps**, **Usage Access**, and **Notification Access** (and **Accessibility** if you need BACK/HOME keys).
 
@@ -406,6 +411,7 @@ jobs:
 
             Prereleases require the explicit version tag shown above.
             `:latest` tracks stable releases only.
+
             ## FastChannels (optional)
 
             Use a FastChannels build with **Bridge → External tuners** and install
@@ -414,7 +420,7 @@ jobs:
             token in **APITuner → Options → Connect FastChannels**. See the attached
             **FASTCHANNELS.md** for setup and troubleshooting.
           files: |
-            ${{ needs.build-agent.outputs.apk_name }}
+            ${{ steps.manifest.outputs.apk_name }}
             latest.json
             docs/FASTCHANNELS.md
 

@@ -61,8 +61,8 @@ The shorter 15-second grace still applies when the Player leaves the foreground,
 stops, or cannot be reached. Encoder reads are bounded.
 
 The integrated staging deployment passed end-to-end validation on November 5,
-2026. APITuner runs at `http://192.168.1.19:6593`, and its companion runs at
-`http://192.168.1.19:5524`, both in Portainer stack `apituner-fc-staging` with
+2026. APITuner runs at `http://192.0.2.19:6593`, and its companion runs at
+`http://192.0.2.19:5524`, both in Portainer stack `apituner-fc-staging` with
 separate data volumes. Production services have not been replaced.
 
 The shared test tuner is disabled in staging after tests, preventing competing

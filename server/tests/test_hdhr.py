@@ -284,9 +284,9 @@ def test_ssdp_response_replaces_loopback_with_lan_ip():
         base_url="http://127.0.0.1:6592",
     )
     svc = HdhrDiscoveryService(lambda: identity, http_port=6592)
-    with patch("apituner.hdhr.discovery._local_ipv4", return_value="192.168.1.50"):
+    with patch("apituner.hdhr.discovery._local_ipv4", return_value="192.0.2.50"):
         reply = svc._build_ssdp_response(identity, "upnp:rootdevice").decode("utf-8")
-    assert "LOCATION: http://192.168.1.50:6592/device.xml" in reply
+    assert "LOCATION: http://192.0.2.50:6592/device.xml" in reply
     assert "127.0.0.1" not in reply
 
 

@@ -51,8 +51,8 @@
     }
   ],
   "date": "2026-11-05",
-  "apituner_staging": "http://192.168.1.19:6593",
-  "fastchannels_staging": "http://192.168.1.19:5524",
+  "apituner_staging": "http://192.0.2.19:6593",
+  "fastchannels_staging": "http://192.0.2.19:5524",
   "device": "Chromecast YTTV 2",
   "normal_control": "HTTP only",
   "production_replaced": false,

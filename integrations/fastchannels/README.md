@@ -19,7 +19,7 @@ The patch also applies cleanly to that deployed revision. The staging image
 `apituner-fastchannels:staging-b3c19be` overlays only the five patched Python
 files from that revision onto the exact production image digest. It was built
 locally and in Portainer. Stack `apituner-fc-staging` runs on
-`192.168.1.19:5524` with its own fresh data volume; production is unchanged.
+`192.0.2.19:5524` with its own fresh data volume; production is unchanged.
 The user configured a staging-only API token. An unauthenticated request returns
 401. No production database or ADB keys were copied.
 
